@@ -4,3 +4,6 @@ dist/
 *.local
 coverage/
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
+backend/var/

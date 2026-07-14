@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hypoweaver-engine"
+version = "0.1.0"
+description = "Code-native workflow engine for HypoWeaver-Qwen"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "fastapi>=0.109,<1",
+  "httpx>=0.26,<1",
+  "openai>=1.10,<3",
+  "pydantic>=2.5,<3",
+  "uvicorn>=0.27,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -12,11 +12,13 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import type { WorkflowNode } from '../domain/types'
+import type { StepAttempt, WorkflowNode } from '../runtime/types'
 
 export interface WorkflowNodeData extends Record<string, unknown> {
   node: WorkflowNode
   stageTitle: string
+  attempt?: StepAttempt
+  current: boolean
   onSelect: (nodeId: string) => void
 }
 
@@ -33,27 +35,25 @@ const iconByKind: Record<WorkflowNode['kind'], LucideIcon> = {
   other: Braces,
 }
 
-function sourceHandles(node: WorkflowNode): string[] {
-  if (node.kind === 'router') {
-    const cases = Array.isArray(node.rawData.cases) ? node.rawData.cases : []
-    const handles = cases
-      .map((item) => (item && typeof item === 'object' ? String((item as Record<string, unknown>).case_id ?? '') : ''))
-      .filter(Boolean)
-    return [...handles, 'false']
-  }
-  if (node.kind === 'gate') return ['submit']
-  return ['source']
-}
+const statusLabel = {
+  pending: '未开始',
+  running: '运行中',
+  waiting_human: '待审批',
+  succeeded: '已完成',
+  failed: '失败',
+  blocked: '阻塞',
+  skipped: '跳过',
+} as const
 
 export function WorkflowNodeCard({ data, selected }: NodeProps) {
-  const { node, stageTitle, onSelect } = data as WorkflowNodeData
+  const { node, stageTitle, attempt, current, onSelect } = data as WorkflowNodeData
   const Icon = iconByKind[node.kind]
-  const handles = sourceHandles(node)
+  const status = attempt?.status ?? 'pending'
 
   return (
     <article
-      className={`workflow-node workflow-node--${node.kind}${selected ? ' is-selected' : ''}`}
-      aria-label={`${node.title}，${node.type}`}
+      className={`workflow-node workflow-node--${node.kind} workflow-node--status-${status}${selected ? ' is-selected' : ''}${current ? ' is-current' : ''}`}
+      aria-label={`${node.title}，${statusLabel[status]}`}
       aria-pressed={selected}
       role="button"
       tabIndex={0}
@@ -66,28 +66,16 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
     >
       {node.kind !== 'start' && <Handle id="target" type="target" position={Position.Left} />}
       <div className="workflow-node__topline">
-        <span className="workflow-node__icon" aria-hidden="true">
-          <Icon size={15} />
-        </span>
+        <span className="workflow-node__icon" aria-hidden="true"><Icon size={15} /></span>
         <span className="workflow-node__stage">{stageTitle}</span>
-        {node.issueIds.length > 0 && (
-          <span className="workflow-node__issue" title={`${node.issueIds.length} 项落地检查`}>
-            {node.issueIds.length}
-          </span>
-        )}
+        <i className={`step-dot step-dot--${status}`} title={statusLabel[status]} />
       </div>
       <strong>{node.title}</strong>
-      <span className="workflow-node__type">{node.type}</span>
-      {node.kind !== 'end' &&
-        handles.map((handle, index) => (
-          <Handle
-            key={handle}
-            id={handle}
-            type="source"
-            position={Position.Right}
-            style={{ top: `${((index + 1) / (handles.length + 1)) * 100}%` }}
-          />
-        ))}
+      <div className="workflow-node__runtime">
+        <span>{statusLabel[status]}</span>
+        {attempt && <small>Attempt {attempt.attempt}</small>}
+      </div>
+      {node.kind !== 'end' && <Handle id="source" type="source" position={Position.Right} />}
     </article>
   )
 }

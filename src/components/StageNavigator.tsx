@@ -1,9 +1,9 @@
-import { Search } from 'lucide-react'
-import { useMemo, useState } from 'react'
-import type { WorkflowDefinition } from '../domain/types'
+import { X } from 'lucide-react'
+import type { RunSnapshot, StepAttempt, StepStatus, WorkflowDefinition, WorkflowStage } from '../runtime/types'
 
 interface StageNavigatorProps {
-  workflow: WorkflowDefinition
+  definition: WorkflowDefinition
+  run: RunSnapshot | null
   activeStageId: string
   selectedNodeId: string | null
   mobileOpen: boolean
@@ -12,8 +12,40 @@ interface StageNavigatorProps {
   onCloseMobile: () => void
 }
 
+type StageStatus = StepStatus | 'pending'
+
+const statusLabel: Record<StageStatus, string> = {
+  pending: '未开始',
+  running: '运行中',
+  waiting_human: '待审批',
+  succeeded: '已完成',
+  failed: '失败',
+  blocked: '阻塞',
+  skipped: '已跳过',
+}
+
+function latestAttempt(steps: StepAttempt[], nodeId: string): StepAttempt | undefined {
+  return steps
+    .filter((step) => step.nodeId === nodeId)
+    .sort((left, right) => right.attempt - left.attempt)[0]
+}
+
+function stageStatus(stage: WorkflowStage, run: RunSnapshot | null): StageStatus {
+  if (!run) return 'pending'
+  const steps = stage.nodeIds.map((nodeId) => latestAttempt(run.steps, nodeId)).filter(Boolean) as StepAttempt[]
+  if (steps.some((step) => step.status === 'waiting_human')) return 'waiting_human'
+  if (steps.some((step) => step.status === 'running')) return 'running'
+  if (steps.some((step) => step.status === 'failed')) return 'failed'
+  if (steps.some((step) => step.status === 'blocked')) return 'blocked'
+  if (!steps.length) return 'pending'
+  if (steps.every((step) => step.status === 'skipped')) return 'skipped'
+  if (steps.every((step) => step.status === 'succeeded' || step.status === 'skipped')) return 'succeeded'
+  return 'pending'
+}
+
 export function StageNavigator({
-  workflow,
+  definition,
+  run,
   activeStageId,
   selectedNodeId,
   mobileOpen,
@@ -21,104 +53,65 @@ export function StageNavigator({
   onSelectNode,
   onCloseMobile,
 }: StageNavigatorProps) {
-  const [query, setQuery] = useState('')
-  const normalizedQuery = query.trim().toLowerCase()
-
-  const filteredNodes = useMemo(
-    () =>
-      normalizedQuery
-        ? workflow.nodes.filter((node) =>
-            [node.title, node.type, ...node.prompts.map((prompt) => prompt.text)]
-              .join('\n')
-              .toLowerCase()
-              .includes(normalizedQuery),
-          )
-        : [],
-    [normalizedQuery, workflow.nodes],
-  )
-
-  function selectNode(nodeId: string) {
-    const node = workflow.nodes.find((candidate) => candidate.id === nodeId)
-    if (node) onSelectStage(node.stageId)
-    onSelectNode(nodeId)
-    onCloseMobile()
-  }
-
   return (
-    <aside className={`stage-nav${mobileOpen ? ' is-mobile-open' : ''}`} aria-label="阶段导航">
+    <aside className={`stage-nav${mobileOpen ? ' is-mobile-open' : ''}`} aria-label="阶段进度">
+      <button type="button" className="mobile-close" onClick={onCloseMobile} aria-label="关闭阶段进度">
+        <X size={18} />
+      </button>
       <div className="stage-nav__header">
-        <p>流程结构</p>
-        <strong>{workflow.id === 'app-a' ? '研究闭环' : '独立评测'}</strong>
-        <span>{workflow.stats.nodes} 节点 · {workflow.stats.edges} 连线</span>
+        <p>运行进度</p>
+        <strong>{run?.caseName ?? '尚未创建 Run'}</strong>
+        <span>{run ? `${run.mode === 'fixture' ? 'Fixture 演示' : '真实研究'} · ${run.id.slice(0, 8)}` : definition.version}</span>
       </div>
 
-      <label className="node-search">
-        <Search size={15} aria-hidden="true" />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="搜索节点或提示词"
-          aria-label="搜索节点或提示词"
-        />
-      </label>
-
       <div className="stage-nav__scroll">
-        {normalizedQuery ? (
-          <div className="search-results">
-            <span>{filteredNodes.length} 个匹配节点</span>
-            {filteredNodes.map((node) => (
-              <button
-                key={node.id}
-                type="button"
-                className={selectedNodeId === node.id ? 'is-selected' : ''}
-                onClick={() => selectNode(node.id)}
-              >
-                <strong>{node.title}</strong>
-                <small>{workflow.stages.find((stage) => stage.id === node.stageId)?.title}</small>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <ol className="stage-list">
-            {workflow.stages.map((stage) => {
-              const active = stage.id === activeStageId
-              const stageNodes = workflow.nodes.filter((node) => node.stageId === stage.id)
-              return (
-                <li key={stage.id}>
-                  <button
-                    type="button"
-                    className={`stage-button${active ? ' is-active' : ''}`}
-                    onClick={() => onSelectStage(stage.id)}
-                  >
-                    <span>{String(stage.order).padStart(2, '0')}</span>
-                    <strong>{stage.title}</strong>
-                    <small>{stage.nodeIds.length}</small>
-                  </button>
-                  {active && (
-                    <div className="stage-node-list">
-                      {stageNodes.map((node) => (
+        <ol className="stage-list">
+          {definition.stages.map((stage) => {
+            const active = stage.id === activeStageId
+            const status = stageStatus(stage, run)
+            const stageNodes = definition.nodes.filter((node) => node.stageId === stage.id)
+            return (
+              <li key={stage.id}>
+                <button
+                  type="button"
+                  className={`stage-button${active ? ' is-active' : ''}`}
+                  onClick={() => onSelectStage(stage.id)}
+                >
+                  <span>{String(stage.order).padStart(2, '0')}</span>
+                  <strong>{stage.title}</strong>
+                  <small className={`stage-status stage-status--${status}`}>{statusLabel[status]}</small>
+                </button>
+                {active && (
+                  <div className="stage-node-list">
+                    {stageNodes.map((node) => {
+                      const attempt = latestAttempt(run?.steps ?? [], node.id)
+                      return (
                         <button
                           key={node.id}
                           type="button"
                           className={selectedNodeId === node.id ? 'is-selected' : ''}
-                          onClick={() => selectNode(node.id)}
+                          onClick={() => {
+                            onSelectNode(node.id)
+                            onCloseMobile()
+                          }}
                         >
+                          <i className={`step-dot step-dot--${attempt?.status ?? 'pending'}`} />
                           <span>{node.title}</span>
-                          {node.issueIds.length > 0 && <i>{node.issueIds.length}</i>}
+                          {attempt && <small>#{attempt.attempt}</small>}
                         </button>
-                      ))}
-                    </div>
-                  )}
-                </li>
-              )
-            })}
-          </ol>
-        )}
+                      )
+                    })}
+                  </div>
+                )}
+              </li>
+            )
+          })}
+        </ol>
       </div>
 
       <div className="stage-nav__truth-note">
-        <strong>按 YAML 真实结构显示</strong>
-        <span>{workflow.id === 'app-a' ? '方法与执行均为互斥路由，不是并行运行。' : '隐藏材料只在 App B 中读取。'}</span>
+        <strong>状态来自服务端 Run</strong>
+        <span>刷新页面会重新读取持久化状态；人工闸门批准前，下游节点不会启动。</span>
       </div>
     </aside>
   )
