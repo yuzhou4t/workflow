@@ -142,9 +142,69 @@ export interface RunSummary {
   updatedAt: string
 }
 
+export type DataStructure =
+  | 'cross_section'
+  | 'panel'
+  | 'time_series'
+  | 'spatial_panel'
+  | 'event'
+  | 'unknown'
+
+export type VariableRole =
+  | 'outcome'
+  | 'treatment'
+  | 'exposure'
+  | 'mediator'
+  | 'moderator'
+  | 'control'
+  | 'id'
+  | 'time'
+  | 'spatial_id'
+  | 'event_date'
+  | 'unknown'
+
+export interface HypothesisInput {
+  hypothesisId: string
+  statement: string
+  expectedDirection: 'positive' | 'negative' | 'nonlinear' | 'heterogeneous' | 'unspecified'
+  mechanism: string
+}
+
+export interface VariableInput {
+  name: string
+  label: string
+  role: VariableRole
+  definition: string
+  source: string
+}
+
+export interface DatasetReferenceInput {
+  datasetId: string
+  role: 'main' | 'supplementary'
+  filename: string
+  mimeType: string
+  sha256: string
+  sizeBytes: number
+}
+
+export interface CaseSubmissionInput {
+  caseId: string
+  title: string
+  researchQuestion: string
+  hypotheses: HypothesisInput[]
+  unitOfAnalysis: string
+  samplePeriod: string
+  dataStructureHint: DataStructure
+  variables: VariableInput[]
+  datasetRefs: DatasetReferenceInput[]
+  knownPolicyFacts: string[]
+  constraints: string[]
+}
+
 export interface CreateRunInput {
-  presetId: string
   mode: 'fixture' | 'research'
+  presetId?: string
+  case?: CaseSubmissionInput
 }
 
 export interface GateDecisionInput {
@@ -153,9 +213,33 @@ export interface GateDecisionInput {
   claims?: Array<{ claimId: string; decision: ClaimDecision; finalText?: string; reason?: string }>
 }
 
-export interface PresetCase {
-  id: string
-  title: string
-  description: string
-  method: string
+export type ConfigSource = 'environment' | 'file' | 'default' | 'missing'
+
+export interface RuntimeConfigStatus {
+  configPath: string
+  environmentPrecedence: boolean
+  workflowApiTokenRequired: boolean
+  qwenApiKey: { configured: boolean; source: ConfigSource }
+  qwenModel: { value: string | null; source: ConfigSource }
+  qwenBaseUrl: { value: string | null; source: ConfigSource }
+  researchEngineUrl: { value: string | null; source: ConfigSource }
+  researchEngineToken: { configured: boolean; source: ConfigSource }
+}
+
+export interface RuntimeConfigUpdate {
+  qwenApiKey?: string
+  qwenModel?: string
+  qwenBaseUrl?: string
+  researchEngineUrl?: string
+  researchEngineToken?: string
+  clearQwenApiKey?: boolean
+  clearResearchEngineToken?: boolean
+  clearResearchEngineUrl?: boolean
+}
+
+export interface ConnectionTestResult {
+  target: 'qwen' | 'research_engine'
+  success: boolean
+  message: string
+  statusCode?: number
 }

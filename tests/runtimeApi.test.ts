@@ -232,6 +232,61 @@ describe('runtime API adapter', () => {
     })
   })
 
+  it('submits a detailed custom CaseSubmission instead of forcing a preset', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => runPayload })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await workflowApi.createRun({
+      mode: 'fixture',
+      case: {
+        caseId: 'case-custom-001',
+        title: '自定义案例',
+        researchQuestion: '政策是否影响绿色创新？',
+        hypotheses: [{ hypothesisId: 'H1', statement: '政策促进绿色创新。', expectedDirection: 'positive', mechanism: '融资约束' }],
+        unitOfAnalysis: '企业—年度',
+        samplePeriod: '2015—2024',
+        dataStructureHint: 'panel',
+        variables: [{ name: 'green_patent', label: '绿色专利', role: 'outcome', definition: '专利数量', source: 'CNRDS' }],
+        datasetRefs: [],
+        knownPolicyFacts: ['政策于 2017 年实施。'],
+        constraints: ['隐藏结果不可见。'],
+      },
+    })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.preset_case_id).toBeUndefined()
+    expect(body.case).toMatchObject({
+      case_id: 'case-custom-001',
+      research_question: '政策是否影响绿色创新？',
+      data_structure_hint: 'panel',
+      hypotheses: [{ hypothesis_id: 'H1', expected_direction: 'positive' }],
+      variables: [{ name: 'green_patent', role: 'outcome' }],
+    })
+  })
+
+  it('reads and updates runtime configuration without exposing secret values', async () => {
+    const status = {
+      config_path: 'backend/var/runtime-config.json',
+      environment_precedence: true,
+      workflow_api_token_required: true,
+      qwen_api_key: { configured: true, source: 'file' },
+      qwen_model: { value: 'qwen-plus', source: 'file' },
+      qwen_base_url: { value: 'https://dashscope.example/v1', source: 'file' },
+      research_engine_url: { value: null, source: 'missing' },
+      research_engine_token: { configured: false, source: 'missing' },
+    }
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => status })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await workflowApi.updateRuntimeConfig({ qwenApiKey: 'secret-value', qwenModel: 'qwen-plus' })
+
+    expect(result.qwenApiKey).toEqual({ configured: true, source: 'file' })
+    expect(result.workflowApiTokenRequired).toBe(true)
+    expect(JSON.stringify(result)).not.toContain('secret-value')
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body).toMatchObject({ qwen_api_key: 'secret-value', qwen_model: 'qwen-plus' })
+  })
+
   it('sends gate decisions with optimistic versioning and fixture claim restrictions', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => runPayload })
     vi.stubGlobal('fetch', fetchMock)
@@ -250,5 +305,41 @@ describe('runtime API adapter', () => {
       idempotency_key: 'decision-001',
       claims: [{ claim_id: 'claim-1', decision: 'hold' }],
     })
+  })
+
+  it('keeps the workflow access token in session storage and sends it on requests', async () => {
+    const values = new Map<string, string>()
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+        removeItem: (key: string) => values.delete(key),
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => definitionPayload })
+    vi.stubGlobal('fetch', fetchMock)
+
+    workflowApi.setAccessToken('browser-session-secret')
+    await workflowApi.getDefinition()
+
+    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({ 'X-Hypoweaver-Token': 'browser-session-secret' })
+  })
+
+  it('submits H1 revisions against the version returned by the revise decision', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => runPayload })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('crypto', { randomUUID: () => 'revision-001' })
+    const run = normalizeRun(runPayload)
+
+    await workflowApi.submitRevision(run, 'H1', { case_id: 'revised-case' })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body).toMatchObject({
+      gate: 'H1',
+      expected_run_version: 7,
+      idempotency_key: 'revision-001',
+      case: { case_id: 'revised-case' },
+    })
+    expect(body.analysis_plan).toBeUndefined()
   })
 })

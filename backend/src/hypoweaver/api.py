@@ -18,10 +18,19 @@ from .repository import (
     TransitionInProgressError,
     VersionConflictError,
 )
+from .runtime_config import (
+    RuntimeConfigStatus,
+    RuntimeConfigStore,
+    RuntimeConfigUpdate,
+    RuntimeConnectionTestRequest,
+    RuntimeConnectionTestResult,
+    test_runtime_connection,
+)
 
 
 repository = RunRepository()
 engine = WorkflowEngine(repository)
+runtime_config_store = RuntimeConfigStore()
 app = FastAPI(
     title="HypoWeaver-Qwen Workflow API",
     version="1.0.0",
@@ -64,6 +73,33 @@ def health() -> dict[str, str]:
 @app.get("/api/v1/definitions/app-a")
 def get_app_a_definition() -> dict:
     return build_app_a_definition()
+
+
+@app.get("/api/v1/runtime-config", response_model=RuntimeConfigStatus)
+def get_runtime_config() -> RuntimeConfigStatus:
+    return runtime_config_store.status()
+
+
+@app.put("/api/v1/runtime-config", response_model=RuntimeConfigStatus)
+def update_runtime_config(
+    request: RuntimeConfigUpdate,
+    _actor: str = Depends(mutation_actor),
+) -> RuntimeConfigStatus:
+    try:
+        return runtime_config_store.update(request)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post(
+    "/api/v1/runtime-config/tests",
+    response_model=RuntimeConnectionTestResult,
+)
+async def test_runtime_config_connection(
+    request: RuntimeConnectionTestRequest,
+    _actor: str = Depends(mutation_actor),
+) -> RuntimeConnectionTestResult:
+    return await test_runtime_connection(request, runtime_config_store)
 
 
 @app.get("/api/v1/runs", response_model=list[RunState])

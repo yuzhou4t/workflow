@@ -1,5 +1,6 @@
 import type {
   ClaimDecision,
+  ConnectionTestResult,
   CreateRunInput,
   GateDecisionInput,
   NodeKind,
@@ -8,6 +9,8 @@ import type {
   RunSnapshot,
   RunStatus,
   RunSummary,
+  RuntimeConfigStatus,
+  RuntimeConfigUpdate,
   StepAttempt,
   StepStatus,
   WorkflowDefinition,
@@ -19,7 +22,11 @@ import type {
 type UnknownRecord = Record<string, unknown>
 
 const API_BASE = '/api/v1'
-const API_TOKEN = import.meta.env.VITE_HYPOWEAVER_API_TOKEN as string | undefined
+const API_TOKEN_KEY = 'hypoweaver.workflow-api-token'
+
+function accessToken(): string | null {
+  return typeof window === 'undefined' ? null : window.sessionStorage.getItem(API_TOKEN_KEY)
+}
 
 const stageDefinitions = [
   { id: 'intake-stage', order: 1, title: '案例入口', description: '解析案例材料并在 H1 确认研究边界。', nodeIds: ['intake', 'await_h1'] },
@@ -394,11 +401,12 @@ export function normalizeRunList(payload: unknown): RunSummary[] {
 }
 
 async function request(path: string, init?: RequestInit): Promise<unknown> {
+  const token = accessToken()
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       Accept: 'application/json',
-      ...(API_TOKEN ? { 'X-Hypoweaver-Token': API_TOKEN } : {}),
+      ...(token ? { 'X-Hypoweaver-Token': token } : {}),
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
       ...init?.headers,
     },
@@ -411,7 +419,81 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
   return payload
 }
 
+function serializeCase(input: NonNullable<CreateRunInput['case']>) {
+  return {
+    case_id: input.caseId,
+    title: input.title,
+    research_question: input.researchQuestion,
+    hypotheses: input.hypotheses.filter((hypothesis) => hypothesis.statement.trim()).map((hypothesis) => ({
+      hypothesis_id: hypothesis.hypothesisId,
+      statement: hypothesis.statement,
+      expected_direction: hypothesis.expectedDirection,
+      mechanism: hypothesis.mechanism || null,
+    })),
+    unit_of_analysis: input.unitOfAnalysis || null,
+    sample_period: input.samplePeriod || null,
+    data_structure_hint: input.dataStructureHint,
+    variables: input.variables.filter((variable) => variable.name.trim()).map((variable) => ({
+      name: variable.name,
+      label: variable.label || null,
+      role: variable.role,
+      definition: variable.definition || null,
+      source: variable.source || null,
+    })),
+    dataset_refs: input.datasetRefs.filter((dataset) => (
+      dataset.datasetId.trim()
+      && dataset.filename.trim()
+      && /^[a-f0-9]{64}$/i.test(dataset.sha256.trim())
+      && dataset.sizeBytes > 0
+    )).map((dataset) => ({
+      dataset_id: dataset.datasetId,
+      role: dataset.role,
+      filename: dataset.filename,
+      mime_type: dataset.mimeType,
+      sha256: dataset.sha256,
+      size_bytes: dataset.sizeBytes,
+    })),
+    known_policy_facts: input.knownPolicyFacts.map((item) => item.trim()).filter(Boolean),
+    constraints: input.constraints.map((item) => item.trim()).filter(Boolean),
+  }
+}
+
+function normalizeConfigStatus(payload: unknown): RuntimeConfigStatus {
+  const config = asRecord(payload)
+  const secret = (value: unknown) => {
+    const item = asRecord(value)
+    return { configured: Boolean(item.configured), source: asString(item.source, 'missing') as RuntimeConfigStatus['qwenApiKey']['source'] }
+  }
+  const visible = (value: unknown) => {
+    const item = asRecord(value)
+    return {
+      value: item.value === null || item.value === undefined ? null : String(item.value),
+      source: asString(item.source, 'missing') as RuntimeConfigStatus['qwenModel']['source'],
+    }
+  }
+  return {
+    configPath: asString(first(config, 'config_path', 'configPath')),
+    environmentPrecedence: Boolean(first(config, 'environment_precedence', 'environmentPrecedence')),
+    workflowApiTokenRequired: Boolean(first(config, 'workflow_api_token_required', 'workflowApiTokenRequired')),
+    qwenApiKey: secret(first(config, 'qwen_api_key', 'qwenApiKey')),
+    qwenModel: visible(first(config, 'qwen_model', 'qwenModel')),
+    qwenBaseUrl: visible(first(config, 'qwen_base_url', 'qwenBaseUrl')),
+    researchEngineUrl: visible(first(config, 'research_engine_url', 'researchEngineUrl')),
+    researchEngineToken: secret(first(config, 'research_engine_token', 'researchEngineToken')),
+  }
+}
+
 export const workflowApi = {
+  hasAccessToken(): boolean {
+    return Boolean(accessToken())
+  },
+
+  setAccessToken(token: string): void {
+    if (typeof window === 'undefined') return
+    if (token.trim()) window.sessionStorage.setItem(API_TOKEN_KEY, token.trim())
+    else window.sessionStorage.removeItem(API_TOKEN_KEY)
+  },
+
   async getDefinition(): Promise<WorkflowDefinition> {
     return normalizeDefinition(await request('/definitions/app-a'))
   },
@@ -425,17 +507,53 @@ export const workflowApi = {
   },
 
   async createRun(input: CreateRunInput): Promise<RunSnapshot> {
+    if (Boolean(input.presetId) === Boolean(input.case)) {
+      throw new Error('必须且只能提交预设案例或自定义研究输入。')
+    }
     const payload = await request('/runs', {
       method: 'POST',
       body: JSON.stringify({
         definition_id: 'app-a',
-        preset_case_id: input.presetId,
+        ...(input.presetId ? { preset_case_id: input.presetId } : { case: serializeCase(input.case!) }),
         mode: input.mode,
         model_provider: input.mode === 'research' ? 'qwen' : 'fixture',
         execution_mode: input.mode === 'research' ? 'external' : 'fixture',
       }),
     })
     return normalizeRun(payload)
+  },
+
+  async getRuntimeConfig(): Promise<RuntimeConfigStatus> {
+    return normalizeConfigStatus(await request('/runtime-config'))
+  },
+
+  async updateRuntimeConfig(input: RuntimeConfigUpdate): Promise<RuntimeConfigStatus> {
+    return normalizeConfigStatus(await request('/runtime-config', {
+      method: 'PUT',
+      body: JSON.stringify({
+        ...(input.qwenApiKey ? { qwen_api_key: input.qwenApiKey } : {}),
+        ...(input.qwenModel ? { qwen_model: input.qwenModel } : {}),
+        ...(input.qwenBaseUrl ? { qwen_base_url: input.qwenBaseUrl } : {}),
+        ...(input.researchEngineUrl ? { research_engine_url: input.researchEngineUrl } : {}),
+        ...(input.researchEngineToken ? { research_engine_token: input.researchEngineToken } : {}),
+        clear_qwen_api_key: Boolean(input.clearQwenApiKey),
+        clear_research_engine_token: Boolean(input.clearResearchEngineToken),
+        clear_research_engine_url: Boolean(input.clearResearchEngineUrl),
+      }),
+    }))
+  },
+
+  async testRuntimeConnection(target: ConnectionTestResult['target']): Promise<ConnectionTestResult> {
+    const payload = asRecord(await request('/runtime-config/tests', {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    }))
+    return {
+      target: asString(payload.target) as ConnectionTestResult['target'],
+      success: Boolean(payload.success),
+      message: asString(payload.message),
+      statusCode: payload.status_code === null || payload.status_code === undefined ? undefined : Number(payload.status_code),
+    }
   },
 
   async advanceRun(runId: string): Promise<RunSnapshot> {
@@ -458,6 +576,20 @@ export const workflowApi = {
           final_text: claim.finalText,
           reason: claim.reason ?? input.comment ?? '',
         })) ?? [],
+      }),
+    })
+    return normalizeRun(payload)
+  },
+
+  async submitRevision(run: RunSnapshot, gate: 'H1' | 'H2', revision: unknown): Promise<RunSnapshot> {
+    const payload = await request(`/runs/${encodeURIComponent(run.id)}/revisions`, {
+      method: 'POST',
+      body: JSON.stringify({
+        gate,
+        expected_run_version: run.version,
+        idempotency_key: crypto.randomUUID(),
+        actor: 'local_researcher',
+        ...(gate === 'H1' ? { case: revision } : { analysis_plan: revision }),
       }),
     })
     return normalizeRun(payload)

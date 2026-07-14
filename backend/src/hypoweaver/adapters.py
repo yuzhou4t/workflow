@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any, Protocol, TypeVar
 from uuid import uuid4
 
@@ -31,6 +30,7 @@ from .models import (
     TestableHypothesis,
 )
 from .prompts import get_prompt
+from .runtime_config import RuntimeConfigStore
 
 
 OutputModel = TypeVar("OutputModel", bound=BaseModel)
@@ -429,16 +429,15 @@ class QwenModelGateway:
     provider_name = "qwen"
 
     def __init__(self) -> None:
-        api_key = os.getenv("DASHSCOPE_API_KEY")
-        if not api_key:
-            raise RuntimeError("DASHSCOPE_API_KEY is required for qwen mode")
-        self.model = os.getenv("QWEN_MODEL", "qwen-plus")
+        config = RuntimeConfigStore().resolve()
+        if not config.qwen_api_key:
+            raise RuntimeError(
+                "Qwen API Key is required; configure runtime settings or DASHSCOPE_API_KEY"
+            )
+        self.model = config.qwen_model
         self.client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=os.getenv(
-                "QWEN_BASE_URL",
-                "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            ),
+            api_key=config.qwen_api_key,
+            base_url=config.qwen_base_url,
         )
 
     async def generate(
@@ -508,10 +507,13 @@ class HttpResearchExecutor:
     executor_name = "external"
 
     def __init__(self) -> None:
-        self.url = os.getenv("RESEARCH_ENGINE_URL")
-        if not self.url:
-            raise RuntimeError("RESEARCH_ENGINE_URL is required for research execution")
-        self.token = os.getenv("RESEARCH_ENGINE_TOKEN")
+        config = RuntimeConfigStore().resolve()
+        if not config.research_engine_url:
+            raise RuntimeError(
+                "Python Research Engine URL is required; configure runtime settings or RESEARCH_ENGINE_URL"
+            )
+        self.url = config.research_engine_url
+        self.token = config.research_engine_token
 
     async def execute(self, contract: FormalResearchContract) -> ResearchRun:
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}

@@ -331,6 +331,31 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
 
+    def test_run_mode_rejects_incompatible_provider_and_executor(self) -> None:
+        invalid_combinations = (
+            (
+                {"mode": "fixture", "model_provider": "qwen"},
+                "fixture mode requires model_provider=fixture",
+            ),
+            (
+                {"mode": "fixture", "execution_mode": "external"},
+                "fixture mode requires execution_mode=fixture",
+            ),
+            (
+                {"mode": "research", "model_provider": "fixture"},
+                "research mode requires model_provider=qwen",
+            ),
+            (
+                {"mode": "research", "execution_mode": "fixture"},
+                "research mode requires execution_mode=external",
+            ),
+        )
+
+        for values, expected_message in invalid_combinations:
+            with self.subTest(values=values):
+                with self.assertRaisesRegex(ValidationError, expected_message):
+                    CreateRunRequest(preset_case_id="esg-panel", **values)
+
     def test_definition_is_code_owned_and_edges_are_valid(self) -> None:
         definition = build_app_a_definition()
         node_ids = {node["id"] for node in definition["nodes"]}

@@ -34,7 +34,8 @@
 - Fixture 安全边界：不生成任何样本量、系数、p 值、显著性或诊断结果，只允许生成研究计划；
 - App A 输入 Schema 拒绝原论文结果和隐藏参考字段；
 - 独立 App B 盲测服务：独立数据库、封存哈希校验、六维诊断和代码计算总分；
-- 可运行的 React 研究 Run 控制台与两个预设案例。
+- 面向研究者的 React 任务控制台：详细研究输入、开始前预检、纵向执行过程、嵌入式 H1/H2/H3 和成果状态；
+- 页面级运行配置入口，支持脱敏状态、私有保存与 Qwen/Research Engine 连接测试。
 
 ## 本地启动
 
@@ -54,6 +55,14 @@ npm run dev -- --port 5174
 ```
 
 前端开发服务器会把 `/api` 代理到 `http://127.0.0.1:8000`。也可以设置 `VITE_API_TARGET` 指向其他后端地址。
+
+页面入口：
+
+```text
+http://127.0.0.1:5174/#new       详细研究输入与开始前检查
+http://127.0.0.1:5174/#runs      运行过程、人工审核与结果
+http://127.0.0.1:5174/#settings  API Key、模型和执行器配置
+```
 
 ## 验证
 
@@ -80,7 +89,15 @@ H3 只能把每条 Claim 标为“拒绝”或“暂缓”，随后生成 `resea
 
 ### 真实研究执行
 
-设置环境变量后，研究模式可调用百炼 Qwen 和独立 Python Research Engine：
+研究模式可通过页面对应的运行配置 API，或通过环境变量，连接百炼 Qwen 和独立 Python Research Engine。页面保存的配置写入：
+
+```text
+backend/var/runtime-config.json
+```
+
+文件使用 `0600` 权限，只允许当前系统用户读取。API 响应只返回“是否已配置”和配置来源，从不返回 Qwen API Key 或 Research Engine Token 的明文。
+
+也可以通过环境变量配置：
 
 ```bash
 export DASHSCOPE_API_KEY=...
@@ -92,7 +109,33 @@ export HYPOWEAVER_BLIND_API_TOKEN=...
 export HYPOWEAVER_SEAL_SECRET=...
 ```
 
-未设置 API Token 时，两个服务的写接口仅允许 loopback 调用。生产或局域网部署必须设置 Token；浏览器控制台对应设置 `VITE_HYPOWEAVER_API_TOKEN`。封存默认使用本机 `backend/var/seal.key`，多实例部署必须通过 `HYPOWEAVER_SEAL_SECRET` 注入同一密钥。
+环境变量的优先级始终高于 `runtime-config.json`。因此，如果页面显示某个字段的来源为 `environment`，页面保存的新值不会覆盖当前进程中的环境变量。`HYPOWEAVER_RUNTIME_CONFIG_PATH` 可以修改配置文件位置，默认值为 `backend/var/runtime-config.json`。
+
+配置状态读取接口只返回脱敏信息；配置写入与连接测试受本机/API Token 保护：
+
+```text
+GET  /api/v1/runtime-config
+PUT  /api/v1/runtime-config
+POST /api/v1/runtime-config/tests
+```
+
+`PUT` 可更新 `qwen_api_key`、`qwen_model`、`qwen_base_url`、`research_engine_url` 和 `research_engine_token`。密钥留空表示“不修改”；清除已保存密钥需显式提交 `clear_qwen_api_key=true` 或 `clear_research_engine_token=true`。
+
+连接测试请求示例：
+
+```json
+{"target": "qwen"}
+```
+
+或：
+
+```json
+{"target": "research_engine"}
+```
+
+Qwen 测试会发起一次 `max_tokens=1` 的最小模型调用；Research Engine 测试约定执行器提供 `GET /v1/health`。
+
+未设置 API Token 时，两个服务的写接口仅允许 loopback 调用。生产或局域网部署必须设置 `HYPOWEAVER_API_TOKEN`，然后在 `#settings` 页的“工作流访问令牌”中输入同一值。该令牌只保存在当前标签页的 `sessionStorage`，关闭标签页即清除；它不会通过 `VITE_*` 变量写入前端构建产物。封存默认使用本机 `backend/var/seal.key`，多实例部署必须通过 `HYPOWEAVER_SEAL_SECRET` 注入同一密钥。
 
 外部执行器接收冻结的 `FormalResearchContract`，并必须返回符合 `ResearchRun` Schema 的 JSON。当前仓库只实现稳定的编排和执行器适配边界，不在 Web 进程内运行任意模型生成代码。
 
@@ -101,6 +144,9 @@ export HYPOWEAVER_SEAL_SECRET=...
 ```text
 GET  /api/v1/health
 GET  /api/v1/definitions/app-a
+GET  /api/v1/runtime-config
+PUT  /api/v1/runtime-config
+POST /api/v1/runtime-config/tests
 POST /api/v1/runs
 GET  /api/v1/runs
 GET  /api/v1/runs/{run_id}

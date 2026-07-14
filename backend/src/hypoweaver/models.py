@@ -501,6 +501,14 @@ class CreateRunRequest(StrictModel):
             raise ValueError("preset_case_id or case is required")
         if self.preset_case_id and self.case:
             raise ValueError("provide preset_case_id or case, not both")
+        if self.mode == "fixture" and self.model_provider not in (None, "fixture"):
+            raise ValueError("fixture mode requires model_provider=fixture")
+        if self.mode == "fixture" and self.execution_mode not in (None, "fixture"):
+            raise ValueError("fixture mode requires execution_mode=fixture")
+        if self.mode == "research" and self.model_provider not in (None, "qwen"):
+            raise ValueError("research mode requires model_provider=qwen")
+        if self.mode == "research" and self.execution_mode not in (None, "external"):
+            raise ValueError("research mode requires execution_mode=external")
         return self
 
 
