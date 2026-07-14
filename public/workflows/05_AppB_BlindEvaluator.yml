@@ -1,0 +1,271 @@
+app:
+  description: 手册第21节独立盲测评估应用。仅本应用可见隐藏参考材料(原论文+原回归结果摘要)，与主应用A物理隔离。接收A封存的ResearchRun/ClaimLedger/冻结研究计划，对比论文参考结果，输出总分+逐项差异诊断。手册§24.6：评测结果不能倒流用于修改同一次主运行。
+  icon: 🕵️
+  icon_background: '#FCE4EC'
+  icon_type: emoji
+  mode: workflow
+  name: HypoWeaver-Blind-Evaluator (App B 盲测评估)
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.3.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      enabled: false
+      image:
+        enabled: false
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        sourceType: start
+        targetType: document-extractor
+      id: e-50-511
+      source: '50'
+      sourceHandle: source
+      target: '511'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: start
+        targetType: document-extractor
+      id: e-50-512
+      source: '50'
+      sourceHandle: source
+      target: '512'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: document-extractor
+        targetType: llm
+      id: e-511-51
+      source: '511'
+      sourceHandle: source
+      target: '51'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: document-extractor
+        targetType: llm
+      id: e-512-51
+      source: '512'
+      sourceHandle: source
+      target: '51'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: end
+      id: e-51-59
+      source: '51'
+      sourceHandle: source
+      target: '59'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: B00 评测输入
+        type: start
+        variables:
+        - label: 案例编号 case_id
+          max_length: 64
+          options: []
+          required: true
+          type: text-input
+          variable: case_id
+        - label: A封存的 ResearchRun (JSON文本)
+          max_length: 50000
+          options: []
+          required: true
+          type: paragraph
+          variable: research_run_text
+        - label: A封存的 ClaimLedger (JSON文本)
+          max_length: 50000
+          options: []
+          required: true
+          type: paragraph
+          variable: claim_ledger_text
+        - label: 冻结后的研究计划/合同 (JSON文本)
+          max_length: 50000
+          options: []
+          required: false
+          type: paragraph
+          variable: analysis_plan_text
+        - label: 原论文 reference_paper_file (仅评测应用可见)
+          options: []
+          required: false
+          type: file
+          variable: reference_paper_file
+        - label: 原回归结果与结论摘要 reference_summary_file
+          options: []
+          required: false
+          type: file
+          variable: reference_summary_file
+      height: 220
+      id: '50'
+      position:
+        x: 30
+        y: 300
+      positionAbsolute:
+        x: 30
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        is_array_file: false
+        selected: false
+        title: B01a 提取原论文
+        type: document-extractor
+        variable_selector:
+        - '50'
+        - reference_paper_file
+      height: 92
+      id: '511'
+      position:
+        x: 340
+        y: 200
+      positionAbsolute:
+        x: 340
+        y: 200
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        is_array_file: false
+        selected: false
+        title: B01b 提取参考结果摘要
+        type: document-extractor
+        variable_selector:
+        - '50'
+        - reference_summary_file
+      height: 92
+      id: '512'
+      position:
+        x: 340
+        y: 400
+      positionAbsolute:
+        x: 340
+        y: 400
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.1
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: b01-sys
+          role: system
+          text: "你是独立盲测评估者。主研究系统在生成 ResearchRun 和 ClaimLedger 时无法访问 ReferencePackage。现在请在不修改主系统输出的前提下进行比较。\n\n评估不是简单判断\"是否与论文结论一致\"。请分别评价：\n1. 研究问题和变量理解；\n2. 方法家族选择；\n3. 样本和模型设定；\n4. 主结果方向、量级和不确定性；\n5. 稳健性、机制和异质性覆盖；\n6. 对识别风险和失败结果的处理；\n7. Claim 表述是否与系统自身证据匹配；\n8. 如果与论文结果不同，系统是否提供可核验的差异解释。\n\n论文发表结果只是 reference，不是绝对真值。不得因为系统与论文不同就自动判错，也不得因为一致就自动判对。\n必须严格区分\"已验证事实、系统推断、你的评估观点\"。若 ResearchRun 为 fixture_only，必须在 notes 明确该次为演示运行、不具科学有效性，评分只针对流程与设计合理性，主结果匹配维度记为 not_applicable。\n\n评分维度与权重（满分100）：\n- 方法选择与设计合理性：20\n- 执行完整性与可复现性：20\n- 主结果匹配与差异解释：20\n- 稳健性、证伪与竞争解释：15\n- Claim 校准与结论可靠性：15\n- 失败、空结果与限制披露：10\n\n只输出一个 JSON 对象，严格符合以下 Schema，不要输出任何解释或多余文本：\n{\n  \"case_id\": \"string\",\n  \"overall_score\": 0,\n  \"dimension_scores\": [\n    {\"dimension\":\"method_design\",\"weight\":20,\"score\":0,\"diagnosis\":\"string\",\"difference_vs_reference\":\"string\"},\n    {\"dimension\":\"execution_reproducibility\",\"weight\":20,\"score\":0,\"diagnosis\":\"string\",\"difference_vs_reference\":\"string\"},\n    {\"dimension\":\"main_result_match\",\"weight\":20,\"score\":0,\"diagnosis\":\"string\",\"difference_vs_reference\":\"string\"},\n    {\"dimension\":\"robustness_falsification\",\"weight\":15,\"score\":0,\"diagnosis\":\"string\",\"difference_vs_reference\":\"string\"},\n    {\"dimension\":\"claim_calibration\",\"weight\":15,\"score\":0,\"diagnosis\":\"string\",\"difference_vs_reference\":\"string\"},\n    {\"dimension\":\"failure_disclosure\",\"weight\":10,\"score\":0,\"diagnosis\":\"string\",\"difference_vs_reference\":\"string\"}\n  ],\n  \"key_agreements\": [],\n  \"key_differences\": [],\n  \"verifiable_difference_explanations\": [],\n  \"fixture_only\": false,\n  \"notes\": \"string\"\n}\n"
+        - id: b01-usr
+          role: user
+          text: '案例编号：{{#50.case_id#}}
+
+
+            === 主系统封存输出（App A） ===
+
+            ResearchRun：{{#50.research_run_text#}}
+
+            ClaimLedger：{{#50.claim_ledger_text#}}
+
+            冻结研究计划/合同：{{#50.analysis_plan_text#}}
+
+
+            === 隐藏参考材料（仅本评测应用可见） ===
+
+            原论文全文：{{#511.text#}}
+
+            原回归结果与结论摘要：{{#512.text#}}
+
+
+            请输出盲测评估 JSON（既要有 overall_score，也要有逐维度 dimension_scores 与差异诊断）。不得修改主系统输出。
+
+            '
+        selected: false
+        title: B01 盲测评估 Blind Evaluator
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '51'
+      position:
+        x: 650
+        y: 300
+      positionAbsolute:
+        x: 650
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        outputs:
+        - value_selector:
+          - '51'
+          - text
+          variable: blind_evaluation
+        selected: false
+        title: B02 盲测评分输出
+        type: end
+      height: 90
+      id: '59'
+      position:
+        x: 960
+        y: 300
+      positionAbsolute:
+        x: 960
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 20
+      y: 60
+      zoom: 0.7

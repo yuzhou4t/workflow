@@ -1,0 +1,2380 @@
+app:
+  description: 手册第3节完整画布 A00-A22，三个人类闸门 H1/H2/H3 使用真正的 Human Input 节点(H2/H3 后各接一个 Code 节点做 contract/授权的确定性转换，保证下游引用不断)。注意：human-input 为版本敏感节点，若导入报错请改用 03_AppA_placeholder.yml，并在 UI 中手动把占位闸门替换为 Human Input。Critic修复以线性Critic→Reviser表示(手册要求最多2轮的Loop，可在UI中转为Loop节点)。
+  icon: 🔬
+  icon_background: '#FFF3CE'
+  icon_type: emoji
+  mode: workflow
+  name: HypoWeaver-Research (完整App A·Human Input版)
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.3.0
+workflow:
+  conversation_variables: []
+  environment_variables:
+  - description: Python Research Engine 执行器地址(external_api模式使用)
+    id: env-0000-0000-0000-000000000001
+    name: RESEARCH_ENGINE_URL
+    selector:
+    - env
+    - RESEARCH_ENGINE_URL
+    value: https://your-python-engine.example.com/v1/research-runs
+    value_type: string
+  features:
+    file_upload:
+      enabled: false
+      image:
+        enabled: false
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        sourceType: start
+        targetType: document-extractor
+      id: e-10-111
+      source: '10'
+      sourceHandle: source
+      target: '111'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: start
+        targetType: document-extractor
+      id: e-10-112
+      source: '10'
+      sourceHandle: source
+      target: '112'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: start
+        targetType: document-extractor
+      id: e-10-113
+      source: '10'
+      sourceHandle: source
+      target: '113'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: document-extractor
+        targetType: llm
+      id: e-111-11
+      source: '111'
+      sourceHandle: source
+      target: '11'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: document-extractor
+        targetType: llm
+      id: e-112-11
+      source: '112'
+      sourceHandle: source
+      target: '11'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: document-extractor
+        targetType: llm
+      id: e-113-11
+      source: '113'
+      sourceHandle: source
+      target: '11'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: code
+      id: e-11-12
+      source: '11'
+      sourceHandle: source
+      target: '12'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: code
+        targetType: human-input
+      id: e-12-13
+      source: '12'
+      sourceHandle: source
+      target: '13'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: human-input
+        targetType: llm
+      id: e-13-14
+      source: '13'
+      sourceHandle: submit
+      target: '14'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: llm
+      id: e-14-15
+      source: '14'
+      sourceHandle: source
+      target: '15'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: llm
+      id: e-15-16
+      source: '15'
+      sourceHandle: source
+      target: '16'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: code
+      id: e-16-17
+      source: '16'
+      sourceHandle: source
+      target: '17'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: code
+        targetType: if-else
+      id: e-17-18
+      source: '17'
+      sourceHandle: source
+      target: '18'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: if-else
+        targetType: llm
+      id: e-18-201
+      source: '18'
+      sourceHandle: case_policy
+      target: '201'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: if-else
+        targetType: llm
+      id: e-18-202
+      source: '18'
+      sourceHandle: case_panel
+      target: '202'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: if-else
+        targetType: llm
+      id: e-18-203
+      source: '18'
+      sourceHandle: case_event
+      target: '203'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: if-else
+        targetType: llm
+      id: e-18-204
+      source: '18'
+      sourceHandle: case_spatial
+      target: '204'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: if-else
+        targetType: llm
+      id: e-18-205
+      source: '18'
+      sourceHandle: case_measure
+      target: '205'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: if-else
+        targetType: llm
+      id: e-18-206
+      source: '18'
+      sourceHandle: 'false'
+      target: '206'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: e-201-21
+      source: '201'
+      sourceHandle: source
+      target: '21'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: e-202-21
+      source: '202'
+      sourceHandle: source
+      target: '21'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: e-203-21
+      source: '203'
+      sourceHandle: source
+      target: '21'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: e-204-21
+      source: '204'
+      sourceHandle: source
+      target: '21'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: e-205-21
+      source: '205'
+      sourceHandle: source
+      target: '21'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: e-206-21
+      source: '206'
+      sourceHandle: source
+      target: '21'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: variable-aggregator
+        targetType: llm
+      id: e-21-22
+      source: '21'
+      sourceHandle: source
+      target: '22'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: llm
+      id: e-22-23
+      source: '22'
+      sourceHandle: source
+      target: '23'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: human-input
+      id: e-23-24h
+      source: '23'
+      sourceHandle: source
+      target: 24h
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: human-input
+        targetType: code
+      id: e-24h-24
+      source: 24h
+      sourceHandle: submit
+      target: '24'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: code
+        targetType: if-else
+      id: e-24-25
+      source: '24'
+      sourceHandle: source
+      target: '25'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: if-else
+        targetType: code
+      id: e-25-261
+      source: '25'
+      sourceHandle: case_fixture
+      target: '261'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: if-else
+        targetType: http-request
+      id: e-25-262
+      source: '25'
+      sourceHandle: 'false'
+      target: '262'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: code
+        targetType: variable-aggregator
+      id: e-261-27
+      source: '261'
+      sourceHandle: source
+      target: '27'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: http-request
+        targetType: variable-aggregator
+      id: e-262-27
+      source: '262'
+      sourceHandle: source
+      target: '27'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: variable-aggregator
+        targetType: llm
+      id: e-27-28
+      source: '27'
+      sourceHandle: source
+      target: '28'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: llm
+      id: e-28-29
+      source: '28'
+      sourceHandle: source
+      target: '29'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: llm
+      id: e-29-30
+      source: '29'
+      sourceHandle: source
+      target: '30'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: human-input
+      id: e-30-31h
+      source: '30'
+      sourceHandle: source
+      target: 31h
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: human-input
+        targetType: code
+      id: e-31h-31
+      source: 31h
+      sourceHandle: submit
+      target: '31'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: code
+        targetType: llm
+      id: e-31-32
+      source: '31'
+      sourceHandle: source
+      target: '32'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: llm
+      id: e-32-33
+      source: '32'
+      sourceHandle: source
+      target: '33'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: end
+      id: e-33-99
+      source: '33'
+      sourceHandle: source
+      target: '99'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: A00 用户输入
+        type: start
+        variables:
+        - label: 运行模式 run_mode
+          max_length: 256
+          options:
+          - research
+          - preset_demo
+          required: true
+          type: select
+          variable: run_mode
+        - label: 案例编号 case_id
+          max_length: 64
+          options: []
+          required: true
+          type: text-input
+          variable: case_id
+        - label: 案例名称 case_title
+          max_length: 256
+          options: []
+          required: true
+          type: text-input
+          variable: case_title
+        - label: 执行模式 execution_mode
+          max_length: 256
+          options:
+          - fixture
+          - external_api
+          required: true
+          type: select
+          variable: execution_mode
+        - label: 研究限制 research_constraints
+          max_length: 5000
+          options: []
+          required: false
+          type: paragraph
+          variable: research_constraints
+        - label: 案例说明文件 case_profile_file
+          options: []
+          required: false
+          type: file
+          variable: case_profile_file
+        - label: 变量字典文件 data_dictionary_file
+          options: []
+          required: false
+          type: file
+          variable: data_dictionary_file
+        - label: 数据说明文件 data_description_file
+          options: []
+          required: false
+          type: file
+          variable: data_description_file
+      height: 260
+      id: '10'
+      position:
+        x: 30
+        y: 300
+      positionAbsolute:
+        x: 30
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        is_array_file: false
+        selected: false
+        title: A01a 提取案例说明
+        type: document-extractor
+        variable_selector:
+        - '10'
+        - case_profile_file
+      height: 92
+      id: '111'
+      position:
+        x: 340
+        y: 120
+      positionAbsolute:
+        x: 340
+        y: 120
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        is_array_file: false
+        selected: false
+        title: A01b 提取变量字典
+        type: document-extractor
+        variable_selector:
+        - '10'
+        - data_dictionary_file
+      height: 92
+      id: '112'
+      position:
+        x: 340
+        y: 300
+      positionAbsolute:
+        x: 340
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        is_array_file: false
+        selected: false
+        title: A01c 提取数据说明
+        type: document-extractor
+        variable_selector:
+        - '10'
+        - data_description_file
+      height: 92
+      id: '113'
+      position:
+        x: 340
+        y: 480
+      positionAbsolute:
+        x: 340
+        y: 480
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.1
+          mode: chat
+          name: qwen3.7-plus
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a01-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。你的任务不是迎合用户，也不是生成看似合理的论文，而是在给定证据和数据边界内完成可审核的社会科学实证研究任务。
+
+
+            必须遵守：
+
+            1. 只能依据当前节点明确提供的输入工作，不得假设你看过原论文结论或隐藏参考结果。
+
+            2. 区分"已知事实、模型推断、方法建议、实际运行结果"，不得混写。
+
+            3. 未真实执行的分析必须标记为 planned 或 not_executed，不得编造系数、显著性、样本量和检验结果。
+
+            4. 信息不足时返回 null、unknown 或 needs_human_review，并明确缺少什么。
+
+            5. 不得因为假设希望得到正向结果，就优先选择更容易显著的方法。
+
+            6. 不得隐藏空结果、反向结果、失败运行或违反识别假设的情况。
+
+            7. 所有结论必须指出适用样本、时间范围、识别前提和仍未排除的竞争解释。
+
+            8. 严格按照节点要求的 JSON Schema 输出，不添加 Schema 之外的自由文本。
+
+
+            你的角色是 Research Intake Agent。你需要把用户提交的案例说明、变量字典和数据说明转换为统一的 ResearchPackage。
+
+            你只能提取材料中明确存在的信息。不得根据常见绿色金融论文自行补齐变量、政策时间、样本期间或研究结论。
+
+            如果多个材料存在冲突，必须把冲突写入 input_conflicts，不得自行选择其中一个版本。
+
+
+            只输出一个 JSON 对象，严格符合以下 Schema，不要输出任何解释或多余文本：
+
+            {"case_id":"string","title":"string","research_question":"string|null","hypotheses":[{"hypothesis_id":"string","statement":"string","expected_direction":"positive|negative|nonlinear|heterogeneous|unspecified","mechanism":"string|null"}],"unit_of_analysis":"string|null","sample_period":"string|null","data_structure_hint":"cross_section|panel|time_series|spatial_panel|event|unknown","variables":[{"name":"string","label":"string|null","role":"outcome|treatment|exposure|mediator|moderator|control|id|time|spatial_id|event_date|unknown","definition":"string|null","source":"string|null"}],"known_policy_facts":[],"constraints":[],"input_conflicts":[],"missing_required_information":[]}
+
+            '
+        - id: a01-usr
+          role: user
+          text: '案例编号：{{#10.case_id#}}
+
+            案例名称：{{#10.case_title#}}
+
+            研究限制：{{#10.research_constraints#}}
+
+
+            案例说明：
+
+            {{#111.text#}}
+
+
+            变量字典：
+
+            {{#112.text#}}
+
+
+            数据说明：
+
+            {{#113.text#}}
+
+
+            请生成 ResearchPackage。不得输出原论文结果，不得推测假设是否成立。
+
+            '
+        selected: false
+        title: A01 案例解析 Research Intake
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '11'
+      position:
+        x: 650
+        y: 300
+      positionAbsolute:
+        x: 650
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "import json\n\ndef main(research_package_text: str) -> dict:\n    try:\n        research_package = json.loads(research_package_text)\n    except Exception:\n        return {\"validation_status\": \"blocked\", \"validation_errors\": [\"invalid_json_from_intake\"], \"validation_warnings\": []}\n\n    required = [\"case_id\", \"research_question\", \"hypotheses\", \"variables\"]\n    errors = []\n    warnings = []\n    for key in required:\n        value = research_package.get(key)\n        if value is None or value == \"\" or value == []:\n            errors.append(\"missing:\" + key)\n\n    roles = {v.get(\"role\") for v in research_package.get(\"variables\", [])}\n    if \"outcome\" not in roles:\n        errors.append(\"missing:outcome_variable\")\n    if not ({\"treatment\", \"exposure\"} & roles):\n        warnings.append(\"missing:core_explanatory_variable\")\n\n    if research_package.get(\"input_conflicts\", []):\n        warnings.append(\"input_conflicts_require_review\")\n\n    status = \"blocked\" if errors else (\"review\" if warnings else \"ready\")\n    return {\"validation_status\": status, \"validation_errors\": errors, \"validation_warnings\": warnings}\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          validation_errors:
+            children: null
+            type: array[string]
+          validation_status:
+            children: null
+            type: string
+          validation_warnings:
+            children: null
+            type: array[string]
+        selected: false
+        title: A02 输入校验 Input Validator
+        type: code
+        variables:
+        - value_selector:
+          - '11'
+          - text
+          value_type: string
+          variable: research_package_text
+      height: 98
+      id: '12'
+      position:
+        x: 960
+        y: 300
+      positionAbsolute:
+        x: 960
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        delivery_methods:
+        - enabled: true
+          id: webapp
+          type: webapp
+        desc: ''
+        form_content: '## A03 H1 研究边界确认 (Human Input)
+
+
+          请审阅上游内容后做出决定，并可在说明栏补充意见。
+
+
+          **决定**（可选：approve / revise / hold / stop）：{{#$output.decision#}}
+
+
+          **说明 / 补充意见**：{{#$output.comment#}}
+
+          '
+        inputs:
+        - option_source:
+            selector: []
+            type: constant
+            value:
+            - approve
+            - revise
+            - hold
+            - stop
+          output_variable_name: decision
+          type: select
+        - default:
+            selector: []
+            type: constant
+            value: ''
+          output_variable_name: comment
+          type: paragraph
+        selected: false
+        timeout: 3
+        timeout_unit: day
+        title: A03 H1 研究边界确认 (Human Input)
+        type: human-input
+        user_actions:
+        - button_style: primary
+          id: submit
+          title: 提交决定
+      height: 140
+      id: '13'
+      position:
+        x: 1270
+        y: 300
+      positionAbsolute:
+        x: 1270
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a04-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。你的任务不是迎合用户，也不是生成看似合理的论文，而是在给定证据和数据边界内完成可审核的社会科学实证研究任务。
+
+
+            必须遵守：
+
+            1. 只能依据当前节点明确提供的输入工作，不得假设你看过原论文结论或隐藏参考结果。
+
+            2. 区分"已知事实、模型推断、方法建议、实际运行结果"，不得混写。
+
+            3. 未真实执行的分析必须标记为 planned 或 not_executed，不得编造系数、显著性、样本量和检验结果。
+
+            4. 信息不足时返回 null、unknown 或 needs_human_review，并明确缺少什么。
+
+            5. 不得因为假设希望得到正向结果，就优先选择更容易显著的方法。
+
+            6. 不得隐藏空结果、反向结果、失败运行或违反识别假设的情况。
+
+            7. 所有结论必须指出适用样本、时间范围、识别前提和仍未排除的竞争解释。
+
+            8. 严格按照节点要求的 JSON Schema 输出，不添加 Schema 之外的自由文本。
+
+
+            你的角色是 Hypothesis Decomposer。你需要把研究假设拆成可以由数据支持或反驳的最小可检验命题。
+
+            对每条假设必须识别：理论机制、核心预测、估计对象、分析单位、变量关系、边界条件、竞争解释和证伪条件。
+
+            不要选择具体计量模型；模型选择由后续 Method Router 完成。不要判断假设是否成立。
+
+
+            只输出一个 JSON 对象，严格符合以下 Schema：
+
+            {"testable_hypotheses":[{"hypothesis_id":"H1","theoretical_claim":"string","observable_prediction":"string","estimand":"string|null","unit_of_analysis":"string|null","outcome":"string|null","treatment_or_exposure":"string|null","mechanism_variables":[],"moderators":[],"boundary_conditions":[],"alternative_explanations":[],"falsification_conditions":[],"required_data":[],"uncertainties":[]}]}
+
+            '
+        - id: a04-usr
+          role: user
+          text: 'ResearchPackage：
+
+            {{#11.text#}}
+
+
+            H1 人类决定：
+
+            {"gate":"H1","decision":"{{#13.decision#}}","comment":"{{#13.comment#}}"}
+
+
+            请把每条假设拆解为 TestableHypothesis。对于材料未提供的内容标记 unknown，不得使用常识补写成事实。
+
+            '
+        selected: false
+        title: A04 假设拆解 Hypothesis Decomposer
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '14'
+      position:
+        x: 1580
+        y: 300
+      positionAbsolute:
+        x: 1580
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a05-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。你的任务不是迎合用户，也不是生成看似合理的论文，而是在给定证据和数据边界内完成可审核的社会科学实证研究任务。
+
+
+            必须遵守：
+
+            1. 只能依据当前节点明确提供的输入工作，不得假设你看过原论文结论或隐藏参考结果。
+
+            2. 区分"已知事实、模型推断、方法建议、实际运行结果"，不得混写。
+
+            3. 未真实执行的分析必须标记为 planned 或 not_executed，不得编造系数、显著性、样本量和检验结果。
+
+            4. 信息不足时返回 null、unknown 或 needs_human_review，并明确缺少什么。
+
+            5. 不得因为假设希望得到正向结果，就优先选择更容易显著的方法。
+
+            6. 不得隐藏空结果、反向结果、失败运行或违反识别假设的情况。
+
+            7. 所有结论必须指出适用样本、时间范围、识别前提和仍未排除的竞争解释。
+
+            8. 严格按照节点要求的 JSON Schema 输出，不添加 Schema 之外的自由文本。
+
+
+            你的角色是 Data & Measurement Agent。你需要判断现有数据是否足以支持每条假设，并识别数据结构、观测层级、主键、时间变量、政策处理变量、空间信息和事件信息。
+
+            只有输入中存在真实统计摘要时，才能报告样本量、缺失率、均值、标准差或分布。没有真实统计摘要时，对应字段必须为 null，并将统计任务写入 required_diagnostics。
+
+            重点检查：1.分析单位是否与变量层级一致；2.主键能否唯一识别观测；3.时间跨度能否支持政策前后比较；4.变量是否具有组内和时间变化；5.多表匹配是否存在口径冲突；6.是否存在结果泄露或按显著性筛选数据的迹象。
+
+
+            只输出一个 JSON 对象，严格符合以下 Schema：
+
+            {"data_structure":"cross_section|panel|time_series|spatial_panel|event|mixed|unknown","unit_of_observation":"string|null","entity_key":[],"time_key":"string|null","spatial_key":"string|null","event_date_key":"string|null","confirmed_facts":[],"required_diagnostics":[],"measurement_risks":[],"merge_risks":[],"potential_leakage":[],"supported_method_families":[],"unsupported_method_families":[],"readiness":"ready|partially_ready|blocked","blocking_reasons":[]}
+
+            '
+        - id: a05-usr
+          role: user
+          text: 'ResearchPackage：{{#11.text#}}
+
+            TestableHypotheses：{{#14.text#}}
+
+            数据说明与可用统计摘要：{{#113.text#}}
+
+
+            请生成 DataProfile。将"从材料确认的事实"和"需要 Python 真实检查的项目"分开。
+
+            '
+        selected: false
+        title: A05 数据画像 Data Profiler
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '15'
+      position:
+        x: 1890
+        y: 300
+      positionAbsolute:
+        x: 1890
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a06-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。你的任务不是迎合用户，也不是生成看似合理的论文，而是在给定证据和数据边界内完成可审核的社会科学实证研究任务。
+
+
+            必须遵守：
+
+            1. 只能依据当前节点明确提供的输入工作，不得假设你看过原论文结论或隐藏参考结果。
+
+            2. 区分"已知事实、模型推断、方法建议、实际运行结果"，不得混写。
+
+            3. 未真实执行的分析必须标记为 planned 或 not_executed，不得编造系数、显著性、样本量和检验结果。
+
+            4. 信息不足时返回 null、unknown 或 needs_human_review，并明确缺少什么。
+
+            5. 不得因为假设希望得到正向结果，就优先选择更容易显著的方法。
+
+            6. 不得隐藏空结果、反向结果、失败运行或违反识别假设的情况。
+
+            7. 所有结论必须指出适用样本、时间范围、识别前提和仍未排除的竞争解释。
+
+            8. 严格按照节点要求的 JSON Schema 输出，不添加 Schema 之外的自由文本。
+
+
+            你的角色是 Method Router。你需要依据研究目标、可检验假设和数据结构选择方法家族，而不是选择能够产生显著结果的方法。
+
+            依次判断：1.目标是因果效应、关联、机制、预测、测度还是结构模拟；2.是否存在可辩护的外生政策冲击；3.是否有处理组、对照组和政策时点；4.数据是截面、面板、空间面板、事件数据还是时间序列；5.变量层级是否匹配；6.每种候选方法的必要前提能否检验；7.哪些内生性风险仍无法解决。
+
+            必须给出一个 primary_route 和最多两个 alternative_routes。若证据不足，不得强行路由，返回 blocked。
+
+            primary_route 必须是以下之一：policy_causal / panel_association / mechanism_boundary / market_event / spatial / measurement_efficiency / structural_macro。
+
+
+            只输出一个 JSON 对象，严格符合以下 Schema：
+
+            {"route_status":"routed|blocked|needs_human_review","research_goal":"causal|associational|mechanism|prediction|measurement|structural|mixed","primary_route":"string|null","route_reason":[],"required_assumptions":[],"testable_assumptions":[],"untestable_assumptions":[],"alternative_routes":[],"rejected_routes":[{"route":"string","reason":"string"}],"missing_information":[]}
+
+            '
+        - id: a06-usr
+          role: user
+          text: 'TestableHypotheses：{{#14.text#}}
+
+            DataProfile：{{#15.text#}}
+
+            ResearchPackage：{{#11.text#}}
+
+
+            可选方法家族：
+
+            - policy_causal：标准DID、多期DID、DDD、PSM-DID、事件研究型政策评估
+
+            - panel_association：双向固定效应、随机效应、动态面板
+
+            - mechanism_boundary：中介、调节、异质性、门槛
+
+            - market_event：金融市场事件研究
+
+            - spatial：SAR、SEM、SDM、动态空间面板
+
+            - measurement_efficiency：熵值法、Super-SBM
+
+            - structural_macro：DSGE等结构模型
+
+
+            请输出 MethodRoute。不得输出回归结果。
+
+            '
+        selected: false
+        title: A06 方法路由 Method Router
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '16'
+      position:
+        x: 2200
+        y: 300
+      positionAbsolute:
+        x: 2200
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "import json\n\nFAMILIES = [\"policy_causal\",\"panel_association\",\"mechanism_boundary\",\"market_event\",\"spatial\",\"measurement_efficiency\",\"structural_macro\"]\n\ndef main(method_route_text: str) -> dict:\n    route_key = \"panel_association\"\n    status = \"routed\"\n    try:\n        mr = json.loads(method_route_text)\n        status = mr.get(\"route_status\", \"routed\")\n        pr = (mr.get(\"primary_route\") or \"\").strip().lower()\n        for fam in FAMILIES:\n            if fam in pr:\n                route_key = fam\n                break\n        else:\n            if \"did\" in pr or \"policy\" in pr or \"政策\" in pr:\n                route_key = \"policy_causal\"\n            elif \"event\" in pr or \"事件\" in pr:\n                route_key = \"market_event\"\n            elif \"spatial\" in pr or \"空间\" in pr:\n                route_key = \"spatial\"\n            elif \"sbm\" in pr or \"熵值\" in pr or \"measure\" in pr or \"指标\" in pr:\n                route_key = \"measurement_efficiency\"\n            elif \"dsge\" in pr or \"structural\" in pr or \"结构\" in pr:\n                route_key = \"structural_macro\"\n            elif \"mechanism\" in pr or \"中介\" in pr or \"调节\" in pr:\n                route_key = \"mechanism_boundary\"\n    except Exception:\n        status = \"parse_failed\"\n    return {\"route_key\": route_key, \"route_status\": status}\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          route_key:
+            children: null
+            type: string
+          route_status:
+            children: null
+            type: string
+        selected: false
+        title: A06b 路由键解析 route_key
+        type: code
+        variables:
+        - value_selector:
+          - '16'
+          - text
+          value_type: string
+          variable: method_route_text
+      height: 98
+      id: '17'
+      position:
+        x: 2510
+        y: 300
+      positionAbsolute:
+        x: 2510
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        cases:
+        - case_id: case_policy
+          conditions:
+          - comparison_operator: is
+            id: c-policy
+            value: policy_causal
+            varType: string
+            variable_selector:
+            - '17'
+            - route_key
+          id: case_policy
+          logical_operator: and
+        - case_id: case_panel
+          conditions:
+          - comparison_operator: is
+            id: c-panel1
+            value: panel_association
+            varType: string
+            variable_selector:
+            - '17'
+            - route_key
+          - comparison_operator: is
+            id: c-panel2
+            value: mechanism_boundary
+            varType: string
+            variable_selector:
+            - '17'
+            - route_key
+          id: case_panel
+          logical_operator: or
+        - case_id: case_event
+          conditions:
+          - comparison_operator: is
+            id: c-event
+            value: market_event
+            varType: string
+            variable_selector:
+            - '17'
+            - route_key
+          id: case_event
+          logical_operator: and
+        - case_id: case_spatial
+          conditions:
+          - comparison_operator: is
+            id: c-spatial
+            value: spatial
+            varType: string
+            variable_selector:
+            - '17'
+            - route_key
+          id: case_spatial
+          logical_operator: and
+        - case_id: case_measure
+          conditions:
+          - comparison_operator: is
+            id: c-measure
+            value: measurement_efficiency
+            varType: string
+            variable_selector:
+            - '17'
+            - route_key
+          id: case_measure
+          logical_operator: and
+        desc: ''
+        selected: false
+        title: A07 If-Else 方法分支
+        type: if-else
+      height: 260
+      id: '18'
+      position:
+        x: 2820
+        y: 300
+      positionAbsolute:
+        x: 2820
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a08a-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不为求显著选方法；不隐藏空/反向/失败结果；结论标注样本时间识别前提与竞争解释；严格按 JSON Schema 输出，不加多余文本。
+
+
+            你是 Research Designer，负责将已批准的假设和方法家族转换为可执行、可证伪的 AnalysisPlan。AnalysisPlan 必须明确：1.估计对象；2.样本筛选；3.变量构造；4.主模型公式；5.固定效应和标准误；6.识别假设与诊断；7.稳健性检验；8.证伪与负向对照；9.机制和异质性分析；10.竞争解释；11.失败条件和停止条件。所有分析必须分为 required、recommended、optional。不得把大量可选模型堆叠成"稳健性"。
+
+
+            【政策因果分支规则】首先判断是统一时点 DID 还是错位实施的多期 DID。不得默认把传统双向固定效应作为所有多期政策的唯一估计器。必须检查：处理组定义、政策时点、提前反应、平行趋势、处理效应异质性、同期政策、聚类层级和政策实施后的样本窗口。必要检验至少包括：事件时间动态效应、伪政策时点或伪处理组、竞争政策排除、替代结果变量或负向对照。
+
+
+            只输出一个 JSON 对象，严格符合以下 AnalysisPlan Schema：
+
+            {"plan_id":"string","plan_version":1,"method_family":"policy_causal","design_only":false,"estimands":[],"sample_rules":[],"variable_construction":[],"baseline_models":[],"fixed_effects":[],"standard_error_strategy":"string|null","identification_assumptions":[],"diagnostics":[],"robustness_tests":[],"falsification_tests":[],"mechanism_tests":[],"heterogeneity_tests":[],"alternative_explanations":[],"failure_conditions":[],"stop_conditions":[],"required_data_fields":[],"unsupported_requested_analyses":[]}
+
+            '
+        - id: a08a-usr
+          role: user
+          text: 'TestableHypotheses：{{#14.text#}}
+
+            DataProfile：{{#15.text#}}
+
+            MethodRoute：{{#16.text#}}
+
+            ResearchPackage：{{#11.text#}}
+
+            请输出 policy_causal 的 AnalysisPlan。不得输出回归结果。
+
+            '
+        selected: false
+        title: A08A 政策因果设计
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '201'
+      position:
+        x: 3130
+        y: 40
+      positionAbsolute:
+        x: 3130
+        y: 40
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a08b-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不为求显著选方法；不隐藏空/反向/失败结果；结论标注样本时间识别前提与竞争解释；严格按 JSON Schema 输出，不加多余文本。
+
+
+            你是 Research Designer，负责将已批准的假设和方法家族转换为可执行、可证伪的 AnalysisPlan（必须明确估计对象、样本筛选、变量构造、主模型公式、固定效应与标准误、识别假设与诊断、稳健性、证伪与负向对照、机制与异质性、竞争解释、失败与停止条件；分析分 required/recommended/optional；不得堆叠可选模型冒充稳健性）。
+
+
+            【面板研究分支规则】必须说明固定效应选择、标准误聚类层级、核心解释变量的组内变异、反向因果和遗漏变量风险。中介变量不得仅凭逐步回归和系数显著就宣称完成因果机制识别。应区分"机制一致性证据"和"已识别的因果中介效应"。
+
+
+            只输出一个 JSON 对象，严格符合以下 AnalysisPlan Schema：
+
+            {"plan_id":"string","plan_version":1,"method_family":"panel_association","design_only":false,"estimands":[],"sample_rules":[],"variable_construction":[],"baseline_models":[],"fixed_effects":[],"standard_error_strategy":"string|null","identification_assumptions":[],"diagnostics":[],"robustness_tests":[],"falsification_tests":[],"mechanism_tests":[],"heterogeneity_tests":[],"alternative_explanations":[],"failure_conditions":[],"stop_conditions":[],"required_data_fields":[],"unsupported_requested_analyses":[]}
+
+            '
+        - id: a08b-usr
+          role: user
+          text: 'TestableHypotheses：{{#14.text#}}
+
+            DataProfile：{{#15.text#}}
+
+            MethodRoute：{{#16.text#}}
+
+            ResearchPackage：{{#11.text#}}
+
+            请输出 panel_association / mechanism_boundary 的 AnalysisPlan。不得输出回归结果。
+
+            '
+        selected: false
+        title: A08B 企业/地区面板设计
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '202'
+      position:
+        x: 3130
+        y: 160
+      positionAbsolute:
+        x: 3130
+        y: 160
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a08c-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不为求显著选方法；不隐藏空/反向/失败结果；结论标注样本时间识别前提与竞争解释；严格按 JSON Schema 输出，不加多余文本。
+
+
+            你是 Research Designer，负责将已批准的假设和方法家族转换为可执行、可证伪的 AnalysisPlan（明确估计对象、样本、变量构造、主模型、固定效应与标准误、识别假设与诊断、稳健性、证伪、机制异质性、竞争解释、失败停止条件；分 required/recommended/optional）。
+
+
+            【事件研究分支规则】必须定义事件日、估计窗口、事件窗口、基准收益模型、异常收益和累计异常收益，检查事件重叠、信息提前泄露和横截面相关。
+
+
+            只输出一个 JSON 对象，严格符合以下 AnalysisPlan Schema：
+
+            {"plan_id":"string","plan_version":1,"method_family":"market_event","design_only":false,"estimands":[],"sample_rules":[],"variable_construction":[],"baseline_models":[],"fixed_effects":[],"standard_error_strategy":"string|null","identification_assumptions":[],"diagnostics":[],"robustness_tests":[],"falsification_tests":[],"mechanism_tests":[],"heterogeneity_tests":[],"alternative_explanations":[],"failure_conditions":[],"stop_conditions":[],"required_data_fields":[],"unsupported_requested_analyses":[]}
+
+            '
+        - id: a08c-usr
+          role: user
+          text: 'TestableHypotheses：{{#14.text#}}
+
+            DataProfile：{{#15.text#}}
+
+            MethodRoute：{{#16.text#}}
+
+            ResearchPackage：{{#11.text#}}
+
+            请输出 market_event 的 AnalysisPlan。不得输出回归结果。
+
+            '
+        selected: false
+        title: A08C 事件研究设计
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '203'
+      position:
+        x: 3130
+        y: 300
+      positionAbsolute:
+        x: 3130
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a08d-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不为求显著选方法；不隐藏空/反向/失败结果；结论标注样本时间识别前提与竞争解释；严格按 JSON Schema 输出，不加多余文本。
+
+
+            你是 Research Designer，负责将已批准的假设和方法家族转换为可执行、可证伪的 AnalysisPlan（明确估计对象、样本、变量构造、主模型、固定效应与标准误、识别假设与诊断、稳健性、证伪、机制异质性、竞争解释、失败停止条件；分 required/recommended/optional）。
+
+
+            【空间计量分支规则】必须说明空间权重矩阵的构造与理论依据，先检查空间相关，再选择 SAR、SEM 或 SDM。结果必须区分直接效应、间接效应和总效应，不能只解释空间滞后项系数。
+
+
+            只输出一个 JSON 对象，严格符合以下 AnalysisPlan Schema：
+
+            {"plan_id":"string","plan_version":1,"method_family":"spatial","design_only":false,"estimands":[],"sample_rules":[],"variable_construction":[],"baseline_models":[],"fixed_effects":[],"standard_error_strategy":"string|null","identification_assumptions":[],"diagnostics":[],"robustness_tests":[],"falsification_tests":[],"mechanism_tests":[],"heterogeneity_tests":[],"alternative_explanations":[],"failure_conditions":[],"stop_conditions":[],"required_data_fields":[],"unsupported_requested_analyses":[]}
+
+            '
+        - id: a08d-usr
+          role: user
+          text: 'TestableHypotheses：{{#14.text#}}
+
+            DataProfile：{{#15.text#}}
+
+            MethodRoute：{{#16.text#}}
+
+            ResearchPackage：{{#11.text#}}
+
+            请输出 spatial 的 AnalysisPlan。不得输出回归结果。
+
+            '
+        selected: false
+        title: A08D 空间计量设计
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '204'
+      position:
+        x: 3130
+        y: 440
+      positionAbsolute:
+        x: 3130
+        y: 440
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a08e-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不为求显著选方法；不隐藏空/反向/失败结果；结论标注样本时间识别前提与竞争解释；严格按 JSON Schema 输出，不加多余文本。
+
+
+            你是 Research Designer，负责将已批准的假设和方法家族转换为可执行、可证伪的 AnalysisPlan（明确估计对象、样本、变量构造、主模型、固定效应与标准误、识别假设与诊断、稳健性、证伪、机制异质性、竞争解释、失败停止条件；分 required/recommended/optional）。
+
+
+            【指标/效率分支规则】必须说明指标方向、标准化方式、权重来源、异常值和缺失值处理。Super-SBM 必须明确投入、期望产出和非期望产出。指数构造结果不能自动被解释为因果效应。
+
+
+            只输出一个 JSON 对象，严格符合以下 AnalysisPlan Schema：
+
+            {"plan_id":"string","plan_version":1,"method_family":"measurement_efficiency","design_only":false,"estimands":[],"sample_rules":[],"variable_construction":[],"baseline_models":[],"fixed_effects":[],"standard_error_strategy":"string|null","identification_assumptions":[],"diagnostics":[],"robustness_tests":[],"falsification_tests":[],"mechanism_tests":[],"heterogeneity_tests":[],"alternative_explanations":[],"failure_conditions":[],"stop_conditions":[],"required_data_fields":[],"unsupported_requested_analyses":[]}
+
+            '
+        - id: a08e-usr
+          role: user
+          text: 'TestableHypotheses：{{#14.text#}}
+
+            DataProfile：{{#15.text#}}
+
+            MethodRoute：{{#16.text#}}
+
+            ResearchPackage：{{#11.text#}}
+
+            请输出 measurement_efficiency 的 AnalysisPlan。不得输出回归结果。
+
+            '
+        selected: false
+        title: A08E 指标与效率测度设计
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '205'
+      position:
+        x: 3130
+        y: 580
+      positionAbsolute:
+        x: 3130
+        y: 580
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a08f-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不为求显著选方法；不隐藏空/反向/失败结果；结论标注样本时间识别前提与竞争解释；严格按 JSON Schema 输出，不加多余文本。
+
+
+            你是 Research Designer，负责将已批准的假设和方法家族转换为可执行、可证伪的 AnalysisPlan（明确估计对象、样本、变量构造、主模型、固定效应与标准误、识别假设与诊断、稳健性、证伪、机制异质性、竞争解释、失败停止条件；分 required/recommended/optional）。
+
+
+            【高级结构模型分支规则】如果现有材料不足以给出模型方程、参数来源、校准策略或识别条件，应输出 design_only=true，不得声称可以直接执行。本分支同时作为 If-Else 的兜底(else)分支：若上游路由键不属于其它五类，请在此按最贴近的方法家族给出"仅设计"方案并说明。
+
+
+            只输出一个 JSON 对象，严格符合以下 AnalysisPlan Schema：
+
+            {"plan_id":"string","plan_version":1,"method_family":"structural_macro","design_only":true,"estimands":[],"sample_rules":[],"variable_construction":[],"baseline_models":[],"fixed_effects":[],"standard_error_strategy":"string|null","identification_assumptions":[],"diagnostics":[],"robustness_tests":[],"falsification_tests":[],"mechanism_tests":[],"heterogeneity_tests":[],"alternative_explanations":[],"failure_conditions":[],"stop_conditions":[],"required_data_fields":[],"unsupported_requested_analyses":[]}
+
+            '
+        - id: a08f-usr
+          role: user
+          text: 'TestableHypotheses：{{#14.text#}}
+
+            DataProfile：{{#15.text#}}
+
+            MethodRoute：{{#16.text#}}
+
+            ResearchPackage：{{#11.text#}}
+
+            route_key：{{#17.route_key#}}
+
+            请输出 structural_macro（或兜底）的 AnalysisPlan，若材料不足务必 design_only=true。不得输出回归结果。
+
+            '
+        selected: false
+        title: A08F 高级结构模型设计
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '206'
+      position:
+        x: 3130
+        y: 720
+      positionAbsolute:
+        x: 3130
+        y: 720
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        output_type: string
+        selected: false
+        title: A09 汇总 AnalysisPlan (Variable Aggregator)
+        type: variable-aggregator
+        variables:
+        - - '201'
+          - text
+        - - '202'
+          - text
+        - - '203'
+          - text
+        - - '204'
+          - text
+        - - '205'
+          - text
+        - - '206'
+          - text
+      height: 180
+      id: '21'
+      position:
+        x: 3440
+        y: 300
+      positionAbsolute:
+        x: 3440
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a10-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不为求显著选方法；不隐藏空/反向/失败结果；结论标注样本时间识别前提与竞争解释；严格按 JSON Schema 输出，不加多余文本。
+
+
+            你的角色是独立 Method Critic。你没有权力为了让研究继续而降低标准。请从测量、因果识别、统计推断和可复现性四个维度审查 AnalysisPlan。每个问题必须包含：issue_id；dimension；severity；evidence；why_it_matters；required_fix；return_stage。critical 表示不修复就不能执行；major 表示结论强度必须受限；minor 表示不影响主识别但需要记录。不得只给总分，不得用"建议进一步完善"等空泛表述。
+
+
+            只输出一个 JSON 对象，严格符合以下 Schema：
+
+            {"verdict":"pass|revise|blocked","issues":[{"issue_id":"string","dimension":"measurement|causal|statistical|reproducibility","severity":"critical|major|minor","evidence":"string","why_it_matters":"string","required_fix":"string","return_stage":"intake|data_profile|method_route|analysis_plan|human"}],"approved_elements":[],"remaining_risks":[]}
+
+            '
+        - id: a10-usr
+          role: user
+          text: 'ResearchPackage：{{#11.text#}}
+
+            DataProfile：{{#15.text#}}
+
+            MethodRoute：{{#16.text#}}
+
+            AnalysisPlan：{{#21.output#}}
+
+
+            请审查该方案是否真的可以检验假设，并输出 CriticReport。
+
+            '
+        selected: false
+        title: A10 方法审查 Method Critic
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '22'
+      position:
+        x: 3750
+        y: 300
+      positionAbsolute:
+        x: 3750
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a11-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不为求显著选方法；不隐藏空/反向/失败结果；结论标注样本时间识别前提与竞争解释；严格按 JSON Schema 输出，不加多余文本。
+
+
+            你是 Plan Reviser。请仅针对 CriticReport 中列出的 required_fix 修改 AnalysisPlan。不得新增与问题无关的模型，不得改变研究假设，不得以"提高显著性"为理由修改样本、变量或方法。输出完整的新版本 AnalysisPlan，并在 deviation_log 中逐项说明改了什么、为什么改、对应哪个 issue_id。若 Critic verdict 为 blocked 或需要新数据/重定义政策/更换核心因变量，不要自行修复，plan_version 保持不变并在 deviation_log 标注 "escalate_to_H2"。
+
+
+            只输出一个 JSON 对象：在 A09 的 AnalysisPlan Schema 基础上追加字段 "deviation_log":[{"issue_id":"string","change":"string","reason":"string"}] 和 "revision_round":1。
+
+            '
+        - id: a11-usr
+          role: user
+          text: 'AnalysisPlan（候选）：{{#21.output#}}
+
+            CriticReport：{{#22.text#}}
+
+
+            请输出修复后的 AnalysisPlan（含 deviation_log）。仅修复 required_fix，不扩展无关模型。
+
+            '
+        selected: false
+        title: A11 有限修复 Plan Reviser (线性1轮·手册要求最多2轮Loop)
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '23'
+      position:
+        x: 4060
+        y: 300
+      positionAbsolute:
+        x: 4060
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        delivery_methods:
+        - enabled: true
+          id: webapp
+          type: webapp
+        desc: ''
+        form_content: '## A12h H2 人工冻结决定 (Human Input)
+
+
+          请审阅上游内容后做出决定，并可在说明栏补充意见。
+
+
+          **决定**（可选：approve_and_freeze / revise_plan / return_to_data / hold / stop）：{{#$output.decision#}}
+
+
+          **说明 / 补充意见**：{{#$output.comment#}}
+
+          '
+        inputs:
+        - option_source:
+            selector: []
+            type: constant
+            value:
+            - approve_and_freeze
+            - revise_plan
+            - return_to_data
+            - hold
+            - stop
+          output_variable_name: decision
+          type: select
+        - default:
+            selector: []
+            type: constant
+            value: ''
+          output_variable_name: comment
+          type: paragraph
+        selected: false
+        timeout: 3
+        timeout_unit: day
+        title: A12h H2 人工冻结决定 (Human Input)
+        type: human-input
+        user_actions:
+        - button_style: primary
+          id: submit
+          title: 提交决定
+      height: 160
+      id: 24h
+      position:
+        x: 4370
+        y: 120
+      positionAbsolute:
+        x: 4370
+        y: 120
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "import json\n\ndef main(plan_text: str, case_id: str, human_decision: str) -> dict:\n    decision = human_decision if human_decision else \"approve_and_freeze\"\n    contract = {\n        \"contract_id\": \"contract_\" + str(case_id),\n        \"case_id\": str(case_id),\n        \"approved_plan_version\": 1,\n        \"data_version\": None,\n        \"approved_models\": [],\n        \"approved_robustness_tests\": [],\n        \"prohibited_deviations\": [\"未经H2批准不得更换核心因变量/样本/识别策略\"],\n        \"allowed_technical_repairs\": [\"聚类层级技术修正\", \"变量标准化口径修正\"],\n        \"unresolved_risks\": [],\n        \"decision\": decision,\n        \"approved_analysis_plan\": plan_text\n    }\n    return {\"decision\": decision, \"contract\": json.dumps(contract, ensure_ascii=False)}\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          contract:
+            children: null
+            type: string
+          decision:
+            children: null
+            type: string
+        selected: false
+        title: A12 H2 冻结分析计划 (据人工决定生成 FormalResearchContract)
+        type: code
+        variables:
+        - value_selector:
+          - '23'
+          - text
+          value_type: string
+          variable: plan_text
+        - value_selector:
+          - '10'
+          - case_id
+          value_type: string
+          variable: case_id
+        - value_selector:
+          - 24h
+          - decision
+          value_type: string
+          variable: human_decision
+      height: 98
+      id: '24'
+      position:
+        x: 4370
+        y: 300
+      positionAbsolute:
+        x: 4370
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        cases:
+        - case_id: case_fixture
+          conditions:
+          - comparison_operator: is
+            id: c-fixture
+            value: fixture
+            varType: string
+            variable_selector:
+            - '10'
+            - execution_mode
+          id: case_fixture
+          logical_operator: and
+        desc: ''
+        selected: false
+        title: A13 执行模式路由
+        type: if-else
+      height: 140
+      id: '25'
+      position:
+        x: 4680
+        y: 300
+      positionAbsolute:
+        x: 4680
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "import json\n\n# 手册§14.1：Fixture 仅验证 Dify 流程，禁止让 LLM 猜系数。此处输出显著标注的演示 ResearchRun。\n# 正式使用时应由团队手工准备 fixture JSON 或改走 external_api(HTTP)。\ndef main(case_id: str, contract: str) -> dict:\n    run = {\n        \"run_id\": \"fixture_run_\" + str(case_id),\n        \"case_id\": str(case_id),\n        \"is_fixture\": True,\n        \"execution_status\": \"fixture_only\",\n        \"scientific_status\": \"not_evaluated\",\n        \"display_warning\": \"该结果仅用于工作流演示，未对真实数据执行。\",\n        \"data_hash\": None,\n        \"plan_version\": 1,\n        \"models\": [],\n        \"diagnostics\": [],\n        \"robustness_results\": [],\n        \"falsification_results\": [],\n        \"failed_runs\": [],\n        \"warnings\": [\"fixture_only_no_real_estimation\"],\n        \"artifact_refs\": {\"code\": None, \"tables\": [], \"figures\": [], \"logs\": None}\n    }\n    return {\"research_run\": json.dumps(run, ensure_ascii=False)}\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          research_run:
+            children: null
+            type: string
+        selected: false
+        title: A14A Fixture Executor (演示数据·未真实执行)
+        type: code
+        variables:
+        - value_selector:
+          - '10'
+          - case_id
+          value_type: string
+          variable: case_id
+        - value_selector:
+          - '24'
+          - contract
+          value_type: string
+          variable: contract
+      height: 98
+      id: '261'
+      position:
+        x: 4990
+        y: 180
+      positionAbsolute:
+        x: 4990
+        y: 180
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: []
+          type: none
+        desc: external_api 执行器。导入后请在此节点 UI 里把 Body 改为 JSON 并粘贴请求体(见 README §14/A14B)。URL 用环境变量 RESEARCH_ENGINE_URL。
+        headers: 'Content-Type: application/json'
+        method: post
+        params: ''
+        selected: false
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: A14B HTTP Python Executor (external_api)
+        type: http-request
+        url: '{{#env.RESEARCH_ENGINE_URL#}}'
+        variables: []
+      height: 140
+      id: '262'
+      position:
+        x: 4990
+        y: 420
+      positionAbsolute:
+        x: 4990
+        y: 420
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        output_type: string
+        selected: false
+        title: A15 ResearchRun 标准化 (Variable Aggregator)
+        type: variable-aggregator
+        variables:
+        - - '261'
+          - research_run
+        - - '262'
+          - body
+      height: 140
+      id: '27'
+      position:
+        x: 5300
+        y: 300
+      positionAbsolute:
+        x: 5300
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a16-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不为求显著选方法；不隐藏空/反向/失败结果；结论标注样本时间识别前提与竞争解释；严格按 JSON Schema 输出，不加多余文本。
+
+
+            你的角色是 Result Interpreter。你只能解释 ResearchRun 中实际存在的模型结果，不得补齐未运行的检验，不得用理论预期替代实证结果。解释顺序：1.先检查 execution_status；2.再检查 scientific_status 和识别诊断；3.再解释系数方向、量级、不确定性和适用范围；4.最后判断结果对每条假设提供支持、反驳、混合证据还是不足以判断。统计显著不等于经济重要，相关关系不等于因果关系。若关键识别假设失败，即使系数显著，也不得表述为因果支持。若 ResearchRun 为 fixture_only，overall_run_status 必须为 fixture_only。
+
+
+            只输出一个 JSON 对象，严格符合以下 Schema：
+
+            {"overall_run_status":"usable|partially_usable|unusable|fixture_only","hypothesis_assessments":[{"hypothesis_id":"H1","status":"supported|refuted|mixed|insufficient|not_tested","supporting_run_ids":[],"opposing_run_ids":[],"effect_direction":"positive|negative|nonlinear|heterogeneous|none|unknown","effect_magnitude_interpretation":"string|null","uncertainty":"string","scope":"string","remaining_alternatives":[]}],"failed_or_null_results":[],"prohibited_claims":[]}
+
+            '
+        - id: a16-usr
+          role: user
+          text: 'TestableHypotheses：{{#14.text#}}
+
+            FormalResearchContract：{{#24.contract#}}
+
+            ResearchRun：{{#27.output#}}
+
+
+            请输出 EvidenceAssessment。不得写论文段落。
+
+            '
+        selected: false
+        title: A16 结果解释 Result Interpreter
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '28'
+      position:
+        x: 5610
+        y: 300
+      positionAbsolute:
+        x: 5610
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a17-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不为求显著选方法；不隐藏空/反向/失败结果；结论标注样本时间识别前提与竞争解释；严格按 JSON Schema 输出，不加多余文本。
+
+
+            你是独立 Scientific Critic。请比较 FormalResearchContract、ResearchRun 和 EvidenceAssessment，检查：1.代码执行成功是否被错误等同于科学有效；2.是否执行了合同规定的主模型和必要诊断；3.是否有未经批准的样本、变量或模型偏离；4.是否忽略空结果、反向结果和失败运行；5.是否把相关关系写成因果；6.是否把统计显著写成经济上重要；7.是否把中介回归写成已识别的因果机制；8.是否仍存在未排除的竞争解释。每项问题必须关联 run_id、plan_version 或具体字段。给出 EvidenceAssessment 是否需要降级。只有技术性错误可以返回执行器有限修复；涉及研究问题、样本和核心设计的修改必须退回 H2。
+
+
+            只输出一个 JSON 对象：{"audit_verdict":"pass|downgrade|return_to_execution|blocked","issues":[{"issue_id":"string","linked_ref":"string","severity":"critical|major|minor","evidence":"string","required_fix":"string","return_stage":"execution|H2"}],"downgrade_required":true,"downgraded_assessment_notes":[]}
+
+            '
+        - id: a17-usr
+          role: user
+          text: 'FormalResearchContract：{{#24.contract#}}
+
+            ResearchRun：{{#27.output#}}
+
+            EvidenceAssessment：{{#28.text#}}
+
+
+            请输出 AuditReport。
+
+            '
+        selected: false
+        title: A17 科学审查 Scientific Critic
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '29'
+      position:
+        x: 5920
+        y: 300
+      positionAbsolute:
+        x: 5920
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a18-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不为求显著选方法；不隐藏空/反向/失败结果；结论标注样本时间识别前提与竞争解释；严格按 JSON Schema 输出，不加多余文本。
+
+
+            你的角色是 Claim Auditor。你需要把所有可能进入论文的结论拆成最小可审核单位，并将每条结论绑定到真实 ResearchRun。允许的表达强度：causal_strong（只有因果识别成立且关键稳健性通过时使用）；causal_cautious（存在因果设计但仍有重要限制）；associational（只能表述为相关关系）；preliminary（仅有初步或单一模型证据）；mixed（证据不一致）；insufficient（证据不足）；prohibited（不允许进入论文）。不得为了行文完整而创造结论。若 ResearchRun 为 fixture_only，所有 claim 的 allowed_strength 只能是 preliminary 或 prohibited，并在 unresolved_risks 注明 fixture_only。
+
+
+            只输出一个 JSON 对象，严格符合以下 Schema：
+
+            {"claims":[{"claim_id":"C001","hypothesis_id":"H1|null","claim_text":"string","allowed_strength":"causal_strong|causal_cautious|associational|preliminary|mixed|insufficient|prohibited","supporting_runs":[],"opposing_runs":[],"scope":"string","robustness_status":"string","unresolved_risks":[],"approval_status":"pending"}],"excluded_findings":[],"unresolved_issues":[]}
+
+            '
+        - id: a18-usr
+          role: user
+          text: 'Hypotheses：{{#14.text#}}
+
+            ResearchRun：{{#27.output#}}
+
+            EvidenceAssessment：{{#28.text#}}
+
+            AuditReport：{{#29.text#}}
+
+
+            请生成 ClaimLedger。
+
+            '
+        selected: false
+        title: A18 ClaimLedger Builder
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '30'
+      position:
+        x: 6230
+        y: 300
+      positionAbsolute:
+        x: 6230
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        delivery_methods:
+        - enabled: true
+          id: webapp
+          type: webapp
+        desc: ''
+        form_content: '## A19h H3 人工结论授权 (Human Input)
+
+
+          请审阅上游内容后做出决定，并可在说明栏补充意见。
+
+
+          **决定**（可选：approve / downgrade / revise_wording / hold / reject / return_to_analysis）：{{#$output.decision#}}
+
+
+          **说明 / 补充意见**：{{#$output.comment#}}
+
+          '
+        inputs:
+        - option_source:
+            selector: []
+            type: constant
+            value:
+            - approve
+            - downgrade
+            - revise_wording
+            - hold
+            - reject
+            - return_to_analysis
+          output_variable_name: decision
+          type: select
+        - default:
+            selector: []
+            type: constant
+            value: ''
+          output_variable_name: comment
+          type: paragraph
+        selected: false
+        timeout: 3
+        timeout_unit: day
+        title: A19h H3 人工结论授权 (Human Input)
+        type: human-input
+        user_actions:
+        - button_style: primary
+          id: submit
+          title: 提交决定
+      height: 180
+      id: 31h
+      position:
+        x: 6540
+        y: 120
+      positionAbsolute:
+        x: 6540
+        y: 120
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "import json\n\n# H3 不能批准 ResearchRun 中不存在的结果。此处将人工决定写回每条 claim 的 approval_status。\ndef main(claim_ledger_text: str, human_decision: str) -> dict:\n    decision = human_decision if human_decision else \"approve\"\n    try:\n        ledger = json.loads(claim_ledger_text)\n        for c in ledger.get(\"claims\", []):\n            c[\"approval_status\"] = decision\n        ledger[\"_h3_note\"] = \"H3 人工决定=\" + str(decision)\n        approved = json.dumps(ledger, ensure_ascii=False)\n    except Exception:\n        approved = claim_ledger_text\n    return {\"decision\": decision, \"approved_claim_ledger\": approved}\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          approved_claim_ledger:
+            children: null
+            type: string
+          decision:
+            children: null
+            type: string
+        selected: false
+        title: A19 H3 结论授权 (据人工决定应用到 ClaimLedger)
+        type: code
+        variables:
+        - value_selector:
+          - '30'
+          - text
+          value_type: string
+          variable: claim_ledger_text
+        - value_selector:
+          - 31h
+          - decision
+          value_type: string
+          variable: human_decision
+      height: 98
+      id: '31'
+      position:
+        x: 6540
+        y: 300
+      positionAbsolute:
+        x: 6540
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.4
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a20-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不为求显著选方法；不隐藏空/反向/失败结果；结论标注样本时间识别前提与竞争解释。
+
+
+            你的角色是受约束的 Scientific Writer。你只能使用：1.H3 已批准的 ClaimLedger；2.与这些 Claim 绑定的真实 ResearchRun；3.已核验的数据来源和参考文献；4.已批准的研究设计。禁止：使用 pending/hold/reject/prohibited 的 Claim；编造未运行的模型、图表和稳健性检验；添加无法定位的引用；把 mixed 或 insufficient 写成支持；删除不显著、反向或失败结果；将 fixture 结果写成正式论文发现。每个实证结论段末尾追加内部标记 [CLAIM:Cxxx][RUN:run_xxx]，供后续审计。若当前是 fixture_only，只能生成"演示版研究计划"，不得生成正式实证结论。
+
+
+            请生成两个部分（用 Markdown）：
+
+            A. 满足比赛字段要求的《科学假设与研究计划》；
+
+            B. 论文初稿，包括题目、摘要、引言、理论分析与假设、研究设计、实证结果、稳健性与扩展分析、讨论、结论与政策启示、研究局限。
+
+            （提示：手册§19建议用 Iteration 按章节生成以控制上下文；本节点为单节点整体生成版，如需分章节可在 UI 中改为 Iteration。）
+
+            '
+        - id: a20-usr
+          role: user
+          text: 'ResearchPackage：{{#11.text#}}
+
+            Approved AnalysisPlan / FormalResearchContract：{{#24.contract#}}
+
+            Approved ClaimLedger：{{#31.approved_claim_ledger#}}
+
+            ResearchRun：{{#27.output#}}
+
+            Verified References：（未提供已核验参考文献；若无请标注 references_unverified，禁止编造引用）
+
+
+            请生成 A《科学假设与研究计划》与 B 论文初稿。fixture_only 时仅生成演示版研究计划。
+
+            '
+        selected: false
+        title: A20 Scientific Writer
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '32'
+      position:
+        x: 6850
+        y: 300
+      positionAbsolute:
+        x: 6850
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: a21-sys
+          role: system
+          text: '你是 HypoWeaver-Qwen 系统中的科研智能体。必须遵守：只依据本节点输入；区分已知事实/模型推断/方法建议/实际运行结果；未执行分析标 planned/not_executed，不编造数值；信息不足返回 null/unknown；不隐藏空/反向/失败结果；严格按 JSON Schema 输出，不加多余文本。
+
+
+            你是 Citation & Consistency Auditor。请逐段审查稿件：1.每个实证结论是否关联已批准的 claim_id 和真实 run_id；2.表述强度是否超过 allowed_strength；3.样本、时间、变量和方法描述是否与 FormalResearchContract 一致；4.是否出现未执行的检验；5.是否省略空结果、反向结果或重要限制；6.每条文献引用是否能在 Verified References 中定位；7.是否将政策事实、理论观点和本研究结果混写。输出逐条问题清单，每条问题包含位置、证据、严重程度、修改要求和应退回阶段。你没有权力批准论文，只能给出 pass_with_no_critical_issues 或 revise。
+
+
+            只输出一个 JSON 对象：{"audit_result":"pass_with_no_critical_issues|revise","issues":[{"location":"string","evidence":"string","severity":"critical|major|minor","required_fix":"string","return_stage":"writer|H3|analysis"}]}
+
+            '
+        - id: a21-usr
+          role: user
+          text: '稿件（Writer 输出）：
+
+            {{#32.text#}}
+
+
+            Approved ClaimLedger：{{#31.approved_claim_ledger#}}
+
+            FormalResearchContract：{{#24.contract#}}
+
+            ResearchRun：{{#27.output#}}
+
+
+            请审查并输出问题清单。
+
+            '
+        selected: false
+        title: A21 Citation & Consistency Auditor
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '33'
+      position:
+        x: 7160
+        y: 300
+      positionAbsolute:
+        x: 7160
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        outputs:
+        - value_selector:
+          - '11'
+          - text
+          variable: research_package
+        - value_selector:
+          - '15'
+          - text
+          variable: data_profile
+        - value_selector:
+          - '16'
+          - text
+          variable: method_route
+        - value_selector:
+          - '23'
+          - text
+          variable: analysis_plan_final
+        - value_selector:
+          - '24'
+          - contract
+          variable: formal_research_contract
+        - value_selector:
+          - '27'
+          - output
+          variable: research_run
+        - value_selector:
+          - '28'
+          - text
+          variable: evidence_assessment
+        - value_selector:
+          - '30'
+          - text
+          variable: claim_ledger
+        - value_selector:
+          - '31'
+          - approved_claim_ledger
+          variable: approved_claim_ledger
+        - value_selector:
+          - '32'
+          - text
+          variable: paper_draft
+        - value_selector:
+          - '33'
+          - text
+          variable: citation_audit
+        selected: false
+        title: A22 最终成果包输出
+        type: end
+      height: 300
+      id: '99'
+      position:
+        x: 7470
+        y: 300
+      positionAbsolute:
+        x: 7470
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.35
