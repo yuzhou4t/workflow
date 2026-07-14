@@ -770,6 +770,7 @@ class WorkflowEngine:
             decision_record_id=decision.decision_id,
             research_package_hash=_hash(package),
             data_hashes=[item.sha256 for item in package.dataset_refs],
+            dataset_refs=package.dataset_refs,
             approved_plan_hash=_hash(plan),
             approved_plan=plan,
             prohibited_deviations=[

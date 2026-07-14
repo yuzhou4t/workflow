@@ -9,6 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .case_import import (
+    CaseImportError,
+    LocalCaseImporter,
+    LocalCaseImportRequest,
+    LocalCaseImportResponse,
+)
 from .definition import build_app_a_definition
 from .engine import WorkflowEngine, WorkflowTransitionError
 from .models import CreateRunRequest, GateDecisionRequest, RevisionRequest, RunState
@@ -31,6 +37,7 @@ from .runtime_config import (
 repository = RunRepository()
 engine = WorkflowEngine(repository)
 runtime_config_store = RuntimeConfigStore()
+case_importer = LocalCaseImporter()
 app = FastAPI(
     title="HypoWeaver-Qwen Workflow API",
     version="1.0.0",
@@ -100,6 +107,20 @@ async def test_runtime_config_connection(
     _actor: str = Depends(mutation_actor),
 ) -> RuntimeConnectionTestResult:
     return await test_runtime_connection(request, runtime_config_store)
+
+
+@app.post(
+    "/api/v1/case-imports/local",
+    response_model=LocalCaseImportResponse,
+)
+def import_local_case(
+    request: LocalCaseImportRequest,
+    _actor: str = Depends(mutation_actor),
+) -> LocalCaseImportResponse:
+    try:
+        return case_importer.import_folder(request.path)
+    except CaseImportError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.get("/api/v1/runs", response_model=list[RunState])

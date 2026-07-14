@@ -1,8 +1,10 @@
 import type {
+  CaseSubmissionInput,
   ClaimDecision,
   ConnectionTestResult,
   CreateRunInput,
   GateDecisionInput,
+  LocalCaseImportResult,
   NodeKind,
   PromptContent,
   RunEvent,
@@ -483,6 +485,70 @@ function normalizeConfigStatus(payload: unknown): RuntimeConfigStatus {
   }
 }
 
+function normalizeCaseSubmission(payload: unknown): CaseSubmissionInput {
+  const value = asRecord(payload)
+  return {
+    caseId: asString(first(value, 'case_id', 'caseId')),
+    title: asString(value.title),
+    researchQuestion: asString(first(value, 'research_question', 'researchQuestion')),
+    hypotheses: asArray(value.hypotheses).map((item, index) => {
+      const hypothesis = asRecord(item)
+      return {
+        hypothesisId: asString(first(hypothesis, 'hypothesis_id', 'hypothesisId'), `H${index + 1}`),
+        statement: asString(hypothesis.statement),
+        expectedDirection: asString(first(hypothesis, 'expected_direction', 'expectedDirection'), 'unspecified') as CaseSubmissionInput['hypotheses'][number]['expectedDirection'],
+        mechanism: asString(hypothesis.mechanism),
+      }
+    }),
+    unitOfAnalysis: asString(first(value, 'unit_of_analysis', 'unitOfAnalysis')),
+    samplePeriod: asString(first(value, 'sample_period', 'samplePeriod')),
+    dataStructureHint: asString(first(value, 'data_structure_hint', 'dataStructureHint'), 'unknown') as CaseSubmissionInput['dataStructureHint'],
+    variables: asArray(value.variables).map((item) => {
+      const variable = asRecord(item)
+      return {
+        name: asString(variable.name),
+        label: asString(variable.label),
+        role: asString(variable.role, 'unknown') as CaseSubmissionInput['variables'][number]['role'],
+        definition: asString(variable.definition),
+        source: asString(variable.source),
+      }
+    }),
+    datasetRefs: asArray(first(value, 'dataset_refs', 'datasetRefs')).map((item) => {
+      const dataset = asRecord(item)
+      return {
+        datasetId: asString(first(dataset, 'dataset_id', 'datasetId')),
+        role: asString(dataset.role, 'main') as CaseSubmissionInput['datasetRefs'][number]['role'],
+        filename: asString(dataset.filename),
+        mimeType: asString(first(dataset, 'mime_type', 'mimeType'), 'text/csv'),
+        sha256: asString(dataset.sha256),
+        sizeBytes: Number(first(dataset, 'size_bytes', 'sizeBytes') ?? 0),
+      }
+    }),
+    knownPolicyFacts: asArray(first(value, 'known_policy_facts', 'knownPolicyFacts')).map(String),
+    constraints: asArray(value.constraints).map(String),
+  }
+}
+
+export function normalizeLocalCaseImport(payload: unknown): LocalCaseImportResult {
+  const envelope = asRecord(payload)
+  const report = asRecord(first(envelope, 'report', 'import_report', 'importReport'))
+  const yearMin = first(report, 'year_min', 'yearMin')
+  const yearMax = first(report, 'year_max', 'yearMax')
+  const explicitSamplePeriod = asString(first(report, 'sample_period', 'samplePeriod'))
+  return {
+    case: normalizeCaseSubmission(first(envelope, 'case_submission', 'case')),
+    report: {
+      datasetFilename: asString(first(report, 'dataset_filename', 'main_dataset_filename', 'main_data_filename', 'datasetFilename')),
+      rowCount: Number(first(report, 'row_count', 'rowCount') ?? 0),
+      columnCount: Number(first(report, 'column_count', 'columnCount') ?? 0),
+      samplePeriod: explicitSamplePeriod || (yearMin !== undefined && yearMax !== undefined ? `${yearMin}—${yearMax}` : undefined),
+      hiddenFileCount: Number(first(report, 'hidden_file_count', 'hiddenFileCount') ?? 0),
+      excludedFileCount: Number(first(report, 'excluded_file_count', 'excludedFileCount') ?? 0),
+      reviewItems: asArray(first(report, 'review_items', 'human_review_items', 'reviewItems')).map(String),
+    },
+  }
+}
+
 export const workflowApi = {
   hasAccessToken(): boolean {
     return Boolean(accessToken())
@@ -521,6 +587,14 @@ export const workflowApi = {
       }),
     })
     return normalizeRun(payload)
+  },
+
+  async importLocalCase(path: string): Promise<LocalCaseImportResult> {
+    if (!path.trim()) throw new Error('请先填写本地案例文件夹路径。')
+    return normalizeLocalCaseImport(await request('/case-imports/local', {
+      method: 'POST',
+      body: JSON.stringify({ path: path.trim() }),
+    }))
   },
 
   async getRuntimeConfig(): Promise<RuntimeConfigStatus> {

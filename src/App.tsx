@@ -6,7 +6,7 @@ import { ResearchInputForm } from './components/ResearchInputForm'
 import { SystemConfigPanel } from './components/SystemConfigPanel'
 import { demoResearchDraft, emptyResearchDraft, preflightResearch, type ResearchDraft } from './data/researchDraft'
 import { workflowApi } from './runtime/api'
-import type { ConnectionTestResult, GateDecisionInput, RunSnapshot, RunSummary, RuntimeConfigStatus, RuntimeConfigUpdate, WorkflowDefinition } from './runtime/types'
+import type { CaseImportReport, ConnectionTestResult, GateDecisionInput, RunSnapshot, RunSummary, RuntimeConfigStatus, RuntimeConfigUpdate, WorkflowDefinition } from './runtime/types'
 
 function viewFromHash(): AppView {
   const value = window.location.hash.replace('#', '')
@@ -22,6 +22,7 @@ export function App() {
   const [accessTokenPresent, setAccessTokenPresent] = useState(() => workflowApi.hasAccessToken())
   const [accessTokenVerified, setAccessTokenVerified] = useState(false)
   const [draft, setDraft] = useState<ResearchDraft>(() => emptyResearchDraft())
+  const [importReport, setImportReport] = useState<CaseImportReport | null>(null)
   const [showPreflight, setShowPreflight] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -129,6 +130,28 @@ export function App() {
     changeView('runs')
   }
 
+  async function importLocalCase(path: string) {
+    const imported = await withBusy('正在扫描案例包、隔离隐藏材料并登记数据…', () => workflowApi.importLocalCase(path))
+    if (!imported) return
+    const importedDraft: ResearchDraft = { mode: draft.mode, case: imported.case }
+    setDraft(importedDraft)
+    setImportReport(imported.report)
+    const blockers = preflightResearch(importedDraft, config, accessTokenVerified)
+      .filter((item) => item.level === 'blocker')
+    if (blockers.length) {
+      setShowPreflight(true)
+      return
+    }
+
+    const nextRun = await withBusy('案例已安全导入，正在启动工作流并进入 H1…', () => workflowApi.createRun({ mode: importedDraft.mode, case: importedDraft.case }))
+    if (!nextRun) return
+    runIdRef.current = nextRun.id
+    setRun(nextRun)
+    await refreshRuns()
+    setShowPreflight(false)
+    changeView('runs')
+  }
+
   async function selectRun(runId: string) {
     const requestId = ++runRequestRef.current
     const nextRun = await withBusy('正在恢复持久化运行状态…', () => workflowApi.getRun(runId))
@@ -205,8 +228,8 @@ export function App() {
       <AppHeader view={view} config={config} onChangeView={changeView} />
       {error && <div className="error-banner" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>关闭</button></div>}
       {view === 'settings' && <SystemConfigPanel status={config} accessTokenPresent={accessTokenPresent} accessTokenVerified={accessTokenVerified} busy={busy} onRefresh={() => withBusy('正在重新读取配置状态…', refreshConfig).then(() => undefined)} onSetAccessToken={(token) => { workflowApi.setAccessToken(token); setAccessTokenPresent(workflowApi.hasAccessToken()); setAccessTokenVerified(false) }} onSave={saveConfig} onTest={testConnection} />}
-      {view === 'new' && !showPreflight && <ResearchInputForm draft={draft} config={config} onChange={setDraft} onLoadDemo={() => setDraft(demoResearchDraft())} onOpenSettings={() => changeView('settings')} onCheck={() => setShowPreflight(true)} />}
-      {view === 'new' && showPreflight && <PreflightPanel draft={draft} items={preflightItems} busy={busy} onBack={() => setShowPreflight(false)} onStart={startResearch} />}
+      {view === 'new' && !showPreflight && <ResearchInputForm draft={draft} config={config} importReport={importReport} busy={busy} onChange={setDraft} onLoadDemo={() => { setDraft(demoResearchDraft()); setImportReport(null) }} onImportLocalCase={importLocalCase} onOpenSettings={() => changeView('settings')} onCheck={() => setShowPreflight(true)} />}
+      {view === 'new' && showPreflight && <PreflightPanel draft={draft} items={preflightItems} importReport={importReport} busy={busy} onBack={() => setShowPreflight(false)} onStart={startResearch} />}
       {view === 'runs' && <ExecutionWorkspace definition={definition} run={run} runs={runs} busy={busy} busyLabel={busyLabel} onSelectRun={selectRun} onNewResearch={() => changeView('new')} onGateDecision={decideGate} onSubmitRevision={submitGateRevision} />}
     </div>
   )

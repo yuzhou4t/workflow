@@ -1,9 +1,11 @@
 import { ArrowLeft, CheckCircle2, CircleAlert, Play, TriangleAlert } from 'lucide-react'
 import type { PreflightItem, ResearchDraft } from '../data/researchDraft'
+import type { CaseImportReport } from '../runtime/types'
 
 interface PreflightPanelProps {
   draft: ResearchDraft
   items: PreflightItem[]
+  importReport?: CaseImportReport | null
   busy: boolean
   onBack: () => void
   onStart: () => void
@@ -15,7 +17,7 @@ const iconByLevel = {
   blocker: CircleAlert,
 }
 
-export function PreflightPanel({ draft, items, busy, onBack, onStart }: PreflightPanelProps) {
+export function PreflightPanel({ draft, items, importReport, busy, onBack, onStart }: PreflightPanelProps) {
   const blockerCount = items.filter((item) => item.level === 'blocker').length
   const warningCount = items.filter((item) => item.level === 'warning').length
 
@@ -36,6 +38,12 @@ export function PreflightPanel({ draft, items, busy, onBack, onStart }: Prefligh
         <div><strong>{blockerCount ? `${blockerCount} 个阻断项需要处理` : '输入已经可以开始'}</strong><p>{warningCount ? `另有 ${warningCount} 项提醒，不会阻止本次运行。` : '没有发现额外提醒。'}</p></div>
         <dl><div><dt>运行方式</dt><dd>{draft.mode === 'fixture' ? '流程演示' : '真实研究'}</dd></div><div><dt>案例</dt><dd>{draft.case.title || '未填写'}</dd></div><div><dt>假设数</dt><dd>{draft.case.hypotheses.length}</dd></div><div><dt>变量数</dt><dd>{draft.case.variables.filter((item) => item.name.trim()).length}</dd></div></dl>
       </section>
+
+      {importReport && <section className="import-result-card" aria-label="案例导入结果">
+        <div><strong>案例包已完成安全导入</strong><p>主流程只登记分析数据；隐藏参考材料没有进入研究输入。</p></div>
+        <dl><div><dt>主数据</dt><dd>{importReport.datasetFilename}</dd></div><div><dt>数据规模</dt><dd>{importReport.rowCount.toLocaleString()} 行 × {importReport.columnCount} 列</dd></div><div><dt>已隔离</dt><dd>{importReport.hiddenFileCount} 个隐藏文件</dd></div><div><dt>已排除</dt><dd>{importReport.excludedFileCount} 个重复/无关文件</dd></div></dl>
+        {importReport.reviewItems.length > 0 && <ul>{importReport.reviewItems.map((item) => <li key={item}>{item}</li>)}</ul>}
+      </section>}
 
       <section className="preflight-list">
         {items.map((item) => {

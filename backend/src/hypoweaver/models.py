@@ -291,6 +291,7 @@ class FormalResearchContract(StrictModel):
     decision_record_id: str
     research_package_hash: str
     data_hashes: list[str]
+    dataset_refs: list[DatasetRef] = Field(default_factory=list)
     approved_plan_hash: str
     approved_plan: AnalysisPlan
     prohibited_deviations: list[str]

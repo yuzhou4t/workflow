@@ -201,6 +201,21 @@ export interface CaseSubmissionInput {
   constraints: string[]
 }
 
+export interface CaseImportReport {
+  datasetFilename: string
+  rowCount: number
+  columnCount: number
+  samplePeriod?: string
+  hiddenFileCount: number
+  excludedFileCount: number
+  reviewItems: string[]
+}
+
+export interface LocalCaseImportResult {
+  case: CaseSubmissionInput
+  report: CaseImportReport
+}
+
 export interface CreateRunInput {
   mode: 'fixture' | 'research'
   presetId?: string

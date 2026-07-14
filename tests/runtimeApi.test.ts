@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { normalizeDefinition, normalizeRun, normalizeRunList, workflowApi } from '../src/runtime/api'
+import { normalizeDefinition, normalizeLocalCaseImport, normalizeRun, normalizeRunList, workflowApi } from '../src/runtime/api'
 
 const definitionPayload = {
   id: 'app-a',
@@ -194,6 +194,44 @@ describe('runtime API adapter', () => {
     expect(runs).toEqual([
       expect.objectContaining({ id: 'run-001', status: 'waiting_human', currentGate: 'H3' }),
     ])
+  })
+
+  it('normalizes a safe local case import without exposing a source path', async () => {
+    const payload = {
+      case_submission: {
+        case_id: 'case-esg-sdla-dad550862bf5',
+        title: 'ESG 与 SDLA 的企业面板研究',
+        research_question: '企业 ESG 表现是否与 SDLA 存在系统性关联？',
+        hypotheses: [{ hypothesis_id: 'H1', statement: 'ESG 与 SDLA 存在系统性关联。', expected_direction: 'unspecified', mechanism: null }],
+        unit_of_analysis: '企业—年度',
+        sample_period: '2009—2021',
+        data_structure_hint: 'panel',
+        variables: [{ name: 'SDLA', label: 'SDLA（定义待确认）', role: 'outcome', definition: null, source: '案例数据' }],
+        dataset_refs: [{ dataset_id: 'dataset-dad550862bf5', role: 'main', filename: 'ESG-SDLA-数据.csv', mime_type: 'text/csv', sha256: 'a'.repeat(64), size_bytes: 41972980 }],
+        known_policy_facts: [],
+        constraints: ['变量定义待 H1 确认。'],
+      },
+      import_report: {
+        dataset_filename: 'ESG-SDLA-数据.csv',
+        row_count: 30311,
+        column_count: 132,
+        sample_period: '2009—2021',
+        hidden_file_count: 3,
+        excluded_file_count: 2,
+        review_items: ['请确认 SDLA 的定义。'],
+      },
+    }
+    expect(normalizeLocalCaseImport(payload)).toMatchObject({
+      case: { caseId: 'case-esg-sdla-dad550862bf5', dataStructureHint: 'panel' },
+      report: { rowCount: 30311, hiddenFileCount: 3 },
+    })
+    expect(JSON.stringify(normalizeLocalCaseImport(payload))).not.toContain('/Users/')
+
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => payload })
+    vi.stubGlobal('fetch', fetchMock)
+    await workflowApi.importLocalCase('/tmp/case-1')
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/case-imports/local', expect.objectContaining({ method: 'POST' }))
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ path: '/tmp/case-1' })
   })
 
   it('rejects definitions whose explicit edge references a missing node', () => {

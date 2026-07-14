@@ -35,6 +35,7 @@
 - App A 输入 Schema 拒绝原论文结果和隐藏参考字段；
 - 独立 App B 盲测服务：独立数据库、封存哈希校验、六维诊断和代码计算总分；
 - 面向研究者的 React 任务控制台：详细研究输入、开始前预检、纵向执行过程、嵌入式 H1/H2/H3 和成果状态；
+- 本地案例包一键导入：安全扫描目录、隔离隐藏参考、登记 CSV 数据并直接启动到 H1；
 - 页面级运行配置入口，支持脱敏状态、私有保存与 Qwen/Research Engine 连接测试。
 
 ## 本地启动
@@ -63,6 +64,21 @@ http://127.0.0.1:5174/#new       详细研究输入与开始前检查
 http://127.0.0.1:5174/#runs      运行过程、人工审核与结果
 http://127.0.0.1:5174/#settings  API Key、模型和执行器配置
 ```
+
+## 一键导入案例包
+
+1. 在 `#settings` 配置并测试 Qwen；真实研究还要配置 Python Research Engine。
+2. 回到 `#new`，选择“流程演示”或“真实研究”，填写本机案例文件夹路径。
+3. 点击“一键导入并启动”。后端会选择主 CSV、计算 SHA256/行列数/年份范围、登记 Dataset ID，并直接创建 Run 到 H1。
+4. 在 H1 确认系统根据表头推断的研究问题、变量角色和样本边界后，再继续方法设计。
+
+导入器强制隔离 PDF、Word、Stata/R/Python 脚本、日志和隐藏参考目录；只返回隐藏文件数量，不返回其文件名、路径或内容。同一案例同时存在 CSV 与 DTA 时，默认登记 CSV，DTA 作为重复格式排除。私有数据注册表位于：
+
+```text
+backend/var/datasets.json
+```
+
+它仅供本机后端/执行器按 Dataset ID 解析，权限为 `0600`，不会进入 Git。当前入口是本地文件夹导入；部署到远程服务器时需要把这一层替换成受控上传或对象存储，浏览器不能让远程服务器直接读取 Mac 本地路径。
 
 ## 验证
 
@@ -147,6 +163,7 @@ GET  /api/v1/definitions/app-a
 GET  /api/v1/runtime-config
 PUT  /api/v1/runtime-config
 POST /api/v1/runtime-config/tests
+POST /api/v1/case-imports/local
 POST /api/v1/runs
 GET  /api/v1/runs
 GET  /api/v1/runs/{run_id}
@@ -187,6 +204,7 @@ python3.11 -m uvicorn hypoweaver.blind_api:app --port 8002
 ```text
 backend/src/hypoweaver/
   api.py              FastAPI 接口
+  case_import.py      本地案例安全扫描与数据资产登记
   blind_api.py        独立 App B FastAPI 入口
   blind_engine.py     封存校验、六维评估与代码评分
   blind_models.py     盲测输入输出 Schema
