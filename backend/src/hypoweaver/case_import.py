@@ -82,6 +82,23 @@ class DatasetRegistry:
             }
             self._write(records)
 
+    def resolve(self, dataset_ref: DatasetRef) -> Path:
+        """Resolve an opaque dataset id and verify its immutable registry metadata."""
+        with self._lock:
+            record = self._load().get(dataset_ref.dataset_id)
+        if record is None:
+            raise CaseImportError(f"dataset id is not registered: {dataset_ref.dataset_id}")
+        if (
+            record.get("sha256") != dataset_ref.sha256
+            or record.get("filename") != dataset_ref.filename
+            or record.get("size_bytes") != dataset_ref.size_bytes
+        ):
+            raise CaseImportError("dataset reference does not match the private registry")
+        source_path = Path(str(record.get("source_path", "")))
+        if not source_path.is_file():
+            raise CaseImportError("registered dataset file is unavailable")
+        return source_path
+
     def _load(self) -> dict[str, dict[str, object]]:
         if not self.path.exists():
             return {}

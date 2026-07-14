@@ -346,7 +346,10 @@ async def test_runtime_connection(
         method = "GET"
 
     try:
-        async with httpx.AsyncClient(timeout=15, transport=transport) as client:
+        trust_env = urlsplit(url).hostname not in {"127.0.0.1", "localhost", "::1"}
+        async with httpx.AsyncClient(
+            timeout=15, transport=transport, trust_env=trust_env
+        ) as client:
             response = await client.request(method, url, headers=headers, json=payload)
         if response.is_success:
             return RuntimeConnectionTestResult(

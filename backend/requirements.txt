@@ -1,5 +1,8 @@
 fastapi>=0.109,<1
 httpx>=0.26,<1
+linearmodels>=7,<8
+numpy>=2,<3
 openai>=1.10,<3
+pandas>=2.2,<3
 pydantic>=2.5,<3
 uvicorn>=0.27,<1

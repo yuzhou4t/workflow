@@ -153,7 +153,15 @@ Qwen 测试会发起一次 `max_tokens=1` 的最小模型调用；Research Engin
 
 未设置 API Token 时，两个服务的写接口仅允许 loopback 调用。生产或局域网部署必须设置 `HYPOWEAVER_API_TOKEN`，然后在 `#settings` 页的“工作流访问令牌”中输入同一值。该令牌只保存在当前标签页的 `sessionStorage`，关闭标签页即清除；它不会通过 `VITE_*` 变量写入前端构建产物。封存默认使用本机 `backend/var/seal.key`，多实例部署必须通过 `HYPOWEAVER_SEAL_SECRET` 注入同一密钥。
 
-外部执行器接收冻结的 `FormalResearchContract`，并必须返回符合 `ResearchRun` Schema 的 JSON。当前仓库只实现稳定的编排和执行器适配边界，不在 Web 进程内运行任意模型生成代码。
+外部执行器接收冻结的 `FormalResearchContract`，并必须返回符合 `ResearchRun` Schema 的 JSON。主 Web 进程不运行任意模型生成代码，计量执行被隔离在独立服务中。
+
+本仓库同时提供一个独立、受限的本地执行器。它不执行模型生成的任意代码，只按冻结合同运行已经实现的估计器；当前支持 `panel_association` 与 `mechanism_boundary` 的双向固定效应基准模型，其他方法会明确返回未支持：
+
+```bash
+PYTHONPATH=backend/src python3.11 -m uvicorn hypoweaver.research_api:app --port 9000
+```
+
+执行器读取私有 Dataset Registry，通过 Dataset ID 解析已上传 CSV，并在估计前复核文件 SHA256。首版结果标记为 `scientific_status=limited`，因为稳健性、证伪、机制和异质性步骤尚未自动执行。
 
 ## HTTP API
 
@@ -205,6 +213,8 @@ python3.11 -m uvicorn hypoweaver.blind_api:app --port 8002
 ```text
 backend/src/hypoweaver/
   api.py              FastAPI 接口
+  research_api.py     独立 Python Research Engine 接口
+  research_engine.py  受限面板计量执行器
   case_import.py      本地案例安全扫描与数据资产登记
   blind_api.py        独立 App B FastAPI 入口
   blind_engine.py     封存校验、六维评估与代码评分

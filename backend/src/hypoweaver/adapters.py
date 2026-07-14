@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Protocol, TypeVar
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
@@ -517,7 +518,8 @@ class HttpResearchExecutor:
 
     async def execute(self, contract: FormalResearchContract) -> ResearchRun:
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
-        async with httpx.AsyncClient(timeout=120) as client:
+        trust_env = urlsplit(self.url).hostname not in {"127.0.0.1", "localhost", "::1"}
+        async with httpx.AsyncClient(timeout=120, trust_env=trust_env) as client:
             response = await client.post(
                 f"{self.url.rstrip('/')}/v1/runs",
                 json={"contract": contract.model_dump(mode="json")},
