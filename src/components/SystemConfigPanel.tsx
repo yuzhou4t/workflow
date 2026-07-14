@@ -79,7 +79,7 @@ export function SystemConfigPanel({ status, accessTokenPresent, accessTokenVerif
           <header><div className="settings-icon"><KeyRound size={20} /></div><div><h2>千问模型</h2><StateLine ready={Boolean(status?.qwenApiKey.configured)}>{status?.qwenApiKey.configured ? `已配置 · ${status.qwenApiKey.source}` : '尚未配置 API 密钥'}</StateLine></div></header>
           <label>API 密钥<input type="password" autoComplete="off" value={qwenApiKey} onChange={(event) => setQwenApiKey(event.target.value)} placeholder={status?.qwenApiKey.configured ? '已配置；留空表示不修改' : '输入 DASHSCOPE_API_KEY'} /></label>
           <div className="field-grid">
-            <label>模型名称<input value={qwenModel} onChange={(event) => setQwenModel(event.target.value)} /></label>
+            <label>模型 ID<input value={qwenModel} onChange={(event) => setQwenModel(event.target.value)} placeholder="qwen3.7-plus" spellCheck={false} /><small className="field-help">区分大小写；百炼公共模型使用小写 ID，例如 qwen3.7-plus 或 qwen-plus。</small></label>
             <label>API 地址<input value={qwenBaseUrl} onChange={(event) => setQwenBaseUrl(event.target.value)} /></label>
           </div>
           {status?.qwenApiKey.configured && qwenBaseUrl.trim() !== status.qwenBaseUrl.value && <p className="config-field-warning">{status.qwenApiKey.source === 'environment' ? '千问密钥来自环境变量；为避免密钥被转发到其他地址，请同时在后端环境变量 QWEN_BASE_URL 中修改地址。页面不能修改这一组合。' : '切换 API 地址时需要重新输入千问 API 密钥，避免把已有密钥误发给新的服务地址。'}</p>}

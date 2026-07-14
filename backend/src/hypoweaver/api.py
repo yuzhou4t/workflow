@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .case_import import (
+    CaseUploadStore,
     CaseImportError,
     LocalCaseImporter,
     LocalCaseImportRequest,
@@ -38,6 +39,7 @@ repository = RunRepository()
 engine = WorkflowEngine(repository)
 runtime_config_store = RuntimeConfigStore()
 case_importer = LocalCaseImporter()
+case_upload_store = CaseUploadStore()
 app = FastAPI(
     title="HypoWeaver-Qwen Workflow API",
     version="1.0.0",
@@ -119,6 +121,22 @@ def import_local_case(
 ) -> LocalCaseImportResponse:
     try:
         return case_importer.import_folder(request.path)
+    except CaseImportError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post(
+    "/api/v1/case-imports/upload",
+    response_model=LocalCaseImportResponse,
+)
+async def upload_case_file(
+    request: Request,
+    filename: str,
+    _actor: str = Depends(mutation_actor),
+) -> LocalCaseImportResponse:
+    try:
+        uploaded = await case_upload_store.save(filename, request.stream())
+        return case_importer.import_folder(uploaded.parent)
     except CaseImportError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 

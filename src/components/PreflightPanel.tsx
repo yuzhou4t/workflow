@@ -41,7 +41,7 @@ export function PreflightPanel({ draft, items, importReport, busy, onBack, onSta
 
       {importReport && <section className="import-result-card" aria-label="案例导入结果">
         <div><strong>案例包已完成安全导入</strong><p>主流程只登记分析数据；隐藏参考材料没有进入研究输入。</p></div>
-        <dl><div><dt>主数据</dt><dd>{importReport.datasetFilename}</dd></div><div><dt>数据规模</dt><dd>{importReport.rowCount.toLocaleString()} 行 × {importReport.columnCount} 列</dd></div><div><dt>已隔离</dt><dd>{importReport.hiddenFileCount} 个隐藏文件</dd></div><div><dt>已排除</dt><dd>{importReport.excludedFileCount} 个重复/无关文件</dd></div></dl>
+        <dl><div><dt>主数据</dt><dd>{importReport.datasetFilename}</dd></div><div><dt>数据规模</dt><dd>{importReport.rowCount.toLocaleString()} 行 × {importReport.columnCount} 列</dd></div><div><dt>隐藏材料</dt><dd>{importReport.hiddenFileCount ? `已隔离 ${importReport.hiddenFileCount} 个` : '未上传'}</dd></div><div><dt>已排除</dt><dd>{importReport.excludedFileCount} 个重复/无关文件</dd></div></dl>
         {importReport.reviewItems.length > 0 && <ul>{importReport.reviewItems.map((item) => <li key={item}>{item}</li>)}</ul>}
       </section>}
 

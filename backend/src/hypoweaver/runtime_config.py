@@ -359,6 +359,16 @@ async def test_runtime_connection(
                 ),
                 status_code=response.status_code,
             )
+        if request.target == "qwen" and response.status_code == 404:
+            return RuntimeConnectionTestResult(
+                target="qwen",
+                success=False,
+                message=(
+                    f"Qwen 返回 HTTP 404：模型 ID {config.qwen_model!r} 或 API 地址不存在。"
+                    "模型 ID 区分大小写，例如 qwen3.7-plus。"
+                ),
+                status_code=404,
+            )
         return RuntimeConnectionTestResult(
             target=request.target,
             success=False,

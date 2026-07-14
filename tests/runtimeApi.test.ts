@@ -234,6 +234,31 @@ describe('runtime API adapter', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ path: '/tmp/case-1' })
   })
 
+  it('uploads one user-selected CSV instead of requiring a filesystem path', async () => {
+    const payload = {
+      case_submission: {
+        case_id: 'case-upload', title: '上传案例', research_question: 'X 是否与 Y 相关？',
+        hypotheses: [{ hypothesis_id: 'H1', statement: 'X 与 Y 相关。', expected_direction: 'unspecified' }],
+        data_structure_hint: 'panel',
+        variables: [{ name: 'Y', role: 'outcome' }],
+        dataset_refs: [{ dataset_id: 'ds-upload', filename: 'main data.csv', role: 'main', mime_type: 'text/csv', sha256: 'b'.repeat(64), size_bytes: 10 }],
+        known_policy_facts: [], constraints: [],
+      },
+      import_report: { main_data_filename: 'main data.csv', row_count: 1, column_count: 1, hidden_file_count: 0, excluded_file_count: 0, human_review_items: [] },
+    }
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => payload })
+    vi.stubGlobal('fetch', fetchMock)
+    const file = Object.assign(new Blob(['Y\n1\n'], { type: 'text/csv' }), { name: 'main data.csv' }) as File
+
+    const imported = await workflowApi.uploadCaseFile(file)
+
+    expect(imported.report.datasetFilename).toBe('main data.csv')
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/case-imports/upload?filename=main%20data.csv', expect.objectContaining({
+      method: 'POST',
+      body: file,
+    }))
+  })
+
   it('rejects definitions whose explicit edge references a missing node', () => {
     expect(() => normalizeDefinition({ ...definitionPayload, edges: [{ source: 'intake', target: 'missing' }] }))
       .toThrow(/不存在的节点/)

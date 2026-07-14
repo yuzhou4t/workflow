@@ -597,6 +597,26 @@ export const workflowApi = {
     }))
   },
 
+  async uploadCaseFile(file: File): Promise<LocalCaseImportResult> {
+    if (!file.name.toLowerCase().endsWith('.csv')) throw new Error('请选择 CSV 数据文件。')
+    const token = accessToken()
+    const response = await fetch(`${API_BASE}/case-imports/upload?filename=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': file.type || 'text/csv',
+        ...(token ? { 'X-Hypoweaver-Token': token } : {}),
+      },
+      body: file,
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      const message = asString(first(asRecord(payload), 'detail', 'message'), `HTTP ${response.status}`)
+      throw new Error(message)
+    }
+    return normalizeLocalCaseImport(payload)
+  },
+
   async getRuntimeConfig(): Promise<RuntimeConfigStatus> {
     return normalizeConfigStatus(await request('/runtime-config'))
   },

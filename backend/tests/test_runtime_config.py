@@ -264,6 +264,18 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status_code, 200)
         self.assertNotIn("test-key", result.model_dump_json())
 
+    async def test_qwen_404_explains_model_id_case_sensitivity(self) -> None:
+        result = await test_runtime_connection(
+            RuntimeConnectionTestRequest(target="qwen"),
+            self.store,
+            transport=httpx.MockTransport(lambda _request: httpx.Response(404)),
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.status_code, 404)
+        self.assertIn("模型 ID", result.message)
+        self.assertIn("区分大小写", result.message)
+
     async def test_executor_connection_uses_v1_health_contract(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/v1/health")

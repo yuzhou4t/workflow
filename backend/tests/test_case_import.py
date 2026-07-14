@@ -12,7 +12,7 @@ from unittest.mock import patch
 import httpx
 
 import hypoweaver.api as api_module
-from hypoweaver.case_import import DatasetRegistry, LocalCaseImporter
+from hypoweaver.case_import import CaseUploadStore, DatasetRegistry, LocalCaseImporter
 
 
 CSV_CONTENT = """YEAR,证券代码,SDLA,ESG,SIZE,LEV,ROA,GROWTH,unused
@@ -105,6 +105,12 @@ class LocalCaseImportApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.importer_patch = patch.object(api_module, "case_importer", importer)
         self.importer_patch.start()
+        self.upload_store_patch = patch.object(
+            api_module,
+            "case_upload_store",
+            CaseUploadStore(Path(self.tempdir.name) / "uploads"),
+        )
+        self.upload_store_patch.start()
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=api_module.app),
             base_url="http://127.0.0.1",
@@ -112,6 +118,7 @@ class LocalCaseImportApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self) -> None:
         await self.client.aclose()
+        self.upload_store_patch.stop()
         self.importer_patch.stop()
         self.tempdir.cleanup()
 
@@ -130,6 +137,27 @@ class LocalCaseImportApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(authorized.status_code, 200)
         self.assertIn("case_submission", authorized.json())
         self.assertNotIn(str(self.root), authorized.text)
+
+    async def test_csv_upload_is_persisted_and_imported_without_client_path(self) -> None:
+        response = await self.client.post(
+            "/api/v1/case-imports/upload",
+            params={"filename": "ESG-SDLA-data.csv"},
+            content=CSV_CONTENT.encode(),
+            headers={"content-type": "text/csv"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["import_report"]["row_count"], 3)
+        self.assertEqual(payload["case_submission"]["dataset_refs"][0]["filename"], "ESG-SDLA-data.csv")
+        self.assertNotIn(str(self.tempdir.name), response.text)
+
+        rejected = await self.client.post(
+            "/api/v1/case-imports/upload",
+            params={"filename": "paper.pdf"},
+            content=b"not a csv",
+        )
+        self.assertEqual(rejected.status_code, 422)
 
 
 if __name__ == "__main__":

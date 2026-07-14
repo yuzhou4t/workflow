@@ -140,7 +140,7 @@ export function preflightResearch(
       title: '可执行数据资产',
       detail: datasetsReady
         ? `已登记 ${researchCase.datasetRefs.length} 个数据资产引用。`
-        : '尚未登记可执行数据。请返回使用“一键导入标准案例包”，或手动填写执行器已登记资产的 dataset_id、文件名、64 位 SHA256 和文件字节数。',
+        : '尚未登记可执行数据。请返回点击“选择 CSV 并启动”，或手动填写执行器已登记资产的 dataset_id、文件名、64 位 SHA256 和文件字节数。',
     })
   }
   if (config?.workflowApiTokenRequired) {

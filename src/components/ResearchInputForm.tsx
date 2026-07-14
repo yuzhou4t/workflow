@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ArrowRight, Database, FlaskConical, FolderInput, Play, Plus, Settings2, ShieldCheck, Trash2 } from 'lucide-react'
+import { useRef } from 'react'
+import { ArrowRight, Database, FileUp, FlaskConical, Play, Plus, Settings2, ShieldCheck, Trash2 } from 'lucide-react'
 import type { ResearchDraft } from '../data/researchDraft'
 import type { CaseImportReport, DataStructure, RuntimeConfigStatus, VariableRole } from '../runtime/types'
 
@@ -10,7 +10,7 @@ interface ResearchInputFormProps {
   busy: boolean
   onChange: (draft: ResearchDraft) => void
   onLoadDemo: () => void
-  onImportLocalCase: (path: string) => Promise<void>
+  onImportCaseFile: (file: File) => Promise<void>
   onOpenSettings: () => void
   onCheck: () => void
 }
@@ -26,8 +26,8 @@ const roleOptions: Array<[VariableRole, string]> = [
   ['id', '个体主键'], ['time', '时间变量'], ['spatial_id', '空间主键'], ['event_date', '事件日期'], ['unknown', '待确定'],
 ]
 
-export function ResearchInputForm({ draft, config, importReport, busy, onChange, onLoadDemo, onImportLocalCase, onOpenSettings, onCheck }: ResearchInputFormProps) {
-  const [localCasePath, setLocalCasePath] = useState('')
+export function ResearchInputForm({ draft, config, importReport, busy, onChange, onLoadDemo, onImportCaseFile, onOpenSettings, onCheck }: ResearchInputFormProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const updateCase = (patch: Partial<ResearchDraft['case']>) => onChange({ ...draft, case: { ...draft.case, ...patch } })
   const qwenReady = Boolean(config?.qwenApiKey.configured)
   const executorReady = Boolean(config?.researchEngineUrl.value)
@@ -48,15 +48,15 @@ export function ResearchInputForm({ draft, config, importReport, busy, onChange,
       </ol>
 
       <section className="quick-import-card">
-        <header><span><FolderInput size={21} /></span><div><h2>推荐：一键导入标准案例包</h2><p>本地后端读取文件夹，自动登记主数据、生成保守研究草稿，并在 H1 停下让你确认。</p></div></header>
-        <div className="quick-import-flow" aria-label="一键导入过程"><span>选择运行方式</span><i>→</i><span>安全扫描案例包</span><i>→</i><span>隔离论文与代码</span><i>→</i><span>启动至 H1</span></div>
+        <header><span><FileUp size={21} /></span><div><h2>推荐：直接选择分析数据</h2><p>点击按钮选择一个 CSV，系统会自动上传、登记数据、生成保守研究草稿，并在 H1 停下让你确认。</p></div></header>
+        <div className="quick-import-flow" aria-label="一键导入过程"><span>选择运行方式</span><i>→</i><span>选择一个 CSV</span><i>→</i><span>自动登记并生成输入</span><i>→</i><span>启动至 H1</span></div>
         <div className="mode-selector" role="radiogroup" aria-label="运行方式">
           <button type="button" role="radio" aria-checked={draft.mode === 'fixture'} className={draft.mode === 'fixture' ? 'is-selected' : ''} onClick={() => onChange({ ...draft, mode: 'fixture' })}><strong>流程演示</strong><span>不需要 API，验证整条状态链路，不产生统计结论。</span></button>
           <button type="button" role="radio" aria-checked={draft.mode === 'research'} className={draft.mode === 'research' ? 'is-selected' : ''} onClick={() => onChange({ ...draft, mode: 'research' })}><strong>真实研究</strong><span>使用已配置的千问与 Python 执行器运行真实数据。</span></button>
         </div>
-        <label className="local-path-field">案例文件夹路径<input value={localCasePath} onChange={(event) => setLocalCasePath(event.target.value)} placeholder="例如：/Users/你的用户名/Downloads/案例/案例1" /><small>路径只发送给当前本机后端；返回的研究输入不会包含绝对路径。</small></label>
-        <div className="quick-import-actions"><div><ShieldCheck size={17} /><span><strong>盲测隔离默认开启</strong>PDF、Word、Stata/R 脚本及隐藏参考目录不会进入 App A。</span></div><button type="button" className="primary-button" disabled={busy || !localCasePath.trim()} onClick={() => onImportLocalCase(localCasePath)}><Play size={17} />{busy ? '正在导入…' : canAutoStart ? '一键导入并启动' : '导入并检查配置'}</button></div>
-        {importReport && <div className="quick-import-result"><strong>最近一次导入：</strong><span>{importReport.datasetFilename} · {importReport.rowCount.toLocaleString()} 行 × {importReport.columnCount} 列 · 已隔离 {importReport.hiddenFileCount} 个隐藏文件</span></div>}
+        <input ref={fileInputRef} className="file-input-hidden" type="file" accept=".csv,text/csv" tabIndex={-1} aria-hidden="true" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void onImportCaseFile(file) }} />
+        <div className="quick-import-actions"><div><ShieldCheck size={17} /><span><strong>盲测隔离默认开启</strong>只有你选择的 CSV 会上传；论文、附录和分析代码无需选择，也不会进入 App A。</span></div><button type="button" className="primary-button" disabled={busy} onClick={() => fileInputRef.current?.click()}><Play size={17} />{busy ? '正在上传并分析…' : canAutoStart ? '选择 CSV 并启动' : '选择 CSV 并检查配置'}</button></div>
+        {importReport && <div className="quick-import-result"><strong>最近一次导入：</strong><span>{importReport.datasetFilename} · {importReport.rowCount.toLocaleString()} 行 × {importReport.columnCount} 列 · 未上传隐藏参考材料</span></div>}
       </section>
 
       <section className="service-strip">
@@ -119,7 +119,7 @@ export function ResearchInputForm({ draft, config, importReport, busy, onChange,
 
       <section className="form-section">
         <div className="section-heading"><span>05</span><div><h2>数据资产</h2><p>一键导入会自动计算哈希并登记本地数据；也可以手动填写已有执行器资产。</p></div></div>
-        <p className="dataset-registration-note"><strong>推荐：</strong>使用页面上方“一键导入标准案例包”。手动模式仅适用于已经在 Python 执行器侧登记、并已取得 Dataset ID、SHA256 和字节数的数据。</p>
+        <p className="dataset-registration-note"><strong>推荐：</strong>使用页面上方“选择 CSV 并启动”。手动模式仅适用于已经在 Python 执行器侧登记、并已取得 Dataset ID、SHA256 和字节数的数据。</p>
         {!draft.case.datasetRefs.length ? <div className="dataset-empty"><Database size={22} /><div><strong>尚未登记数据资产</strong><span>{draft.mode === 'fixture' ? '流程演示可以继续；输出将明确标记为 plan-only。' : '真实研究会在开始前检查中被阻断。'}</span></div></div> : (
           <div className="repeat-list">{draft.case.datasetRefs.map((dataset, index) => <article className="dataset-row" key={`${dataset.datasetId}-${index}`}>
             <div className="field-grid field-grid--three"><label>Dataset ID<input value={dataset.datasetId} onChange={(event) => updateCase({ datasetRefs: draft.case.datasetRefs.map((item, itemIndex) => itemIndex === index ? { ...item, datasetId: event.target.value } : item) })} /></label><label>文件名<input value={dataset.filename} onChange={(event) => updateCase({ datasetRefs: draft.case.datasetRefs.map((item, itemIndex) => itemIndex === index ? { ...item, filename: event.target.value } : item) })} /></label><label>SHA256<input value={dataset.sha256} onChange={(event) => updateCase({ datasetRefs: draft.case.datasetRefs.map((item, itemIndex) => itemIndex === index ? { ...item, sha256: event.target.value } : item) })} placeholder="64 位十六进制哈希" /></label></div>

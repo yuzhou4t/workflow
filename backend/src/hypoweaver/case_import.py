@@ -8,6 +8,8 @@ import re
 import tempfile
 import threading
 from pathlib import Path
+from typing import AsyncIterable
+from uuid import uuid4
 
 from pydantic import Field
 
@@ -16,6 +18,8 @@ from .models import CaseSubmission, DatasetRef, Hypothesis, StrictModel, Variabl
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_REGISTRY_PATH = PROJECT_ROOT / "backend" / "var" / "datasets.json"
+DEFAULT_UPLOAD_ROOT = PROJECT_ROOT / "backend" / "var" / "uploads"
+MAX_UPLOAD_BYTES = 512 * 1024 * 1024
 HIDDEN_SUFFIXES = {".pdf", ".doc", ".docx", ".do", ".r", ".rmd", ".py", ".ipynb", ".log"}
 HIDDEN_PATH_MARKERS = {"hidden", "reference", "references", "gold", "原始论文"}
 
@@ -110,6 +114,43 @@ class DatasetRegistry:
         finally:
             if temporary_path and temporary_path.exists():
                 temporary_path.unlink()
+
+
+class CaseUploadStore:
+    """Persists one user-selected CSV without exposing a client filesystem path."""
+
+    def __init__(self, root: Path | None = None) -> None:
+        configured_root = os.getenv("HYPOWEAVER_UPLOAD_ROOT")
+        self.root = (
+            Path(configured_root).expanduser()
+            if root is None and configured_root
+            else (root or DEFAULT_UPLOAD_ROOT)
+        )
+
+    async def save(self, filename: str, chunks: AsyncIterable[bytes]) -> Path:
+        safe_name = Path(filename).name
+        if not safe_name or safe_name != filename or Path(safe_name).suffix.casefold() != ".csv":
+            raise CaseImportError("only a single CSV analysis file can be uploaded")
+
+        upload_dir = self.root / str(uuid4())
+        upload_dir.mkdir(parents=True, mode=0o700)
+        destination = upload_dir / safe_name
+        size = 0
+        try:
+            with destination.open("xb") as handle:
+                os.chmod(destination, 0o600)
+                async for chunk in chunks:
+                    size += len(chunk)
+                    if size > MAX_UPLOAD_BYTES:
+                        raise CaseImportError("CSV file exceeds the 512 MiB upload limit")
+                    handle.write(chunk)
+            if size == 0:
+                raise CaseImportError("uploaded CSV is empty")
+            return destination
+        except Exception:
+            destination.unlink(missing_ok=True)
+            upload_dir.rmdir()
+            raise
 
 
 class LocalCaseImporter:

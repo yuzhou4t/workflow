@@ -88,7 +88,7 @@ code, pre { font-family: "SFMono-Regular", Consolas, monospace; }
 .quick-import-card .mode-selector { margin-bottom: 0; }
 .quick-import-flow { display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-radius: 7px; background: #f4f7fa; color: #526177; font-size: 12px; }
 .quick-import-flow i { color: #9aa8b9; font-style: normal; }
-.local-path-field small { color: var(--muted); font-size: 11px; font-weight: 500; }
+.file-input-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .quick-import-actions { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .quick-import-actions > div { display: flex; align-items: flex-start; gap: 8px; color: #526177; font-size: 12px; line-height: 1.55; }
 .quick-import-actions > div svg { flex: 0 0 auto; color: var(--accent); }
@@ -110,6 +110,7 @@ code, pre { font-family: "SFMono-Regular", Consolas, monospace; }
 .section-heading p { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
 label { display: grid; gap: 7px; color: #35465e; font-size: 13px; font-weight: 650; }
 label em { color: var(--danger); font-size: 11px; font-style: normal; }
+.field-help { color: var(--muted); font-size: 11px; font-weight: 500; line-height: 1.55; }
 input, textarea, select { width: 100%; border: 1px solid #cfd8e3; border-radius: 7px; background: white; color: var(--ink); padding: 11px 12px; outline: none; font-size: 14px; line-height: 1.4; transition: border-color 120ms, box-shadow 120ms; }
 textarea { resize: vertical; }
 input:focus, textarea:focus, select:focus { border-color: #4ba993; box-shadow: 0 0 0 3px rgba(11, 122, 104, 0.1); }
