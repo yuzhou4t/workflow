@@ -106,9 +106,32 @@ export interface RunEvent {
 export interface ClaimRecord {
   id: string
   text: string
+  finalText?: string
   allowedStrength?: string
+  evidenceStatus?: string
+  robustnessStatus?: string
   supportingRuns: string[]
   decision?: ClaimDecision
+}
+
+export interface ManuscriptSectionView {
+  id: string
+  title: string
+  content: string
+  status: 'generated' | 'not_generated'
+  claimIds: string[]
+  runIds: string[]
+}
+
+export interface ManuscriptPackageView {
+  version: number
+  mode: 'research_plan_only' | 'full_manuscript'
+  status: 'draft' | 'needs_revision' | 'ready_for_human_review' | 'not_generated'
+  researchPlan: string
+  sections: ManuscriptSectionView[]
+  disclosures: string[]
+  unresolvedIssues: string[]
+  auditResult: 'not_run' | 'pass_with_no_critical_issues' | 'revise'
 }
 
 export interface RunSnapshot {
@@ -122,6 +145,7 @@ export interface RunSnapshot {
   status: RunStatus
   currentNodeId?: string
   currentGate?: 'H1' | 'H2' | 'H3'
+  lastError?: string
   executionStatus: string
   scientificStatus: string
   planOnly: boolean
@@ -130,6 +154,7 @@ export interface RunSnapshot {
   steps: StepAttempt[]
   events: RunEvent[]
   claims: ClaimRecord[]
+  manuscript?: ManuscriptPackageView
   allowedActions: string[]
 }
 
@@ -257,4 +282,29 @@ export interface ConnectionTestResult {
   success: boolean
   message: string
   statusCode?: number
+}
+
+export interface BaselinePhase {
+  id: string
+  title: string
+  status: 'pending' | 'running' | 'succeeded' | 'failed'
+}
+
+export interface BaselineRun {
+  id: string
+  systemId: 'agent_laboratory_social_science_adapted'
+  caseId: string
+  caseName: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  phases: BaselinePhase[]
+  executionStatus: string
+  scientificStatus: string
+  methodFamily?: string
+  llmCalls: number
+  inputTokens: number
+  outputTokens: number
+  wallTimeSeconds: number
+  error?: string
+  createdAt: string
+  updatedAt: string
 }

@@ -7,3 +7,4 @@ coverage/
 __pycache__/
 *.py[cod]
 backend/var/
+tmp/

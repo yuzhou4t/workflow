@@ -85,6 +85,13 @@ class RunRepository:
             ).fetchall()
         return [RunState.model_validate_json(row["payload"]) for row in rows]
 
+    def delete(self, run_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM transition_claims WHERE run_id = ?", (run_id,))
+            cursor = connection.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+        if cursor.rowcount != 1:
+            raise RunNotFoundError(run_id)
+
     def save(self, state: RunState, *, expected_version: int) -> RunState:
         next_version = expected_version + 1
         next_updated_at = utc_now()

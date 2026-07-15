@@ -93,6 +93,61 @@ class LocalCaseImporterTests(unittest.TestCase):
         self.assertNotIn("原始论文1", serialized)
         self.assertEqual(result.import_report.main_data_filename, "ESG-SDLA-数据.csv")
 
+    def test_processed_columns_form_one_executable_default_measurement_set(self) -> None:
+        self.csv_path.write_text(
+            "YEAR,证券代码,SDLA,ESG,SIZE,SDLA_w,ESG_w,SIZE_w\n"
+            "2019,000001.SZ,0.1,72,21.0,0.11,71,20.9\n"
+            "2020,000001.SZ,0.2,74,21.2,0.19,73,21.1\n",
+            encoding="utf-8",
+        )
+
+        result = self.importer.import_folder(self.root)
+        variables = {variable.name: variable for variable in result.case_submission.variables}
+
+        self.assertEqual(result.case_submission.title, "企业ESG表现与短债长用")
+        self.assertEqual(
+            result.case_submission.research_question,
+            "企业 ESG 表现是否与企业短债长用程度存在系统性关联？",
+        )
+        self.assertNotIn("SDLA", variables)
+        self.assertNotIn("ESG", variables)
+        self.assertNotIn("SIZE", variables)
+        self.assertEqual(variables["SDLA_w"].role, "outcome")
+        self.assertEqual(variables["ESG_w"].role, "exposure")
+        self.assertEqual(variables["SIZE_w"].role, "control")
+        self.assertIn("逐行校验", variables["SDLA_w"].definition or "")
+        self.assertIn("截尾", variables["SDLA_w"].definition or "")
+        self.assertTrue(all(variable.definition for variable in variables.values()))
+        self.assertTrue(all(variable.source for variable in variables.values()))
+
+    def test_import_recognizes_province_panel_sd_and_gf(self) -> None:
+        main_data = self.root / "main_data.csv"
+        self.csv_path.unlink()
+        main_data.write_text(
+            "id,year,province,SD,GF,EPD\n"
+            "1,2019,beijing,42.9,33.9,27.1\n"
+            "1,2020,beijing,43.3,60.1,18.7\n",
+            encoding="utf-8",
+        )
+        (self.root / "data_dictionary.csv").write_text(
+            "name,definition\n" + "noise,metadata\n" * 100,
+            encoding="utf-8",
+        )
+
+        result = self.importer.import_folder(self.root)
+        variables = {variable.name: variable.role for variable in result.case_submission.variables}
+
+        self.assertEqual(result.case_submission.title, "绿色金融与省级可持续发展")
+        self.assertEqual(
+            result.case_submission.research_question,
+            "绿色金融水平是否与省级可持续发展存在系统性关联？",
+        )
+        self.assertEqual(variables["id"], "id")
+        self.assertEqual(variables["year"], "time")
+        self.assertEqual(variables["SD"], "outcome")
+        self.assertEqual(variables["GF"], "exposure")
+        self.assertEqual(result.import_report.main_data_filename, "main_data.csv")
+
 
 class LocalCaseImportApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:

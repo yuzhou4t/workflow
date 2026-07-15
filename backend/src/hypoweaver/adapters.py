@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
 from pydantic import BaseModel, ValidationError
 
 from .models import (
@@ -429,13 +429,13 @@ class FixtureModelGateway:
 class QwenModelGateway:
     provider_name = "qwen"
 
-    def __init__(self) -> None:
+    def __init__(self, model_override: str | None = None) -> None:
         config = RuntimeConfigStore().resolve()
         if not config.qwen_api_key:
             raise RuntimeError(
                 "Qwen API Key is required; configure runtime settings or DASHSCOPE_API_KEY"
             )
-        self.model = config.qwen_model
+        self.model = model_override or config.qwen_model
         self.client = AsyncOpenAI(
             api_key=config.qwen_api_key,
             base_url=config.qwen_base_url,
@@ -462,12 +462,32 @@ class QwenModelGateway:
                         ),
                     }
                 )
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                response_format={"type": "json_object"},
-                temperature=0,
-            )
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    extra_body={"enable_thinking": False},
+                    temperature=0,
+                    max_tokens=(
+                        3072
+                        if prompt_key == "scientific_writer_section"
+                        else 12288 if prompt_key == "scientific_writer" else 8192
+                    ),
+                    timeout=(
+                        180
+                        if prompt_key == "scientific_writer_section"
+                        else 360 if prompt_key == "scientific_writer" else 120
+                    ),
+                )
+            except (APIConnectionError, APITimeoutError) as error:
+                raise RuntimeError(
+                    "千问调用期间连接中断或超时。请检查网络/代理后重新启动本次研究；案例数据无需重新整理。"
+                ) from error
+            except APIStatusError as error:
+                raise RuntimeError(
+                    f"千问调用返回 HTTP {error.status_code}。请在配置页重新测试当前模型与 API 地址。"
+                ) from error
             content = response.choices[0].message.content or "{}"
             try:
                 return output_model.model_validate_json(content)

@@ -23,7 +23,7 @@ from .models import (
 from .prompts import get_prompt
 
 
-DEFINITION_VERSION = "1.0.0"
+DEFINITION_VERSION = "1.1.0"
 
 
 def _schema(model: type[BaseModel] | None) -> dict[str, Any] | None:
@@ -129,14 +129,14 @@ def build_app_a_definition() -> dict[str, Any]:
             "id": "writing",
             "order": 7,
             "title": "受约束成果生成",
-            "description": "Writer 只能读取 H3 授权结论；无真实执行时仅生成研究计划。",
+            "description": "Writer 只能读取 H3 授权结论；真实写作失败时保持可重试状态，不用短模板伪装完成。",
             "node_ids": ["scientific_writer", "consistency_audit", "complete"],
         },
     ]
 
     nodes = [
         _node("case_input", "标准案例包", "start", "intake", "接收预设案例或用户提交的结构化研究包。隐藏参考材料会被 Schema 拒绝。", 80, 160, output_model=CaseSubmission),
-        _node("intake_agent", "Research Intake", "llm", "intake", "将输入规范化为统一 ResearchPackage。", 360, 160, input_model=CaseSubmission, output_model=ResearchPackage, prompt_key="intake"),
+        _node("intake_agent", "Research Intake", "code", "intake", "在 H1 前用确定性代码将输入规范化为统一 ResearchPackage，不调用外部模型。", 360, 160, input_model=CaseSubmission, output_model=ResearchPackage),
         _node("input_validation", "确定性输入校验", "code", "intake", "由 Pydantic 与代码规则检查假设、结果变量和泄漏字段，不由模型自行判定。", 640, 160, input_model=ResearchPackage),
         _node("h1_gate", "H1 · 研究边界确认", "gate", "intake", "服务端真正停止，等待批准、退回或拒绝。", 920, 160, input_model=ResearchPackage, output_model=GateDecisionRequest),
         _node("hypothesis_decomposition", "假设拆解", "llm", "understanding", "把理论命题转成可观察预测、竞争解释和证伪条件。", 1220, 80, input_model=ResearchPackage, output_model=TestableHypotheses, prompt_key="hypothesis_decomposition"),
@@ -187,8 +187,8 @@ def build_app_a_definition() -> dict[str, Any]:
             _node("scientific_audit", "Scientific Audit", "llm", "audit", "独立判断合同遵从与科学有效性，代码成功不能自动通过。", 4900, 140, input_model=EvidenceAssessment, output_model=ScientificAudit, prompt_key="scientific_audit"),
             _node("claim_ledger", "ClaimLedger", "llm", "audit", "将证据约束为可追溯、可降级、可拒绝的结论。", 5180, 140, input_model=ScientificAudit, output_model=ClaimLedger, prompt_key="claim_ledger"),
             _node("h3_gate", "H3 · 逐条结论授权", "gate", "audit", "人工逐条批准、降级、暂缓或拒绝 Claim；Fixture 只能拒绝或暂缓。", 5460, 140, input_model=ClaimLedger, output_model=GateDecisionRequest),
-            _node("scientific_writer", "Scientific Writer", "llm", "writing", "只读取冻结计划、真实运行和 H3 授权结论。", 5740, 140, input_model=ClaimLedger, output_model=ManuscriptPackage, prompt_key="scientific_writer"),
-            _node("consistency_audit", "写作一致性审计", "code", "writing", "确定性检查未授权 Claim、虚构统计量、Run 引用与成果模式。", 6020, 140, input_model=ManuscriptPackage, output_model=ManuscriptPackage),
+            _node("scientific_writer", "Scientific Writer", "llm", "writing", "将完整论文拆成 8 个通用分节写作任务；只读取冻结计划、真实运行和 H3 授权结论，失败后可在原 Run 重试。", 5740, 140, input_model=ClaimLedger, output_model=ManuscriptPackage, prompt_key="scientific_writer_section"),
+            _node("consistency_audit", "写作一致性审计", "code", "writing", "确定性检查完整章节、未授权 Claim、虚构统计量、Run 引用与成果模式。", 6020, 140, input_model=ManuscriptPackage, output_model=ManuscriptPackage),
             _node("complete", "封存成果包", "end", "writing", "计算封存哈希并结束主 Run；隐藏参考结果仍不可见。", 6300, 140, input_model=ManuscriptPackage),
         ]
     )

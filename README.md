@@ -35,7 +35,9 @@
 - App A 输入 Schema 拒绝原论文结果和隐藏参考字段；
 - 独立 App B 盲测服务：独立数据库、封存哈希校验、六维诊断和代码计算总分；
 - 面向研究者的 React 任务控制台：详细研究输入、开始前预检、纵向执行过程、嵌入式 H1/H2/H3 和成果状态；
-- CSV 一键导入：使用系统文件选择器上传主数据、登记数据并直接启动到 H1；
+- 案例文件夹一键导入：选择案例根目录后自动识别主 CSV、隔离论文与代码，再登记数据并直接启动到 H1；
+- 黑白极简 Research Bench：默认展示 HypoWeaver 纵向链路，可展开为与 Agent Laboratory 并排的双流程对照；
+- Agent Laboratory 独立基线启动器：复用同一 Dataset ID 与文件哈希，通过同级仓库的适配器异步运行并回传阶段状态；
 - 页面级运行配置入口，支持脱敏状态、私有保存与 Qwen/Research Engine 连接测试。
 
 ## 本地启动
@@ -68,11 +70,15 @@ http://127.0.0.1:5174/#settings  API Key、模型和执行器配置
 ## 一键导入案例包
 
 1. 在 `#settings` 配置并测试 Qwen；真实研究还要配置 Python Research Engine。
-2. 回到 `#new`，选择“流程演示”或“真实研究”，点击“选择 CSV 并启动”。
-3. 在系统文件选择器中选择主分析 CSV。后端会上传文件、计算 SHA256/行列数/年份范围、登记 Dataset ID，并直接创建 Run 到 H1。
+2. 回到 `#new`，点击“选择案例文件夹并启动”，在系统文件选择器中选择案例根目录，例如 `案例1`，而不是目录中的某个文件。
+3. 前端会在文件夹中自动选择主分析 CSV，并只上传这一份数据。后端会计算 SHA256/行列数/年份范围、登记 Dataset ID，并直接创建 Run 到 H1。
 4. 在 H1 确认系统根据表头推断的研究问题、变量角色和样本边界后，再继续方法设计。
 
-页面只允许选择 CSV，因此 PDF、Word、Stata/R/Python 脚本和隐藏参考材料不会上传。保留的本地目录导入 API 仍会强制隔离这些文件，并且只返回隐藏文件数量，不返回其文件名、路径或内容。私有数据注册表位于：
+案例规范化、H1 前校验和方法家族路由全部由确定性代码完成；因此短暂的模型网络异常不会阻止案例先进入 H1，路由也不会因模型给出自相矛盾的状态而失败。千问从 H1 批准后的假设拆解阶段开始调用，结构化 JSON 请求会显式关闭思考模式，连接中断或超时时会记录明确错误，不再返回无说明的 HTTP 500。方法方案生成后，测量、因果识别、统计推断和可复现性四类 Critic 会并行执行，再统一汇合到 H2 前审查。运行记录页支持删除单条历史 Run；删除不会移除已上传的案例数据文件。
+
+需要做流程对照时，点击首页“展开基线”。HypoWeaver 与 Agent Laboratory 各有独立启动按钮；二者复用同一份已登记 CSV 和千问配置，但分别运行、分别记录状态。Agent Laboratory 会执行模型生成的 Python 代码，因此启动前页面会要求一次明确确认。其输出只作为外部基线，默认 `scientific_status=not_assessed`，不会自动继承 HypoWeaver 的 Critic、H2 冻结或 ClaimLedger。
+
+文件夹选择器会读取目录清单以寻找主 CSV，但只向后端上传选中的主 CSV。PDF、Word、Stata/R/Python 脚本，以及位于 `原始论文` 或 `02_hidden_reference` 等目录中的隐藏参考材料都不会上传；页面只显示隔离数量，不显示其文件名、路径或内容。保留的本地目录导入 API 也执行同样的隔离规则。私有数据注册表位于：
 
 ```text
 backend/var/datasets.json
@@ -173,6 +179,8 @@ PUT  /api/v1/runtime-config
 POST /api/v1/runtime-config/tests
 POST /api/v1/case-imports/local
 POST /api/v1/case-imports/upload?filename=main_data.csv
+POST /api/v1/baselines/agent-laboratory/runs
+GET  /api/v1/baselines/agent-laboratory/runs/{run_id}
 POST /api/v1/runs
 GET  /api/v1/runs
 GET  /api/v1/runs/{run_id}
@@ -213,6 +221,7 @@ python3.11 -m uvicorn hypoweaver.blind_api:app --port 8002
 ```text
 backend/src/hypoweaver/
   api.py              FastAPI 接口
+  benchmark_runner.py Agent Laboratory 独立基线启动与状态适配
   research_api.py     独立 Python Research Engine 接口
   research_engine.py  受限面板计量执行器
   case_import.py      本地案例安全扫描与数据资产登记

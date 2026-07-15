@@ -45,10 +45,29 @@ class PanelResearchEngine:
         except (CaseImportError, ResearchEngineError, OSError, ValueError) as error:
             return self._failed_run(contract, str(error))
 
-        warnings = [
-            "当前执行器只运行冻结的基准双向固定效应模型。",
-            "稳健性、证伪、机制和异质性步骤尚未执行，因此科学状态标记为 limited。",
+        pending_categories = [
+            label
+            for label, steps in (
+                ("诊断", plan.diagnostics),
+                ("稳健性", plan.robustness_tests),
+                ("证伪", plan.falsification_tests),
+                ("机制", plan.mechanism_tests),
+                ("异质性", plan.heterogeneity_tests),
+            )
+            if steps
         ]
+        warnings = ["当前执行器只运行冻结的基准双向固定效应模型。"]
+        if pending_categories:
+            warnings.append(
+                "冻结计划中的"
+                + "、".join(pending_categories)
+                + "步骤尚未执行，且当前基准设计仅支持受限解释，"
+                "因此科学状态标记为 limited。"
+            )
+        else:
+            warnings.append(
+                "当前基准设计仅支持受限解释，因此科学状态标记为 limited。"
+            )
         return ResearchRun(
             research_run_id=f"research-{uuid4()}",
             case_id=contract.case_id,

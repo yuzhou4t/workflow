@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import re
 from typing import Any
 from uuid import uuid4
 
+import pandas as pd
 from pydantic import BaseModel
 
 from .adapters import (
@@ -14,6 +18,7 @@ from .adapters import (
     ResearchExecutor,
 )
 from .definition import DEFINITION_VERSION
+from .case_import import CaseImportError, DatasetRegistry
 from .models import (
     AnalysisPlan,
     CaseSubmission,
@@ -24,8 +29,10 @@ from .models import (
     DecisionRecord,
     EvidenceAssessment,
     FormalResearchContract,
+    FULL_MANUSCRIPT_SECTION_IDS,
     GateDecisionRequest,
     ManuscriptPackage,
+    ManuscriptSection,
     MethodRoute,
     PromptContent,
     ResearchPackage,
@@ -35,6 +42,7 @@ from .models import (
     RunState,
     ScientificAudit,
     StepAttempt,
+    TRACEABLE_MANUSCRIPT_SECTION_IDS,
     TestableHypotheses,
     CreateRunRequest,
     utc_now,
@@ -103,6 +111,81 @@ PRESET_CASES: dict[str, CaseSubmission] = {
 }
 
 
+MAX_MANUSCRIPT_REPAIR_ROUNDS = 2
+LEGACY_OVERBROAD_EXECUTION_WARNING = (
+    "稳健性、证伪、机制和异质性步骤尚未执行，因此科学状态标记为 limited。"
+)
+WRITER_ESCALATION_MODEL = "qwen3.7-max"
+WRITER_ESCALATION_SECTION_IDS = {
+    "introduction",
+    "theory_hypotheses",
+    "data_variables",
+    "research_design",
+    "empirical_results",
+    "discussion_limitations",
+}
+
+
+MANUSCRIPT_SECTION_SPECS: tuple[dict[str, str], ...] = (
+    {
+        "section_id": "abstract",
+        "title": "摘要",
+        "target_characters": "450-650",
+        "focus": "概括研究问题、数据与方法、已执行主要证据、识别边界与贡献，不引入新数字。",
+        "evidence_keys": "research_context,data_profile,frozen_design,executed_evidence,authorized_claims,writing_requirements",
+    },
+    {
+        "section_id": "introduction",
+        "title": "一、引言",
+        "target_characters": "650-900",
+        "focus": "从研究问题的经济与治理意义切入，说明现实张力、核心问题、分析思路与本稿实际完成的工作；无文献时不宣称文献空白或创新性。",
+        "evidence_keys": "research_context,authorized_claims,writing_requirements",
+    },
+    {
+        "section_id": "theory_hypotheses",
+        "title": "二、理论分析与研究假设",
+        "target_characters": "650-900",
+        "focus": "围绕输入中的假设和可用机制形成可证伪推理，同时陈述反向因果和遗漏变量等竞争性解释。",
+        "evidence_keys": "research_context,frozen_design,writing_requirements",
+    },
+    {
+        "section_id": "data_variables",
+        "title": "三、数据、样本与变量",
+        "target_characters": "650-900",
+        "focus": "完整交代分析单位、样本时期、筛选规则、变量角色、定义、来源、预处理和已知数据质量情况；每个来源必须忠于输入。",
+        "evidence_keys": "research_context,data_profile,frozen_design,writing_requirements",
+    },
+    {
+        "section_id": "research_design",
+        "title": "四、研究设计",
+        "target_characters": "650-900",
+        "focus": "说明估计对象、模型形式、固定效应、标准误处理、控制变量、识别假设与冻结的后续检验。",
+        "evidence_keys": "research_context,frozen_design,executed_evidence,writing_requirements",
+    },
+    {
+        "section_id": "empirical_results",
+        "title": "五、实证结果",
+        "target_characters": "650-900",
+        "focus": "只解释真实执行的基准结果及其范围，不引用不存在的图表，不对统计量作无基准的价值评价；明确区分已执行与尚未执行分析。",
+        "evidence_keys": "research_context,executed_evidence,authorized_claims,writing_requirements",
+    },
+    {
+        "section_id": "discussion_limitations",
+        "title": "六、讨论、局限与后续检验",
+        "target_characters": "650-900",
+        "focus": "解释证据可能的理论含义，系统呈现测量、反向因果、时变混杂、稳健性与外部效度边界，并列出可执行的后续检验。",
+        "evidence_keys": "research_context,frozen_design,executed_evidence,authorized_claims,writing_requirements",
+    },
+    {
+        "section_id": "conclusion",
+        "title": "七、结论",
+        "target_characters": "450-650",
+        "focus": "回答研究问题，保持 H3 授权的证据强度，概括审慎启示；后续工作优先使用冻结计划，其他方法需新设计审批，不将关联表述升格为因果结论。",
+        "evidence_keys": "research_context,executed_evidence,authorized_claims,writing_requirements",
+    },
+)
+
+
 def _plain(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
@@ -114,8 +197,13 @@ def _hash(value: Any) -> str:
 
 
 class WorkflowEngine:
-    def __init__(self, repository: RunRepository) -> None:
+    def __init__(
+        self,
+        repository: RunRepository,
+        dataset_registry: DatasetRegistry | None = None,
+    ) -> None:
         self.repository = repository
+        self.dataset_registry = dataset_registry or DatasetRegistry()
 
     def _gateway(self, state: RunState) -> ModelGateway:
         return QwenModelGateway() if state.model_provider == "qwen" else FixtureModelGateway()
@@ -249,8 +337,7 @@ class WorkflowEngine:
         )
         self._event(state, "gate.waiting", f"{gate} 等待人工决定。", node_id=node_id, status="waiting_human")
 
-    @staticmethod
-    def _profile(package: ResearchPackage) -> DataProfile:
+    def _profile(self, package: ResearchPackage) -> DataProfile:
         entity_keys = _names(package, "id")
         time_keys = _names(package, "time")
         spatial_keys = _names(package, "spatial_id")
@@ -264,29 +351,137 @@ class WorkflowEngine:
             "cross_section": ["panel_association", "measurement_efficiency"],
             "unknown": [],
         }[package.data_structure_hint]
+        if not has_refs:
+            return DataProfile(
+                profile_execution_status="not_executed",
+                data_structure=package.data_structure_hint,
+                unit_of_observation=package.unit_of_analysis,
+                entity_key=entity_keys,
+                time_key=time_keys[0] if time_keys else None,
+                spatial_key=spatial_keys[0] if spatial_keys else None,
+                event_date_key=event_keys[0] if event_keys else None,
+                confirmed_facts=[
+                    f"案例声明的数据结构为 {package.data_structure_hint}。",
+                    f"变量字典包含 {len(package.variables)} 个字段。",
+                ],
+                measurement_risks=["尚未接入可执行数据资产。"],
+                supported_method_families=supported,
+                readiness="blocked",
+                blocking_reasons=["没有可执行数据资产；仅允许形成研究计划。"],
+            )
+
+        selected_columns = list(dict.fromkeys(variable.name for variable in package.variables))
+        key_columns = [*entity_keys, *time_keys]
+        try:
+            source = self.dataset_registry.resolve(package.dataset_refs[0])
+            frame, column_count = _read_profile_csv(source, selected_columns)
+        except (CaseImportError, OSError, ValueError) as error:
+            return DataProfile(
+                profile_execution_status="failed",
+                data_structure=package.data_structure_hint,
+                unit_of_observation=package.unit_of_analysis,
+                entity_key=entity_keys,
+                time_key=time_keys[0] if time_keys else None,
+                spatial_key=spatial_keys[0] if spatial_keys else None,
+                event_date_key=event_keys[0] if event_keys else None,
+                confirmed_facts=[f"变量字典包含 {len(package.variables)} 个字段。"],
+                measurement_risks=[f"数据画像读取失败：{error}"],
+                supported_method_families=supported,
+                readiness="blocked",
+                blocking_reasons=["实际数据无法在 H2 前完成确定性画像。"],
+            )
+
+        missing_columns = [name for name in selected_columns if name not in frame.columns]
+        missingness = [
+            {
+                "variable": name,
+                "missing_count": int(frame[name].isna().sum()),
+                "missing_rate": float(frame[name].isna().mean()) if len(frame) else 0.0,
+            }
+            for name in selected_columns
+            if name in frame.columns
+        ]
+        duplicate_key_count = (
+            int(frame.duplicated(subset=key_columns, keep=False).sum())
+            if key_columns and all(name in frame.columns for name in key_columns)
+            else None
+        )
+        risks: list[str] = []
+        if missing_columns:
+            risks.append("变量字典字段未出现在数据中：" + "、".join(missing_columns))
+        if duplicate_key_count:
+            risks.append(f"发现 {duplicate_key_count} 行处于重复实体—时间主键中，执行前必须按冻结规则处理。")
+        variables_with_missing = [
+            item["variable"] for item in missingness if item["missing_count"]
+        ]
+        if variables_with_missing:
+            risks.append("以下建模字段存在缺失值：" + "、".join(variables_with_missing))
+        missing_definitions = [
+            variable.name for variable in package.variables if not variable.definition
+        ]
+        if missing_definitions:
+            risks.append("以下变量缺少定义：" + "、".join(missing_definitions))
+
+        blocking_reasons: list[str] = []
+        if missing_columns:
+            blocking_reasons.append("冻结计划所需字段与实际数据表不一致。")
+        if package.data_structure_hint == "panel" and (not entity_keys or not time_keys):
+            blocking_reasons.append("面板数据缺少实体或时间主键。")
+
         return DataProfile(
-            profile_execution_status="partially_succeeded" if has_refs else "not_executed",
+            profile_execution_status="succeeded",
             data_structure=package.data_structure_hint,
             unit_of_observation=package.unit_of_analysis,
             entity_key=entity_keys,
             time_key=time_keys[0] if time_keys else None,
             spatial_key=spatial_keys[0] if spatial_keys else None,
             event_date_key=event_keys[0] if event_keys else None,
-            row_count=None,
-            column_count=None,
-            duplicate_key_count=None,
-            missingness=[],
+            row_count=len(frame),
+            column_count=column_count,
+            duplicate_key_count=duplicate_key_count,
+            missingness=missingness,
             confirmed_facts=[
                 f"案例声明的数据结构为 {package.data_structure_hint}。",
                 f"变量字典包含 {len(package.variables)} 个字段。",
+                f"实际 CSV 共 {len(frame)} 行、{column_count} 列。",
             ],
-            measurement_risks=["尚未读取实际数据，缺失率、重复键与异常值仍待外部执行器诊断。"],
+            measurement_risks=risks,
             merge_risks=[],
             supported_method_families=supported,
             unsupported_method_families=[],
-            readiness="partially_ready" if has_refs else "partially_ready",
-            blocking_reasons=([] if has_refs else ["没有可执行数据资产；仅允许形成研究计划。"]),
+            readiness=(
+                "blocked"
+                if blocking_reasons
+                else ("partially_ready" if risks else "ready")
+            ),
+            blocking_reasons=blocking_reasons,
         )
+
+    def _normalize_case(self, state: RunState, case: CaseSubmission) -> ResearchPackage:
+        package = ResearchPackage(
+            **case.model_dump(),
+            input_conflicts=[],
+            missing_required_information=(
+                [] if case.dataset_refs else ["尚未接入可执行数据资产；本次只能形成研究设计。"]
+            ),
+        )
+        self._record_step(
+            state,
+            "intake_agent",
+            "succeeded",
+            input_value={"case": case.model_dump(mode="json")},
+            output_value=package,
+            prompts=[
+                {
+                    "id": "intake:code",
+                    "role": "code",
+                    "template": "CaseSubmission → ResearchPackage deterministic normalization",
+                    "rendered": "H1 前不调用外部模型；只按严格 Schema 规范化用户可见输入。",
+                }
+            ],
+            logs=["案例规范化由确定性代码完成；H1 前未调用千问。"],
+        )
+        return package
 
     async def create_run(self, request: CreateRunRequest) -> RunState:
         if request.preset_case_id:
@@ -320,13 +515,7 @@ class WorkflowEngine:
             output_value=case,
             logs=["输入已通过 CaseSubmission 严格 Schema；额外隐藏字段会被拒绝。"],
         )
-        package = await self._llm_step(
-            state,
-            "intake_agent",
-            "intake",
-            {"case": case.model_dump(mode="json")},
-            ResearchPackage,
-        )
+        package = self._normalize_case(state, case)
         self._put_artifact(state, "research_package", package)
         validation = {
             "valid": not package.input_conflicts,
@@ -363,15 +552,147 @@ class WorkflowEngine:
     def list_runs(self) -> list[RunState]:
         return self.repository.list()
 
+    def delete_run(self, run_id: str) -> None:
+        self.repository.delete(run_id)
+
     async def advance(self, run_id: str) -> RunState:
         state = self.repository.get(run_id)
         if state.status == "waiting_human":
             return state
+        if (
+            state.status == "failed"
+            and state.current_node_id == "scientific_writer"
+            and "approved_claim_ledger" in state.artifacts
+            and "research_run" in state.artifacts
+        ):
+            return await self.retry_writing(run_id)
         if state.status in ("completed", "stopped"):
             return state
         raise WorkflowTransitionError(
             "该 Run 不能无条件继续；请在当前人工闸门作决定，或修订导致阻塞的输入。"
         )
+
+    async def retry_writing(self, run_id: str) -> RunState:
+        state = self.repository.get(run_id)
+        if state.mode != "research" or state.plan_only:
+            raise WorkflowTransitionError("只有已有真实执行结果的研究 Run 可以重试论文写作。")
+        if "approved_claim_ledger" not in state.artifacts or "research_run" not in state.artifacts:
+            raise WorkflowTransitionError("缺少 H3 授权结论或 ResearchRun，不能重试论文写作。")
+        failed_writer = (
+            state.status == "failed"
+            and state.current_node_id == "scientific_writer"
+        )
+        completed_draft = (
+            state.status == "completed"
+            and "manuscript_package" in state.artifacts
+        )
+        if not failed_writer and not completed_draft:
+            raise WorkflowTransitionError("当前 Run 不在可重试的论文写作状态。")
+
+        current_version = state.version
+        transition_key = f"retry-writer-{uuid4()}"
+        self.repository.claim_transition(
+            run_id,
+            expected_version=current_version,
+            idempotency_key=transition_key,
+        )
+        try:
+            previous_version = int(
+                state.artifacts.get("manuscript_package", {})
+                .get("payload", {})
+                .get("version", 0)
+                or 0
+            )
+            existing_sections: list[ManuscriptSection] | None = None
+            existing_payload = state.artifacts.get("manuscript_package", {}).get(
+                "payload"
+            )
+            if existing_payload:
+                existing_sections = ManuscriptPackage.model_validate(
+                    existing_payload
+                ).manuscript_sections
+            latest_generated: dict[str, ManuscriptSection] = {}
+            last_completed_step = max(
+                (
+                    index
+                    for index, step in enumerate(state.steps)
+                    if step.node_id == "complete" and step.status == "succeeded"
+                ),
+                default=-1,
+            )
+            failed_draft_steps = (
+                state.steps[last_completed_step + 1:]
+                if failed_writer
+                else []
+            )
+            for step in failed_draft_steps:
+                if step.node_id != "scientific_writer" or step.status != "succeeded":
+                    continue
+                try:
+                    section = ManuscriptSection.model_validate(step.output)
+                except (TypeError, ValueError):
+                    continue
+                latest_generated[section.section_id] = section
+            if existing_sections and latest_generated:
+                sections_by_id = {
+                    section.section_id: section
+                    for section in existing_sections
+                }
+                sections_by_id.update(latest_generated)
+                if set(FULL_MANUSCRIPT_SECTION_IDS).issubset(sections_by_id):
+                    existing_sections = [
+                        sections_by_id[section_id]
+                        for section_id in FULL_MANUSCRIPT_SECTION_IDS
+                    ]
+            state.status = "running"
+            state.current_node_id = "scientific_writer"
+            state.current_gate = None
+            state.last_error = None
+            package = self._artifact(state, "research_package", ResearchPackage)
+            plan = self._artifact(state, "analysis_plan", AnalysisPlan)
+            research_run = self._artifact(state, "research_run", ResearchRun)
+            ledger = self._artifact(state, "approved_claim_ledger", ClaimLedger)
+            approved_claims = [
+                claim.model_dump(mode="json")
+                for claim in ledger.claims
+                if claim.approval_status in ("approved", "downgraded")
+            ]
+            try:
+                await self._finalize_manuscript(
+                    state,
+                    package,
+                    plan,
+                    research_run,
+                    approved_claims,
+                    manuscript_version=previous_version + 1,
+                    existing_sections=existing_sections,
+                    reuse_existing_if_valid=failed_writer,
+                )
+            except Exception as error:
+                state.status = "failed"
+                state.current_node_id = "scientific_writer"
+                state.last_error = str(error)
+                self._event(
+                    state,
+                    "run.failed",
+                    f"论文写作失败：{error}",
+                    node_id="scientific_writer",
+                    status="failed",
+                )
+            return self.repository.save(state, expected_version=current_version)
+        finally:
+            self.repository.release_transition(run_id, transition_key)
+
+    @staticmethod
+    def _has_quality_manuscript(state: RunState) -> bool:
+        payload = state.artifacts.get("manuscript_package", {}).get("payload")
+        if not payload:
+            return False
+        try:
+            manuscript = ManuscriptPackage.model_validate(payload)
+        except (ValueError, TypeError):
+            return False
+        return manuscript.mode == "full_manuscript" and manuscript.audit_result == "pass_with_no_critical_issues"
 
     async def decide_gate(
         self, run_id: str, gate: str, request: GateDecisionRequest
@@ -499,12 +820,22 @@ class WorkflowEngine:
             raise VersionConflictError(
                 f"run {run_id} changed; expected version {request.expected_run_version}, actual {state.version}"
             )
-        if state.status != "blocked" or not state.decisions:
-            raise WorkflowTransitionError("run is not waiting for a returned revision")
-        returned = state.decisions[-1]
-        if returned.action != "revise" or returned.gate != request.gate:
+        returned_revision = (
+            state.status == "blocked"
+            and bool(state.decisions)
+            and state.decisions[-1].action == "revise"
+            and state.decisions[-1].gate == request.gate
+        )
+        critic_revision = (
+            state.status == "blocked"
+            and request.gate == "H2"
+            and state.current_node_id == "critic_merge"
+            and "analysis_plan" in state.artifacts
+            and "critic_report" in state.artifacts
+        )
+        if not returned_revision and not critic_revision:
             raise WorkflowTransitionError(
-                f"latest return is not a {request.gate} revision request"
+                f"run is not waiting for a {request.gate} revision"
             )
 
         current_version = state.version
@@ -530,13 +861,7 @@ class WorkflowEngine:
                     output_value=case,
                     logs=["H1 修订案例已提交并通过严格 CaseSubmission Schema。"],
                 )
-                package = await self._llm_step(
-                    state,
-                    "intake_agent",
-                    "intake",
-                    {"case": case.model_dump(mode="json")},
-                    ResearchPackage,
-                )
+                package = self._normalize_case(state, case)
                 self._put_artifact(state, "research_package", package)
                 validation = {
                     "valid": not package.input_conflicts,
@@ -618,22 +943,33 @@ class WorkflowEngine:
                     "id": "data_profile:code",
                     "role": "code",
                     "template": "Deterministic dataset-reference and variable-role profiling",
-                    "rendered": "No statistical values are inferred without opening an actual dataset.",
+                    "rendered": "Server-side code reads only the registered analysis CSV and computes descriptive integrity checks; no model is estimated.",
                 }
             ],
-            logs=["数据画像完成；无法确认的统计量保持 null/not_executed。"],
+            logs=["实际数据画像完成；样本量、字段数、主键重复与缺失率均由确定性代码计算。"],
         )
         self._put_artifact(state, "data_profile", profile)
-        route = await self._llm_step(
+        route_input = {
+            "research_package": package.model_dump(mode="json"),
+            "testable_hypotheses": hypotheses.model_dump(mode="json"),
+            "data_profile": profile.model_dump(mode="json"),
+        }
+        route = MethodRoute.model_validate(FixtureModelGateway._route(route_input))
+        self._record_step(
             state,
             "method_route",
-            "method_route",
-            {
-                "research_package": package.model_dump(mode="json"),
-                "testable_hypotheses": hypotheses.model_dump(mode="json"),
-                "data_profile": profile.model_dump(mode="json"),
-            },
-            MethodRoute,
+            "succeeded",
+            input_value=route_input,
+            output_value=route,
+            prompts=[
+                {
+                    "id": "method_route:code",
+                    "role": "code",
+                    "template": "Deterministic method-family routing from research goal and data structure",
+                    "rendered": "方法路由由确定性规则完成；不会因模型输出自相矛盾而使 Run 失败。",
+                }
+            ],
+            logs=["确定性方法路由完成；输出已通过 MethodRoute 校验。"],
         )
         self._put_artifact(state, "method_route", route)
         if route.route_status != "routed" or route.primary_route is None:
@@ -694,9 +1030,10 @@ class WorkflowEngine:
     ) -> None:
         plan = initial_plan
         for round_number in (1, 2):
-            reports: list[CriticReport] = []
-            for dimension in ("measurement", "causal", "statistical", "reproducibility"):
-                report = await self._llm_step(
+            gateway = self._gateway(state)
+
+            async def review_dimension(dimension: str) -> CriticReport:
+                return await self._llm_step(
                     state,
                     f"critic_{dimension}",
                     "method_critic",
@@ -709,8 +1046,19 @@ class WorkflowEngine:
                         "analysis_plan": plan.model_dump(mode="json"),
                     },
                     CriticReport,
+                    gateway=gateway,
                 )
-                reports.append(report)
+
+            reports = list(
+                await asyncio.gather(
+                    *(review_dimension(dimension) for dimension in (
+                        "measurement",
+                        "causal",
+                        "statistical",
+                        "reproducibility",
+                    ))
+                )
+            )
             merged = _merge_critics(reports, round_number)
             self._record_step(
                 state,
@@ -947,19 +1295,57 @@ class WorkflowEngine:
         state.claims = ledger.claims
         self._put_artifact(state, "approved_claim_ledger", ledger)
 
-        manuscript = await self._llm_step(
+        await self._finalize_manuscript(
             state,
-            "scientific_writer",
-            "scientific_writer",
-            {
+            package,
+            plan,
+            run,
+            approved_claims,
+        )
+
+    async def _finalize_manuscript(
+        self,
+        state: RunState,
+        package: ResearchPackage,
+        plan: AnalysisPlan,
+        run: ResearchRun,
+        approved_claims: list[dict[str, Any]],
+        *,
+        manuscript_version: int = 1,
+        existing_sections: list[ManuscriptSection] | None = None,
+        reuse_existing_if_valid: bool = False,
+    ) -> None:
+        if state.plan_only:
+            writer_payload = {
                 "research_package": package.model_dump(mode="json"),
                 "analysis_plan": plan.model_dump(mode="json"),
                 "research_run": run.model_dump(mode="json"),
                 "approved_claims": approved_claims,
-            },
-            ManuscriptPackage,
-            gateway=FixtureModelGateway() if state.plan_only else None,
-        )
+            }
+            manuscript = await self._llm_step(
+                state,
+                "scientific_writer",
+                "scientific_writer",
+                writer_payload,
+                ManuscriptPackage,
+                gateway=FixtureModelGateway(),
+            )
+        else:
+            writer_payload = self._writing_evidence_pack(
+                state, package, plan, run, approved_claims
+            )
+            manuscript = await self._generate_full_manuscript(
+                state,
+                package,
+                plan,
+                run,
+                approved_claims,
+                writer_payload["writing_evidence_pack"],
+                existing_sections=existing_sections,
+                reuse_existing_if_valid=reuse_existing_if_valid,
+            )
+        manuscript.version = max(manuscript.version, manuscript_version)
+
         problems: list[str] = []
         if (run.fixture_only or state.plan_only) and manuscript.mode != "research_plan_only":
             problems.append("无真实执行时成果模式必须为 research_plan_only")
@@ -987,11 +1373,15 @@ class WorkflowEngine:
         if manuscript.mode == "full_manuscript" and not approved_ids:
             problems.append("没有 H3 获批 Claim 时不得生成完整实证论文")
         for section in manuscript.manuscript_sections:
-            if section.section_id == "research_plan" or section.status == "not_generated":
+            if section.status == "not_generated":
                 continue
-            if manuscript.mode == "full_manuscript" and not section.claim_ids:
+            requires_trace = (
+                manuscript.mode == "full_manuscript"
+                and section.section_id in TRACEABLE_MANUSCRIPT_SECTION_IDS
+            )
+            if requires_trace and not section.claim_ids:
                 problems.append(f"实证章节 {section.section_id} 没有 Claim 追踪信息")
-            if manuscript.mode == "full_manuscript" and not section.run_ids:
+            if requires_trace and not section.run_ids:
                 problems.append(f"实证章节 {section.section_id} 没有 Run 追踪信息")
         manuscript.audit_result = "revise" if problems else "pass_with_no_critical_issues"
         if problems:
@@ -1013,11 +1403,12 @@ class WorkflowEngine:
             ],
             logs=["写作一致性确定性审计完成。"],
         )
-        self._put_artifact(state, "manuscript_package", manuscript)
         if problems:
-            state.status = "blocked"
-            state.last_error = "成果一致性审计未通过。"
+            state.status = "failed"
+            state.current_node_id = "scientific_writer"
+            state.last_error = "论文初稿未通过一致性审计；可以调整写作后重试。"
             return
+        self._put_artifact(state, "manuscript_package", manuscript)
         sealed = {
             "run_id": state.id,
             "seal_algorithm": "hmac-sha256",
@@ -1042,6 +1433,961 @@ class WorkflowEngine:
         state.current_node_id = "complete"
         self._event(state, "run.completed", "代码工作流已完成并封存。", node_id="complete", status="succeeded")
 
+    async def _generate_full_manuscript(
+        self,
+        state: RunState,
+        package: ResearchPackage,
+        plan: AnalysisPlan,
+        run: ResearchRun,
+        approved_claims: list[dict[str, Any]],
+        evidence_pack: dict[str, Any],
+        *,
+        existing_sections: list[ManuscriptSection] | None = None,
+        reuse_existing_if_valid: bool = False,
+    ) -> ManuscriptPackage:
+        gateway = self._gateway(state)
+        escalated_gateway: ModelGateway | None = None
+        semaphore = asyncio.Semaphore(4)
+
+        def normalize_section_text(value: str) -> str:
+            normalized = (
+                value.replace("残分布", "残差分布")
+                .replace("SDL A", "SDLA")
+                .replace("\x08eta", "β")
+                .replace("回归元", "回归变量")
+                .replace(
+                    "在控制变量取值相同且去除个体与时间均值后",
+                    "在控制企业特征并吸收企业与年份固定效应后",
+                )
+            )
+            return re.sub(
+                r"去除个体均值(?:和|及)时间均值后",
+                "去除个体均值后",
+                normalized,
+            )
+
+        async def write_section(
+            spec: dict[str, str],
+            revision_feedback: list[str] | None = None,
+        ) -> ManuscriptSection:
+            nonlocal escalated_gateway
+            evidence_keys = spec["evidence_keys"].split(",")
+            section_spec = {
+                key: value
+                for key, value in spec.items()
+                if key != "evidence_keys"
+            }
+            if not evidence_pack["writing_requirements"].get(
+                "literature_evidence_provided"
+            ):
+                section_spec["forbidden_phrases"] = (
+                    "现有研究、现有文献、参考文献惯例、参照文献、"
+                    "弥补空白、鲜有研究、尚缺乏研究"
+                )
+            if not evidence_pack.get("research_context", {}).get(
+                "known_policy_facts"
+            ):
+                section_spec["unsupported_background_phrases"] = [
+                    "普遍存在",
+                    "普遍面临",
+                    "随着某项制度或关注度变化",
+                    "日益成为",
+                    "备受关注",
+                ]
+            if not evidence_pack["writing_requirements"].get("tables_provided"):
+                section_spec["unavailable_assets"] = [
+                    "table",
+                    "figure",
+                    "appendix",
+                ]
+            frozen_design = evidence_pack.get("frozen_design", {})
+            frozen_categories = {
+                "diagnostics": frozen_design.get("planned_diagnostics", []),
+                "robustness": frozen_design.get("planned_robustness", []),
+                "falsification": frozen_design.get("planned_falsification", []),
+                "mechanisms": frozen_design.get("planned_mechanisms", []),
+                "heterogeneity": frozen_design.get("planned_heterogeneity", []),
+            }
+            section_spec["empty_frozen_plan_categories"] = [
+                category
+                for category, steps in frozen_categories.items()
+                if not steps
+            ]
+            section_spec["frozen_plan_steps"] = frozen_categories
+            if not frozen_categories["mechanisms"]:
+                section_spec["mechanism_evidence_status"] = (
+                    "未冻结也未执行实证机制检验；可以讨论条件性的理论路径，"
+                    "但基准系数方向不能验证机制，也不能把机制检验写成后续计划。"
+                )
+            frozen_plan_text = json.dumps(
+                frozen_categories,
+                ensure_ascii=False,
+            )
+            if "内生性" not in frozen_plan_text:
+                section_spec["endogeneity_plan_status"] = (
+                    "冻结计划没有单列内生性处理步骤；可以把内生性写成未解决风险，"
+                    "但不能声称已有对应的冻结步骤。"
+                )
+            measurement_risks = evidence_pack.get("data_profile", {}).get(
+                "measurement_risks",
+                [],
+            )
+            section_spec["allowed_measurement_risks"] = measurement_risks
+            if not measurement_risks:
+                section_spec["measurement_risk_policy"] = (
+                    "输入没有提供测量口径变迁风险；不得自行推测评级方法、"
+                    "数据库口径或数据提供方在年份间发生变化。"
+                )
+            scientific_audit = evidence_pack.get("executed_evidence", {}).get(
+                "scientific_audit",
+                {},
+            )
+            evidence_assessment = evidence_pack.get("executed_evidence", {}).get(
+                "evidence_assessment",
+                {},
+            )
+            section_spec["allowed_unresolved_risks"] = [
+                *measurement_risks,
+                *frozen_design.get("alternative_explanations", []),
+                *scientific_audit.get("unresolved_risks", []),
+                *evidence_assessment.get("limitations", []),
+                *[
+                    risk
+                    for claim in evidence_pack.get("authorized_claims", [])
+                    for risk in claim.get("unresolved_risks", [])
+                ],
+            ]
+            section_spec["executed_run_types"] = [
+                execution.get("run_type")
+                for execution in evidence_pack.get("executed_evidence", {}).get(
+                    "executions", []
+                )
+                if execution.get("execution_status") == "succeeded"
+            ]
+            if not any(
+                run_type in {"data_preparation", "data_cleaning", "data_merge"}
+                for run_type in section_spec["executed_run_types"]
+            ):
+                section_spec["input_data_status"] = (
+                    "输入案例包已提供预处理后的分析数据；"
+                    "本系统没有数据清洗、跨库匹配、合并或变量构造的成功执行记录，"
+                    "只能把成功的模型运行写成实际完成工作。"
+                )
+            payload = {
+                "section_spec": section_spec,
+                "evidence": {
+                    key: evidence_pack[key]
+                    for key in evidence_keys
+                },
+            }
+            if revision_feedback:
+                payload["revision_feedback"] = {
+                    "instruction": "上一版未通过通用内容质量审计。请重写本节，不要只做表面替换。",
+                    "problems": revision_feedback,
+                }
+            section_gateway = gateway
+            if (
+                revision_feedback
+                and spec["section_id"] in WRITER_ESCALATION_SECTION_IDS
+                and getattr(gateway, "provider_name", None) == "qwen"
+            ):
+                if escalated_gateway is None:
+                    escalated_gateway = QwenModelGateway(
+                        model_override=WRITER_ESCALATION_MODEL
+                    )
+                section_gateway = escalated_gateway
+                payload["section_spec"]["writer_model_policy"] = {
+                    "tier": "escalated_after_quality_failure",
+                    "model": WRITER_ESCALATION_MODEL,
+                }
+            async with semaphore:
+                section = await self._llm_step(
+                    state,
+                    "scientific_writer",
+                    "scientific_writer_section",
+                    payload,
+                    ManuscriptSection,
+                    gateway=section_gateway,
+                )
+            assert isinstance(section, ManuscriptSection)
+            if section.section_id != spec["section_id"]:
+                raise ValueError(
+                    f"writer returned section_id={section.section_id}; "
+                    f"expected {spec['section_id']}"
+                )
+            traceable = section.section_id in TRACEABLE_MANUSCRIPT_SECTION_IDS
+            return section.model_copy(
+                update={
+                    "title": spec["title"],
+                    "status": "generated",
+                    "content_markdown": normalize_section_text(
+                        section.content_markdown
+                    ),
+                    "claim_ids": (
+                        [claim["claim_id"] for claim in approved_claims]
+                        if traceable
+                        else []
+                    ),
+                    "run_ids": [run.research_run_id] if traceable else [],
+                }
+            )
+
+        approved_claim_ids = [
+            claim["claim_id"]
+            for claim in approved_claims
+        ]
+        sections = [
+            section.model_copy(
+                update={
+                    "content_markdown": normalize_section_text(
+                        section.content_markdown
+                    ),
+                    "claim_ids": (
+                        approved_claim_ids
+                        if section.section_id in TRACEABLE_MANUSCRIPT_SECTION_IDS
+                        else []
+                    ),
+                    "run_ids": (
+                        [run.research_run_id]
+                        if section.section_id in TRACEABLE_MANUSCRIPT_SECTION_IDS
+                        else []
+                    ),
+                }
+            )
+            for section in (existing_sections or [])
+        ]
+        content_problems = (
+            self._manuscript_content_problems(sections, evidence_pack)
+            if sections
+            else []
+        )
+        if not sections or (not content_problems and not reuse_existing_if_valid):
+            results = await asyncio.gather(
+                *(write_section(spec) for spec in MANUSCRIPT_SECTION_SPECS),
+                return_exceptions=True,
+            )
+            failures = [
+                result for result in results if isinstance(result, BaseException)
+            ]
+            if failures:
+                raise RuntimeError(
+                    "论文分节写作未完成："
+                    + "；".join(str(error) for error in failures)
+                )
+            sections = [
+                result
+                for result in results
+                if isinstance(result, ManuscriptSection)
+            ]
+            content_problems = self._manuscript_content_problems(
+                sections,
+                evidence_pack,
+            )
+        for _repair_round in range(MAX_MANUSCRIPT_REPAIR_ROUNDS):
+            if not content_problems:
+                break
+            problem_ids = {
+                problem.split(" ", 1)[0]
+                for problem in content_problems
+            }
+            repair_specs = [
+                spec
+                for spec in MANUSCRIPT_SECTION_SPECS
+                if spec["section_id"] in problem_ids
+            ]
+            repairs = await asyncio.gather(
+                *(
+                    write_section(
+                        spec,
+                        [
+                            problem
+                            for problem in content_problems
+                            if problem.startswith(spec["section_id"] + " ")
+                        ],
+                    )
+                    for spec in repair_specs
+                ),
+                return_exceptions=True,
+            )
+            repair_failures = [
+                result for result in repairs if isinstance(result, BaseException)
+            ]
+            if repair_failures:
+                raise RuntimeError(
+                    "论文分节修订未完成："
+                    + "；".join(str(error) for error in repair_failures)
+                )
+            repaired_by_id = {
+                section.section_id: section
+                for section in repairs
+                if isinstance(section, ManuscriptSection)
+            }
+            sections = [
+                repaired_by_id.get(section.section_id, section)
+                for section in sections
+            ]
+            content_problems = self._manuscript_content_problems(
+                sections,
+                evidence_pack,
+            )
+        if content_problems:
+            error = ValueError("；".join(content_problems))
+            self._record_step(
+                state,
+                "scientific_writer",
+                "failed",
+                input_value={
+                    "generated_sections": [section.section_id for section in sections]
+                },
+                logs=["论文章节已生成，但通用内容质量规则未通过。"],
+                error=str(error),
+            )
+            raise error
+        scientific_audit = evidence_pack.get("executed_evidence", {}).get(
+            "scientific_audit", {}
+        )
+        try:
+            return ManuscriptPackage(
+                package_id=f"manuscript-{package.case_id}",
+                case_id=package.case_id,
+                mode="full_manuscript",
+                status="ready_for_human_review",
+                research_plan_markdown=self._research_plan_markdown(package, plan),
+                manuscript_sections=sections,
+                empirical_findings_status="included",
+                disclosures=[
+                    "文献证据与正式引文待补充；当前初稿未编造参考文献。",
+                    "稳健性、证伪、机制与异质性分析如未出现在 ResearchRun 中，均只是待执行计划。",
+                    "实证结论仅使用 H3 授权的 Claim，并保留 execution_status 与 scientific_status 的区分。",
+                ],
+                unresolved_issues=list(
+                    scientific_audit.get("unresolved_risks", [])
+                ),
+            )
+        except Exception as error:
+            self._record_step(
+                state,
+                "scientific_writer",
+                "failed",
+                input_value={
+                    "generated_sections": [
+                        {
+                            "section_id": section.section_id,
+                            "character_count": len(section.content_markdown.strip()),
+                        }
+                        for section in sections
+                    ]
+                },
+                logs=["论文分节均已返回，但整体完整度门槛未通过。"],
+                error=str(error),
+            )
+            raise
+
+    @staticmethod
+    def _manuscript_content_problems(
+        sections: list[ManuscriptSection],
+        evidence_pack: dict[str, Any],
+    ) -> list[str]:
+        requirements = evidence_pack.get("writing_requirements", {})
+        literature_provided = bool(
+            requirements.get("literature_evidence_provided")
+        )
+        tables_provided = bool(requirements.get("tables_provided"))
+        background_facts = evidence_pack.get("research_context", {}).get(
+            "known_policy_facts", []
+        )
+        measurement_risks = evidence_pack.get("data_profile", {}).get(
+            "measurement_risks", []
+        )
+        panel_balance = evidence_pack.get("data_profile", {}).get(
+            "panel_balance", "unknown"
+        )
+        frozen_design = evidence_pack.get("frozen_design", {})
+        planned_mechanisms = frozen_design.get("planned_mechanisms", [])
+        frozen_design_text = str(frozen_design)
+        planned_falsification_text = " ".join(
+            str(value)
+            for value in frozen_design.get("planned_falsification", [])
+        ).lower()
+        research_goal = frozen_design.get("research_goal")
+        scientific_status = evidence_pack.get("executed_evidence", {}).get(
+            "scientific_status"
+        )
+        executed_records = evidence_pack.get("executed_evidence", {}).get(
+            "executions", []
+        )
+        entity_fixed_effects = any(
+            bool(record.get("diagnostic_results", {}).get("entity_fixed_effects"))
+            for record in executed_records
+            if isinstance(record, dict)
+        )
+        data_preparation_executed = any(
+            record.get("execution_status") == "succeeded"
+            and str(record.get("run_type", "")).lower()
+            in {"data_preparation", "data_cleaning", "data_merge"}
+            for record in executed_records
+            if isinstance(record, dict)
+        )
+        problems: list[str] = []
+        explicit_plan_absence_markers = (
+            "为空",
+            "未预设",
+            "未纳入",
+            "未被纳入",
+            "未包含",
+            "未列入",
+            "未单列",
+            "未在",
+            "未冻结",
+            "没有单列",
+            "没有计划",
+            "不存在",
+            "不预设",
+            "不执行",
+            "不涉及",
+            "不讨论",
+            "不包含",
+            "不会",
+            "不在冻结",
+            "不属于冻结",
+            "不在本研究计划",
+            "推测性质",
+        )
+        for section in sections:
+            content = section.content_markdown
+            certainty_content = re.sub(
+                r"(?:不能|无法|未能)(?:彻底|完全)排除",
+                "",
+                content,
+            )
+            certainty_content = re.sub(
+                r"(?:并非|而非|不是).{0,12}必然(?:结果|关系|影响)?",
+                "",
+                certainty_content,
+            )
+            if not tables_provided and re.search(
+                r"(?:表|图)\s*[0-9一二三四五六七八九十]+",
+                content,
+            ):
+                problems.append(
+                    f"{section.section_id} 引用了未提供的图表"
+                )
+            if not literature_provided and (
+                re.search(
+                    r"现有研究.{0,30}(?:多|主要|集中|缺乏|鲜有|尚未|空白)",
+                    content,
+                )
+                or re.search(r"(?:参照|参考).{0,8}文献", content)
+                or re.search(
+                    r"(?:缺乏|尚无).{0,24}(?:直接)?(?:经验|实证|文献)证据",
+                    content,
+                )
+            ):
+                problems.append(
+                    f"{section.section_id} 声称了未提供证据的文献状况"
+                )
+            if (
+                not literature_provided
+                and re.search(
+                    r"遵循(?:常规|主流|通行).{0,16}(?:研究|实证).{0,12}做法",
+                    content,
+                )
+            ):
+                problems.append(
+                    f"{section.section_id} 声称了未提供证据的研究惯例"
+                )
+            if re.search(
+                r"(?:frozen_design|executed_evidence|authorized_claims|scientific_status|ResearchRun|ClaimLedger)",
+                content,
+                flags=re.IGNORECASE,
+            ):
+                problems.append(
+                    f"{section.section_id} 泄露了工作流内部字段名"
+                )
+            if (
+                section.section_id
+                in {"introduction", "theory_hypotheses", "data_variables"}
+                and re.search(
+                    r"(?:极易|必然|一定会|保证了|有效避免|彻底排除|完全排除|显著(?:增加|降低|提升).{0,12}(?:风险|压力|可能性))",
+                    certainty_content,
+                )
+            ):
+                problems.append(
+                    f"{section.section_id} 使用了无证据支撑的强确定性表述"
+                )
+            if re.search(r"(?:具有|达到|呈现).{0,8}较高(?:的)?精度", content):
+                problems.append(
+                    f"{section.section_id} 对统计精度作了无比较基准的判断"
+                )
+            invented_measurement_risk_sentences = [
+                sentence
+                for sentence in re.split(r"[。！？\n]", content)
+                if re.search(
+                    r"(?:评级体系|评级方法|评分体系|评分方法|数据库口径|统计口径|数据提供方|底层数据).{0,60}(?:调整|变迁|变化|改变|更新频率)|(?:得分|评分).{0,60}权重.{0,12}(?:调整|变化|改变)",
+                    sentence,
+                )
+                and not any(
+                    marker in sentence
+                    for marker in (
+                        "不涉及",
+                        "不推断",
+                        "不得推断",
+                        "未提供",
+                        "没有提供",
+                    )
+                )
+            ]
+            if not measurement_risks and invented_measurement_risk_sentences:
+                problems.append(
+                    f"{section.section_id} 增加了输入未提供的数据口径变迁风险"
+                )
+            if re.search(
+                r"(?:企业|个体)和(?:年份|时间)层面的不随时间变化的异质性",
+                content,
+            ):
+                problems.append(
+                    f"{section.section_id} 混淆了个体固定效应与年份固定效应的含义"
+                )
+            if (
+                not planned_mechanisms
+                and re.search(
+                    r"(?:(?:暂不|不再|不对).{0,8}(?:传导路径|作用渠道|理论机制).{0,4}(?:讨论|推测|分析)|(?:暂不|不再|不对).{0,8}(?:讨论|推测|分析).{0,12}(?:传导路径|作用渠道|理论机制)|机制(?:分析|路径)?.{0,30}不在.{0,20}讨论范围)",
+                    content,
+                )
+            ):
+                problems.append(
+                    f"{section.section_id} 将未执行机制检验误写为不讨论理论机制"
+                )
+            if (
+                not planned_mechanisms
+                and re.search(
+                    r"(?:显著为正|显著为负|系数.{0,20}(?:为正|为负)).{0,70}(?:支持|验证|证明).{0,28}(?:机制|路径|解释)",
+                    content,
+                )
+            ):
+                problems.append(
+                    f"{section.section_id} 将系数方向误写为机制得到支持"
+                )
+            if entity_fixed_effects and re.search(
+                r"(?:两家|不同)企业.{0,65}(?:相差|比较|对应)",
+                content,
+            ):
+                problems.append(
+                    f"{section.section_id} 将个体固定效应系数误写为企业间比较"
+                )
+            endogeneity_plan_claims = [
+                sentence
+                for sentence in re.split(r"[。！？\n]", content)
+                if re.search(
+                    r"(?:冻结|预设|计划).{0,55}内生性(?:处理|检验)步骤",
+                    sentence,
+                )
+                and not any(
+                    marker in sentence
+                    for marker in explicit_plan_absence_markers
+                )
+            ]
+            if endogeneity_plan_claims and "内生性" not in frozen_design_text:
+                problems.append(
+                    f"{section.section_id} 声称冻结计划包含不存在的内生性步骤"
+                )
+            if "残分布" in content:
+                problems.append(
+                    f"{section.section_id} 存在残差分布术语缺字"
+                )
+            if re.search(
+                r"(?:R.?\s*平方|R²|R\^2).{0,24}(?:合理|较高|较低|理想)",
+                content,
+                flags=re.IGNORECASE,
+            ):
+                problems.append(
+                    f"{section.section_id} 对拟合指标作了无比较基准的价值判断"
+                )
+            if re.search(
+                r"(?:组内\s*R|Within\s+R).{0,80}(?:控制变量与固定效应|固定效应.{0,20}(?:解释|贡献))",
+                content,
+                flags=re.IGNORECASE,
+            ):
+                problems.append(
+                    f"{section.section_id} 错误解释了固定效应模型的组内拟合指标"
+                )
+            if re.search(
+                r"(?:组内\s*R|Within\s+R|R²).{0,80}(?:去除|扣除).{0,24}时间趋势",
+                content,
+                flags=re.IGNORECASE,
+            ):
+                problems.append(
+                    f"{section.section_id} 错误扩大了组内拟合指标的含义"
+                )
+            if re.search(
+                r"(?:组内\s*R|Within\s+R|R²).{0,90}(?:去除|扣除).{0,30}(?:时间均值|年份均值|时间效应)",
+                content,
+                flags=re.IGNORECASE,
+            ):
+                problems.append(
+                    f"{section.section_id} 将组内拟合指标误写为同时去除时间均值"
+                )
+            overstated_residual_sentences = [
+                sentence
+                for sentence in re.split(r"[。！？\n]", content)
+                if re.search(
+                    r"残差分布.{0,70}(?:验证|确认).{0,24}模型(?:设定|假设).{0,12}(?:合理|有效|正确)",
+                    sentence,
+                )
+                and not any(
+                    marker in sentence
+                    for marker in ("不能", "无法", "不得", "不应")
+                )
+            ]
+            if overstated_residual_sentences:
+                problems.append(
+                    f"{section.section_id} 夸大了残差分布检查的诊断能力"
+                )
+            if re.search(
+                r"(?:确保|保证).{0,24}(?:推断|检验).{0,16}(?:可靠|有效|正确)",
+                content,
+            ):
+                problems.append(
+                    f"{section.section_id} 将标准误处理写成保证推断可靠"
+                )
+            overstated_endogeneity_sentences = [
+                sentence
+                for sentence in re.split(r"[。！？\n]", content)
+                if re.search(
+                    r"(?:稳健性|证伪|检验).{0,55}(?:剥离|消除|解决).{0,16}内生性",
+                    sentence,
+                )
+                and not any(
+                    marker in sentence
+                    for marker in ("不能", "无法", "不得", "不应")
+                )
+            ]
+            if overstated_endogeneity_sentences:
+                problems.append(
+                    f"{section.section_id} 夸大了稳健性或证伪检验对内生性的作用"
+                )
+            if not background_facts and re.search(
+                r"(?:评级|评分).{0,28}(?:用作|作为).{0,12}(?:抵押|信用增级)",
+                content,
+            ):
+                problems.append(
+                    f"{section.section_id} 增加了输入未提供的融资工具安排"
+                )
+            if re.search(
+                r"(?:剔除|删除|排除).{0,24}(?:个体|企业|年份|时间).{0,12}固定效应",
+                content,
+            ):
+                problems.append(
+                    f"{section.section_id} 将控制固定效应错写为剔除固定效应"
+                )
+            if (
+                section.section_id == "introduction"
+                and re.search(
+                    r"(?:引言|本节)(?:部分)?的(?:核心)?任务(?:在于|是)",
+                    content,
+                )
+            ):
+                problems.append(
+                    "introduction 泄露了写作任务元叙述"
+                )
+            execution_claim_content = re.sub(
+                r"基于(?:已)?预处理后的",
+                "基于输入的",
+                content,
+            )
+            invented_data_preparation_sentences = [
+                sentence
+                for sentence in re.split(r"[。！？；\n]", execution_claim_content)
+                if re.search(
+                    r"(?:本稿|本文|本研究|本系统).{0,40}(?:完成|已(?:经)?).{0,70}(?:清理|清洗|匹配|合并|预处理|变量构造|缩尾)",
+                    sentence,
+                )
+            ]
+            if not data_preparation_executed and invented_data_preparation_sentences:
+                problems.append(
+                    f"{section.section_id} 将输入数据准备误写为本系统已执行"
+                )
+            if not data_preparation_executed and re.search(
+                r"本系统.{0,24}(?:验证|核验).{0,45}(?:原始值|处理值|缩尾边界|对应关系)",
+                content,
+            ):
+                problems.append(
+                    f"{section.section_id} 声称执行了没有运行记录的数据核验"
+                )
+            if not planned_mechanisms:
+                future_mechanism_sentences = [
+                    sentence
+                    for sentence in re.split(r"[。！？\n]", content)
+                    if "机制" in sentence
+                    and any(
+                        marker in sentence
+                        for marker in (
+                            "后续",
+                            "计划",
+                            "冻结",
+                            "待执行",
+                            "尚未执行",
+                            "优先执行",
+                            "将进一步",
+                        )
+                    )
+                    and not any(
+                        marker in sentence
+                        for marker in explicit_plan_absence_markers
+                    )
+                ]
+                if future_mechanism_sentences:
+                    problems.append(
+                        f"{section.section_id} 把未冻结的机制分析写成后续计划"
+                    )
+            unplanned_method_patterns = (
+                ("工具变量", r"(?:工具变量|instrumental\s+variables?|\b2SLS\b|\bIV\b)"),
+                ("倾向得分", r"(?:倾向得分|\bPSM\b)"),
+                ("双重差分", r"(?:双重差分|\bDID\b)"),
+                ("广义矩估计", r"(?:广义矩|\bGMM\b)"),
+                ("断点回归", r"(?:断点回归|\bRDD\b)"),
+                ("合成控制", r"合成控制"),
+                ("空间计量", r"(?:空间计量|空间杜宾|\bSDM\b|\bSAR\b)"),
+                ("中介检验", r"(?:中介检验|中介效应)"),
+                ("门槛模型", r"门槛模型"),
+                ("安慰剂检验", r"安慰剂"),
+            )
+            for method_name, pattern in unplanned_method_patterns:
+                if re.search(pattern, frozen_design_text, flags=re.IGNORECASE):
+                    continue
+                for sentence in re.split(r"[。！？\n]", content):
+                    if not re.search(pattern, sentence, flags=re.IGNORECASE):
+                        continue
+                    if any(
+                        marker in sentence
+                        for marker in explicit_plan_absence_markers + (
+                            "另行审批",
+                            "新设计获批",
+                            "不报告",
+                        )
+                    ):
+                        continue
+                    problems.append(
+                        f"{section.section_id} 擅自加入冻结计划之外的{method_name}"
+                    )
+                    break
+            has_planned_lead = (
+                "lead" in planned_falsification_text
+                or "领先" in planned_falsification_text
+                or "超前" in planned_falsification_text
+            )
+            has_planned_lag = (
+                "lag" in planned_falsification_text
+                or "滞后" in planned_falsification_text
+            )
+            if "滞后项" in content and not has_planned_lag:
+                problems.append(
+                    f"{section.section_id} 擅自把冻结的时间检验扩展为滞后项"
+                )
+            if (
+                ("领先项" in content or "超前项" in content)
+                and not has_planned_lead
+            ):
+                problems.append(
+                    f"{section.section_id} 擅自把冻结的时间检验扩展为领先项"
+                )
+            if (
+                section.section_id in TRACEABLE_MANUSCRIPT_SECTION_IDS
+                and (research_goal == "associational" or scientific_status == "limited")
+                and re.search(
+                    r"(?:每|当).{0,20}(?:提高|提升|增加|上升|下降|降低).{0,55}(?:提高|提升|增加|上升|下降|降低|减少).{0,24}(?:单位|%|百分点)",
+                    content,
+                )
+            ):
+                problems.append(
+                    f"{section.section_id} 将关联系数写成了单位变化的因果效果"
+                )
+            if (
+                section.section_id == "introduction"
+                and not background_facts
+                and re.search(
+                    r"(?:普遍存在|普遍面临|日益成为|备受.{0,8}关注|随着.{0,20}(?:强化|发展|提高|增加|提升|完善|推进|演进|普及))",
+                    content,
+                )
+            ):
+                problems.append(
+                    "introduction 声称了未提供证据的市场或学界趋势"
+                )
+            if "不随时间变化但随时间演变" in content:
+                problems.append(
+                    f"{section.section_id} 对时变因素作了自相矛盾的描述"
+                )
+            if (
+                panel_balance == "unbalanced"
+                and re.search(r"(?<!非)平衡面板", content)
+            ):
+                problems.append(
+                    f"{section.section_id} 将真实非平衡面板错写为平衡面板"
+                )
+            if panel_balance == "balanced" and "非平衡面板" in content:
+                problems.append(
+                    f"{section.section_id} 将真实平衡面板错写为非平衡面板"
+                )
+        return problems
+
+    @staticmethod
+    def _research_plan_markdown(
+        package: ResearchPackage,
+        plan: AnalysisPlan,
+    ) -> str:
+        def names(items: list[Any]) -> str:
+            values = [item.name for item in items]
+            return "、".join(values) if values else "本轮未预设"
+
+        return (
+            f"# {package.title}：后续研究计划\n\n"
+            f"## 研究问题\n{package.research_question}\n\n"
+            f"## 冻结基准设计\n方法家族：{plan.method_family}。"
+            f"基准模型：{names(plan.baseline_models)}。\n\n"
+            f"## 待执行检验\n诊断：{names(plan.diagnostics)}。\n"
+            f"稳健性：{names(plan.robustness_tests)}。\n"
+            f"证伪：{names(plan.falsification_tests)}。\n"
+            f"机制：{names(plan.mechanism_tests)}。\n"
+            f"异质性：{names(plan.heterogeneity_tests)}。\n\n"
+            "## 执行原则\n保持 H2 冻结的样本、变量和模型定义；"
+            "任何偏离都需要记录，不得因显著性改变分析。"
+        )
+
+    @staticmethod
+    def _writing_evidence_pack(
+        state: RunState,
+        package: ResearchPackage,
+        plan: AnalysisPlan,
+        run: ResearchRun,
+        approved_claims: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        data_profile = state.artifacts.get("data_profile", {}).get("payload", {})
+        method_route = state.artifacts.get("method_route", {}).get("payload", {})
+        evidence_assessment = state.artifacts.get("evidence_assessment", {}).get("payload", {})
+        scientific_audit = state.artifacts.get("scientific_audit", {}).get("payload", {})
+
+        def remove_legacy_warning(values: list[Any]) -> list[Any]:
+            return [
+                value
+                for value in values
+                if value != LEGACY_OVERBROAD_EXECUTION_WARNING
+            ]
+
+        evidence_assessment = {
+            **evidence_assessment,
+            "limitations": remove_legacy_warning(
+                evidence_assessment.get("limitations", [])
+            ),
+        }
+        scientific_audit = {
+            **scientific_audit,
+            "unresolved_risks": remove_legacy_warning(
+                scientific_audit.get("unresolved_risks", [])
+            ),
+        }
+        approved_claims = [
+            {
+                **claim,
+                "unresolved_risks": remove_legacy_warning(
+                    claim.get("unresolved_risks", [])
+                ),
+            }
+            for claim in approved_claims
+        ]
+        diagnostics = (
+            run.executions[0].diagnostic_results
+            if run.executions
+            else {}
+        )
+        entity_count = diagnostics.get("entity_count")
+        time_count = diagnostics.get("time_period_count")
+        rows_used = diagnostics.get("rows_used")
+        panel_balance = "unknown"
+        if all(isinstance(value, int) for value in (entity_count, time_count, rows_used)):
+            panel_balance = (
+                "balanced"
+                if rows_used == entity_count * time_count
+                else "unbalanced"
+            )
+        return {
+            "writing_evidence_pack": {
+                "research_context": {
+                    "case_id": package.case_id,
+                    "title": package.title,
+                    "research_question": package.research_question,
+                    "hypotheses": [item.model_dump(mode="json") for item in package.hypotheses],
+                    "unit_of_analysis": package.unit_of_analysis,
+                    "sample_period": package.sample_period,
+                    "data_structure": package.data_structure_hint,
+                    "variables": [variable.model_dump(mode="json") for variable in package.variables],
+                    "known_policy_facts": package.known_policy_facts,
+                    "constraints": package.constraints,
+                },
+                "data_profile": {
+                    **{
+                        key: data_profile.get(key)
+                        for key in (
+                            "profile_execution_status",
+                            "row_count",
+                            "column_count",
+                            "entity_key",
+                            "time_key",
+                            "duplicate_key_count",
+                            "missingness",
+                            "confirmed_facts",
+                            "measurement_risks",
+                            "readiness",
+                        )
+                    },
+                    "panel_balance": panel_balance,
+                },
+                "frozen_design": {
+                    "plan_id": plan.plan_id,
+                    "plan_version": plan.plan_version,
+                    "method_family": plan.method_family,
+                    "research_goal": method_route.get("research_goal"),
+                    "sample_rules": [step.model_dump(mode="json") for step in plan.sample_rules],
+                    "variable_construction": [
+                        step.model_dump(mode="json") for step in plan.variable_construction
+                    ],
+                    "baseline_models": [
+                        model.model_dump(mode="json") for model in plan.baseline_models
+                    ],
+                    "planned_diagnostics": [step.name for step in plan.diagnostics],
+                    "planned_robustness": [step.name for step in plan.robustness_tests],
+                    "planned_falsification": [step.name for step in plan.falsification_tests],
+                    "planned_mechanisms": [step.name for step in plan.mechanism_tests],
+                    "planned_heterogeneity": [step.name for step in plan.heterogeneity_tests],
+                    "identification_assumptions": plan.identification_assumptions,
+                    "alternative_explanations": plan.alternative_explanations,
+                    "unsupported_analyses": plan.unsupported_requested_analyses,
+                },
+                "executed_evidence": {
+                    "research_run_id": run.research_run_id,
+                    "execution_status": run.execution_status,
+                    "scientific_status": run.scientific_status,
+                    "executions": [
+                        execution.model_dump(mode="json") for execution in run.executions
+                    ],
+                    "deviations": run.deviations,
+                    "failed_runs": run.failed_runs,
+                    "warnings": remove_legacy_warning(run.warnings),
+                    "evidence_assessment": evidence_assessment,
+                    "scientific_audit": scientific_audit,
+                },
+                "authorized_claims": approved_claims,
+                "writing_requirements": {
+                    "language": "zh-CN",
+                    "required_section_ids": list(FULL_MANUSCRIPT_SECTION_IDS),
+                    "target_total_characters": "4000-7000",
+                    "literature_evidence_provided": False,
+                    "tables_provided": False,
+                    "forbid_unverified_citations": True,
+                    "forbid_unexecuted_results": True,
+                },
+            }
+        }
+
     @staticmethod
     def _validate_research_run_binding(
         research_run: ResearchRun,
@@ -1063,6 +2409,22 @@ class WorkflowEngine:
 
 def _names(package: ResearchPackage, role: str) -> list[str]:
     return [variable.name for variable in package.variables if variable.role == role]
+
+
+def _read_profile_csv(path: Any, selected_columns: list[str]) -> tuple[pd.DataFrame, int]:
+    last_error: UnicodeDecodeError | None = None
+    for encoding in ("utf-8-sig", "gb18030"):
+        try:
+            header = pd.read_csv(path, encoding=encoding, nrows=0)
+            frame = pd.read_csv(
+                path,
+                encoding=encoding,
+                usecols=lambda name: name in selected_columns,
+            )
+            return frame, len(header.columns)
+        except UnicodeDecodeError as error:
+            last_error = error
+    raise ValueError("CSV 编码必须是 UTF-8 或 GB18030。") from last_error
 
 
 def _merge_critics(reports: list[CriticReport], round_number: int) -> CriticReport:

@@ -1,17 +1,50 @@
-import { Check, CheckCircle2, ChevronDown, Circle, CircleAlert, Clock3, FileText, LoaderCircle, ShieldCheck, XCircle } from 'lucide-react'
+import { Check, CheckCircle2, ChevronDown, Circle, CircleAlert, Clock3, FileText, LoaderCircle, RotateCcw, Settings2, ShieldCheck, Trash2, XCircle } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import type { ClaimDecision, GateDecisionInput, RunSnapshot, RunSummary, StepAttempt, WorkflowDefinition, WorkflowStage } from '../runtime/types'
+import type { BaselineRun, ClaimDecision, GateDecisionInput, RunSnapshot, RunSummary, StepAttempt, WorkflowDefinition, WorkflowStage } from '../runtime/types'
 
 interface ExecutionWorkspaceProps {
   definition: WorkflowDefinition
   run: RunSnapshot | null
   runs: RunSummary[]
+  baselineRun: BaselineRun | null
+  compareOpen: boolean
+  caseReady: boolean
   busy: boolean
   busyLabel: string
   onSelectRun: (runId: string) => void
+  onDeleteRun: () => void
   onNewResearch: () => void
+  onToggleCompare: () => void
+  onStartHypoweaver: () => Promise<void>
+  onStartBaseline: () => Promise<void>
+  onOpenSettings: () => void
   onGateDecision: (gate: string, input: GateDecisionInput) => Promise<void>
   onSubmitRevision: (gate: 'H1' | 'H2', revision: unknown, comment: string) => Promise<void>
+  onRetryWriting: () => Promise<void>
+}
+
+const requiredManuscriptSections = [
+  'abstract',
+  'introduction',
+  'theory_hypotheses',
+  'data_variables',
+  'research_design',
+  'empirical_results',
+  'discussion_limitations',
+  'conclusion',
+]
+
+export function manuscriptQuality(run: RunSnapshot): { complete: boolean; characterCount: number } {
+  const generated = run.manuscript?.sections.filter((section) => section.status === 'generated') ?? []
+  const sectionIds = new Set(generated.map((section) => section.id))
+  const characterCount = generated.reduce((total, section) => total + section.content.trim().length, 0)
+  return {
+    complete: run.manuscript?.mode === 'full_manuscript'
+      && run.manuscript.auditResult === 'pass_with_no_critical_issues'
+      && requiredManuscriptSections.every((sectionId) => sectionIds.has(sectionId))
+      && characterCount >= 3200,
+    characterCount,
+  }
 }
 
 const statusText = {
@@ -19,15 +52,16 @@ const statusText = {
   failed: '执行失败', completed: '已完成', stopped: '已终止', cancelled: '已取消',
 }
 
+const claimDecisionText: Record<ClaimDecision, string> = {
+  approve: 'H3 已批准',
+  downgrade: 'H3 已降级授权',
+  reject: 'H3 已拒绝',
+  hold: 'H3 已暂缓',
+}
+
 function JsonBlock({ value, empty = '本步骤尚未产生内容。' }: { value: unknown; empty?: string }) {
   if (value === null || value === undefined || value === '') return <p className="technical-empty">{empty}</p>
   return <pre>{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</pre>
-}
-
-function formatTime(value?: string) {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
 }
 
 function stageState(stage: WorkflowStage, definition: WorkflowDefinition, run: RunSnapshot) {
@@ -63,7 +97,11 @@ function StepDetails({ step, title }: { step: StepAttempt; title: string }) {
 
 export function revisionSeed(run: RunSnapshot, gate: 'H1' | 'H2'): string {
   const nodeId = gate === 'H1' ? 'h1_gate' : 'h2_gate'
-  const source = [...run.steps].reverse().find((step) => step.nodeId === nodeId && step.status === 'waiting_human')?.input
+  const waitingSource = [...run.steps].reverse().find((step) => step.nodeId === nodeId && step.status === 'waiting_human')?.input
+  const blockedPlan = gate === 'H2'
+    ? [...run.steps].reverse().find((step) => ['plan_revision', 'analysis_plan_merge'].includes(step.nodeId) && step.status === 'succeeded')?.output
+    : undefined
+  const source = waitingSource ?? blockedPlan
   const sourceRecord = source && typeof source === 'object' && !Array.isArray(source)
     ? source as Record<string, unknown>
     : {}
@@ -83,6 +121,8 @@ export function revisionSeed(run: RunSnapshot, gate: 'H1' | 'H2'): string {
 }
 
 export function returnedRevisionGate(run: RunSnapshot): 'H1' | 'H2' | undefined {
+  const blockedByCritic = [...run.steps].reverse().find((step) => step.nodeId === 'critic_merge')
+  if (run.currentNodeId === 'critic_merge' && blockedByCritic?.status === 'blocked') return 'H2'
   const latestDecision = [...run.steps].reverse().find((step) => (
     step.status === 'succeeded' && ['h1_gate', 'h2_gate'].includes(step.nodeId)
   ))
@@ -104,6 +144,13 @@ function HumanReview({ run, busy, onDecision, onSubmitRevision }: {
   const returnedGate = run.status === 'blocked' ? returnedRevisionGate(run) : undefined
   const gate = run.currentGate ?? returnedGate
   const returnedForRevision = Boolean(returnedGate)
+  const blockedByCritic = returnedGate === 'H2' && run.currentNodeId === 'critic_merge'
+  const criticOutput = blockedByCritic
+    ? [...run.steps].reverse().find((step) => step.nodeId === 'critic_merge')?.output
+    : undefined
+  const criticIssues = criticOutput && typeof criticOutput === 'object' && !Array.isArray(criticOutput)
+    ? (criticOutput as Record<string, unknown>).issues
+    : undefined
   const [comment, setComment] = useState('')
   const [decisions, setDecisions] = useState<Record<string, ClaimDecision>>({})
   const [finalTexts, setFinalTexts] = useState<Record<string, string>>({})
@@ -151,7 +198,11 @@ function HumanReview({ run, busy, onDecision, onSubmitRevision }: {
 
   return (
     <section className="human-review-card">
-      <header><ShieldCheck size={22} /><div><strong>{gate} · {returnedForRevision ? '请继续提交修订' : gate === 'H1' ? '请确认研究边界' : gate === 'H2' ? '请审核并冻结分析计划' : '请逐条授权结论'}</strong><p>{returnedForRevision ? '上一次“退回”已经记录在服务端。请修改结构化内容并重新提交，刷新页面后也可以从这里继续。' : gate === 'H1' ? '批准后系统才会拆解假设并设计方法。' : gate === 'H2' ? '批准后样本、变量、模型和诊断将进入不可静默修改的研究合同。' : 'Writer 只能读取本次明确授权的结论。'}</p></div></header>
+      <header><ShieldCheck size={22} /><div><strong>{gate} · {blockedByCritic ? '请处理关键审查问题' : returnedForRevision ? '请继续提交修订' : gate === 'H1' ? '请确认研究边界' : gate === 'H2' ? '请审核并冻结分析计划' : '请逐条授权结论'}</strong><p>{blockedByCritic ? '当前不能直接批准。请按 Critic 意见修改分析计划并重新审查；通过后系统会开放 H2 批准按钮。' : returnedForRevision ? '上一次“退回”已经记录在服务端。请修改结构化内容并重新提交，刷新页面后也可以从这里继续。' : gate === 'H1' ? '批准后系统才会拆解假设并设计方法。' : gate === 'H2' ? '批准后样本、变量、模型和诊断将进入不可静默修改的研究合同。' : 'Writer 只能读取本次明确授权的结论。'}</p></div></header>
+      {blockedByCritic && Array.isArray(criticIssues) && <ul className="review-issue-list">{criticIssues.map((issue, index) => {
+        const item = issue && typeof issue === 'object' && !Array.isArray(issue) ? issue as Record<string, unknown> : {}
+        return <li key={`${String(item.issue_id ?? 'issue')}-${index}`}><strong>{String(item.severity ?? 'issue')}</strong><span>{String(item.evidence ?? item.why_it_matters ?? '请查看 CriticReport 输出。')}</span><small>需要修改：{String(item.required_fix ?? '请根据审查意见补充研究设计。')}</small></li>
+      })}</ul>}
       {gate === 'H3' && <div className="claim-review-list">{run.claims.map((claim) => <article key={claim.id}><p>{claim.text}</p><small>允许强度：{claim.allowedStrength ?? '未指定'}</small><div>{(fixtureH3 ? ['reject', 'hold'] : ['approve', 'downgrade', 'reject', 'hold']).map((decision) => <button type="button" key={decision} aria-pressed={(decisions[claim.id] ?? claim.decision) === decision} className={(decisions[claim.id] ?? claim.decision) === decision ? 'is-selected' : ''} onClick={() => setDecisions((current) => ({ ...current, [claim.id]: decision as ClaimDecision }))}>{{ approve: '批准', downgrade: '降级', reject: '拒绝', hold: '暂缓' }[decision]}</button>)}</div>{(decisions[claim.id] ?? claim.decision) === 'downgrade' && <textarea value={finalTexts[claim.id] ?? ''} onChange={(event) => setFinalTexts((current) => ({ ...current, [claim.id]: event.target.value }))} placeholder="填写降级后的审慎表述" />}</article>)}</div>}
       {fixtureH3 && <p className="fixture-warning">本次没有真实实证结果，每条 Claim 只能拒绝或暂缓；提交后仅生成研究计划。</p>}
       {!returnedForRevision && <label>审核说明<textarea rows={3} value={comment} onChange={(event) => setComment(event.target.value)} placeholder="记录批准或拒绝理由（选填）" /></label>}
@@ -161,39 +212,216 @@ function HumanReview({ run, busy, onDecision, onSubmitRevision }: {
   )
 }
 
-export function ExecutionWorkspace({ definition, run, runs, busy, busyLabel, onSelectRun, onNewResearch, onGateDecision, onSubmitRevision }: ExecutionWorkspaceProps) {
-  const attemptsByStage = useMemo(() => new Map(definition.stages.map((stage) => [stage.id, run?.steps.filter((step) => stage.nodeIds.includes(step.nodeId)) ?? []])), [definition.stages, run?.steps])
-  if (!run) return <main className="page empty-runs"><FileText size={32} /><h1>还没有研究运行</h1><p>从详细研究输入开始，完成检查后启动第一条链路。</p><button type="button" className="primary-button" onClick={onNewResearch}>新建研究</button></main>
+const baselineStatusText: Record<BaselineRun['status'], string> = {
+  queued: '排队中',
+  running: '运行中',
+  completed: '已完成',
+  failed: '执行失败',
+}
 
-  const completedStages = definition.stages.filter((stage) => stageState(stage, definition, run) === 'complete').length
-  const currentNode = definition.nodes.find((node) => node.id === run.currentNodeId)
+const baselineFallbackPhases: BaselineRun['phases'] = [
+  { id: 'plan', title: '形成研究计划', status: 'pending' },
+  { id: 'data', title: '准备分析数据', status: 'pending' },
+  { id: 'execute', title: '运行实验', status: 'pending' },
+  { id: 'interpret', title: '解释结果', status: 'pending' },
+  { id: 'write', title: '生成研究报告', status: 'pending' },
+]
+
+function elapsedSeconds(start?: string, end?: string): string {
+  if (!start || !end) return '—'
+  const value = (new Date(end).getTime() - new Date(start).getTime()) / 1000
+  if (!Number.isFinite(value) || value < 0) return '—'
+  return value < 60 ? `${value.toFixed(1)} 秒` : `${(value / 60).toFixed(1)} 分钟`
+}
+
+function findMethodFamily(run: RunSnapshot | null): string {
+  if (!run) return '—'
+  for (const step of [...run.steps].reverse()) {
+    const output = step.output
+    if (!output || typeof output !== 'object' || Array.isArray(output)) continue
+    const record = output as Record<string, unknown>
+    const direct = record.method_family ?? record.primary_route ?? record.method
+    if (typeof direct === 'string' && direct) return direct
+    const route = record.method_route
+    if (route && typeof route === 'object' && !Array.isArray(route)) {
+      const nested = (route as Record<string, unknown>).method_family
+      if (typeof nested === 'string' && nested) return nested
+    }
+  }
+  return '待路由'
+}
+
+function BaselineLane({ run, busy, caseReady, onStart }: {
+  run: BaselineRun | null
+  busy: boolean
+  caseReady: boolean
+  onStart: () => Promise<void>
+}) {
+  const phases = run?.phases.length ? run.phases : baselineFallbackPhases
+  return (
+    <section className="bench-lane">
+      <header className="bench-lane__header">
+        <div><span className="bench-badge">AL</span><h2>Agent Laboratory</h2></div>
+        <span className={`plain-status plain-status--${run?.status ?? 'idle'}`}>{run ? baselineStatusText[run.status] : '尚未启动'}</span>
+      </header>
+      {!run && <button type="button" className="secondary-button lane-start" disabled={busy || !caseReady} onClick={() => void onStart()}>{caseReady ? '启动基线' : '请重新选择案例'}</button>}
+      <ol className="compact-flow compact-flow--runtime">
+        {phases.map((phase, index) => (
+          <li className={`is-${phase.status}`} key={phase.id}>
+            <span>{phase.status === 'succeeded' ? <Check size={13} /> : index + 1}</span>
+            <div><strong>{phase.title}</strong><small>{phase.status === 'succeeded' ? '已完成' : phase.status === 'running' ? '正在执行' : phase.status === 'failed' ? '执行失败' : '尚未开始'}</small></div>
+          </li>
+        ))}
+      </ol>
+      {run?.error && <p className="lane-error">{run.error}</p>}
+      <p className="lane-note">基线保留原生调度；科学状态默认不判定。</p>
+    </section>
+  )
+}
+
+export function ExecutionWorkspace({
+  definition,
+  run,
+  runs,
+  baselineRun,
+  compareOpen,
+  caseReady,
+  busy,
+  busyLabel,
+  onSelectRun,
+  onDeleteRun,
+  onNewResearch,
+  onToggleCompare,
+  onStartHypoweaver,
+  onStartBaseline,
+  onOpenSettings,
+  onGateDecision,
+  onSubmitRevision,
+  onRetryWriting,
+}: ExecutionWorkspaceProps) {
+  const attemptsByStage = useMemo(
+    () => new Map(definition.stages.map((stage) => [stage.id, run?.steps.filter((step) => stage.nodeIds.includes(step.nodeId)) ?? []])),
+    [definition.stages, run?.steps],
+  )
+  const caseName = run?.caseName ?? baselineRun?.caseName ?? '已导入案例'
+  const currentNode = definition.nodes.find((node) => node.id === run?.currentNodeId)
+  const completedStages = run ? definition.stages.filter((stage) => stageState(stage, definition, run) === 'complete').length : 0
+  const manuscriptState = run ? manuscriptQuality(run) : { complete: false, characterCount: 0 }
+  const writingFailed = run?.status === 'failed' && run.currentNodeId === 'scientific_writer'
+  const preservedDraft = Boolean(writingFailed && run?.manuscript)
 
   return (
-    <main className="runs-layout">
-      <aside className="run-history"><header><strong>运行记录</strong><button type="button" onClick={onNewResearch} disabled={busy}>新建</button></header>{runs.map((item) => <button type="button" disabled={busy} className={item.id === run.id ? 'is-active' : ''} key={item.id} onClick={() => onSelectRun(item.id)}><strong>{item.caseName}</strong><span>{statusText[item.status]} · {formatTime(item.updatedAt)}</span></button>)}</aside>
-      <section className="execution-page">
-        <header className="run-heading"><div><span className={`run-state run-state--${run.status}`}>{statusText[run.status]}</span><h1>{run.caseName}</h1><p>{busy ? busyLabel : currentNode ? `当前步骤：${currentNode.title}` : '运行状态已从服务端恢复。'}</p></div><dl><div><dt>已完成阶段</dt><dd>{completedStages}/{definition.stages.length}</dd></div><div><dt>执行状态</dt><dd>{run.executionStatus}</dd></div><div><dt>科学状态</dt><dd>{run.scientificStatus}</dd></div><div><dt>运行模式</dt><dd>{run.mode === 'fixture' ? '流程演示' : '真实研究'}</dd></div></dl></header>
-        {busy && <div className="active-operation"><LoaderCircle size={19} className="spin" /><div><strong>{busyLabel}</strong><span>服务端正在生成结构化产物，完成后页面会自动更新。</span></div></div>}
-        {run.mode === 'fixture' && <p className="fixture-banner"><CircleAlert size={18} /><strong>流程演示：</strong>不会产生系数、显著性、样本量或实证结论。</p>}
-
-        <div className="stage-flow">
-          {definition.stages.map((stage) => {
-            const state = stageState(stage, definition, run)
-            const attempts = attemptsByStage.get(stage.id) ?? []
-            const StageIcon = state === 'complete' ? CheckCircle2 : state === 'active' ? LoaderCircle : state === 'problem' ? XCircle : Circle
-            const stateLabel = state === 'problem'
-              ? run.status === 'stopped' || run.status === 'cancelled' ? '已终止' : run.status === 'failed' ? '执行失败' : '需要处理'
-              : { complete: '已完成', active: run.status === 'waiting_human' ? '等待你审核' : '正在执行', pending: '尚未开始' }[state]
-            return <section className={`stage-card stage-card--${state}`} key={stage.id}><div className="stage-rail"><StageIcon size={21} className={state === 'active' && busy ? 'spin' : ''} /><span /></div><div className="stage-card__content"><header><div><small>阶段 {stage.order}</small><h2>{stage.title}</h2><p>{stage.description}</p></div><span>{stateLabel}</span></header>
-              {attempts.length > 0 && <div className="attempt-list">{attempts.map((attempt) => <StepDetails key={attempt.id} step={attempt} title={definition.nodes.find((node) => node.id === attempt.nodeId)?.title ?? attempt.nodeId} />)}</div>}
-              {state === 'pending' && <p className="stage-pending-copy"><Clock3 size={15} />上游完成并汇合后才会进入本阶段。</p>}
-              {(state === 'active' || state === 'problem') && <HumanReview key={`${run.id}:${run.version}:${run.currentGate}`} run={run} busy={busy} onDecision={onGateDecision} onSubmitRevision={onSubmitRevision} />}
-            </div></section>
-          })}
+    <main className="bench-page bench-page--run">
+      <header className="run-toolbar">
+        <div>
+          <p className="eyebrow">当前案例</p>
+          <h1>{caseName}</h1>
+          <p>{busy ? busyLabel : currentNode ? `HypoWeaver 当前：${currentNode.title}` : '两条流程可以分别启动。'}</p>
         </div>
+        <div className="run-toolbar__actions">
+          {runs.length > 0 && (
+            <select aria-label="切换运行记录" value={run?.id ?? ''} disabled={busy} onChange={(event) => onSelectRun(event.target.value)}>
+              {!run && <option value="">选择运行记录</option>}
+              {runs.map((item) => <option value={item.id} key={item.id}>{item.caseName} · {statusText[item.status]}</option>)}
+            </select>
+          )}
+          {run && <button type="button" className="quiet-button delete-run-button" disabled={busy} onClick={onDeleteRun}><Trash2 size={14} />删除记录</button>}
+          <button type="button" className="quiet-button" onClick={onToggleCompare}>{compareOpen ? '收起基线' : '展开基线'}</button>
+          <button type="button" className="quiet-button" onClick={onOpenSettings}><Settings2 size={14} />配置</button>
+          <button type="button" className="primary-button" onClick={onNewResearch}>选择新案例</button>
+        </div>
+      </header>
 
-        {run.status === 'completed' && <section className="result-summary"><Check size={24} /><div><h2>{run.planOnly ? '研究计划已经生成' : '研究成果包已经生成'}</h2><p>{run.planOnly ? '本次没有执行实证模型，成果中不包含统计结论。' : '成果只包含 H3 已授权并可追溯到真实运行的结论。'}</p></div></section>}
+      <section className="shared-input-strip shared-input-strip--run">
+        <div><span>01</span><strong>案例一致</strong><small>{caseName}</small></div>
+        <div><span>02</span><strong>模型一致</strong><small>使用同一套千问配置</small></div>
+        <div><span>03</span><strong>结果隔离</strong><small>隐藏参考仅供最终评测</small></div>
       </section>
+
+      {busy && <div className="bench-operation"><LoaderCircle size={16} className="spin" /><strong>{busyLabel}</strong></div>}
+
+      <div className={`bench-grid ${compareOpen ? 'is-comparing' : ''}`}>
+        <section className="bench-lane">
+          <header className="bench-lane__header">
+            <div><span className="bench-badge">HW</span><h2>HypoWeaver-Qwen</h2></div>
+            <span className={`plain-status plain-status--${run?.status ?? 'idle'}`}>{run ? statusText[run.status] : '尚未启动'}</span>
+          </header>
+          {!run && <button type="button" className="primary-button lane-start" disabled={busy || !caseReady} onClick={() => void onStartHypoweaver()}>{caseReady ? '启动 HypoWeaver' : '请重新选择案例'}</button>}
+          {run?.mode === 'fixture' && <p className="fixture-banner"><CircleAlert size={16} />流程演示不会生成实证结论。</p>}
+          {run?.status === 'failed' && run.lastError && <div className="run-error-summary"><CircleAlert size={16} /><span><strong>失败原因</strong>{run.lastError}</span>{writingFailed && <button type="button" className="secondary-button" disabled={busy} onClick={() => void onRetryWriting()}><RotateCcw size={14} />调整后重试论文写作</button>}</div>}
+
+          <div className="stage-flow stage-flow--compact">
+            {definition.stages.map((stage) => {
+              const state = run ? stageState(stage, definition, run) : 'pending'
+              const attempts = attemptsByStage.get(stage.id) ?? []
+              const StageIcon = state === 'complete' ? CheckCircle2 : state === 'active' ? LoaderCircle : state === 'problem' ? XCircle : Circle
+              const stateLabel = !run ? '尚未开始' : state === 'problem'
+                ? run.status === 'failed' ? '执行失败' : '需要处理'
+                : { complete: '已完成', active: run.status === 'waiting_human' ? '等待审核' : '正在执行', pending: '尚未开始' }[state]
+              return (
+                <section className={`stage-card stage-card--${state}`} key={stage.id}>
+                  <div className="stage-rail"><StageIcon size={18} className={state === 'active' && busy ? 'spin' : ''} /><span /></div>
+                  <div className="stage-card__content">
+                    <header><div><small>阶段 {stage.order}</small><h3>{stage.title}</h3></div><span>{stateLabel}</span></header>
+                    {attempts.length > 0 && <div className="attempt-list">{attempts.map((attempt) => <StepDetails key={attempt.id} step={attempt} title={definition.nodes.find((node) => node.id === attempt.nodeId)?.title ?? attempt.nodeId} />)}</div>}
+                    {!attempts.length && state === 'pending' && <p className="stage-pending-copy"><Clock3 size={14} />等待上游阶段</p>}
+                    {run && (state === 'active' || state === 'problem') && <HumanReview key={`${run.id}:${run.version}:${run.currentGate}`} run={run} busy={busy} onDecision={onGateDecision} onSubmitRevision={onSubmitRevision} />}
+                  </div>
+                </section>
+              )
+            })}
+          </div>
+
+          {run && (run.status === 'completed' || preservedDraft) && <section className="result-summary">
+            <div className="result-summary__heading">{preservedDraft ? <CircleAlert size={20} /> : <Check size={20} />}<div><h2>{preservedDraft ? '本次重生成失败，上一版已保留' : run.planOnly ? '研究计划已生成' : manuscriptState.complete ? '完整论文初稿已生成' : '论文初稿不完整'}</h2><p>{preservedDraft ? `仍显示论文初稿 v${run.manuscript?.version ?? '—'}；失败原因与本次尝试记录保留在上方。` : run.planOnly ? '本次没有统计结论。' : manuscriptState.complete ? `共 ${run.manuscript?.sections.length ?? 0} 节、${manuscriptState.characterCount.toLocaleString()} 字；实证表述受 H3 授权结论约束。` : '当前成果没有达到完整论文门槛，不将其冒充为已完成。'}</p></div>{!run.planOnly && <button type="button" className={manuscriptState.complete ? 'quiet-button' : 'primary-button'} disabled={busy} onClick={() => void onRetryWriting()}><RotateCcw size={14} />{preservedDraft ? '调整后重试论文写作' : manuscriptState.complete ? '重新生成论文' : '生成完整论文'}</button>}</div>
+            {!run.planOnly && <>
+              <div className="result-summary__meta"><span>执行状态 · {run.executionStatus}</span><span>科学状态 · {run.scientificStatus}</span></div>
+              <div className="result-summary__claims">
+                {run.claims.filter((claim) => claim.decision === 'approve' || claim.decision === 'downgrade').map((claim) => <article key={claim.id}>
+                  <header><strong>{claimDecisionText[claim.decision!]}</strong><small>{claim.allowedStrength ?? '未指定结论强度'}</small></header>
+                  <p>{claim.finalText ?? claim.text}</p>
+                  <footer>证据：{claim.evidenceStatus ?? '未标注'} · 稳健性：{claim.robustnessStatus ?? '未标注'} · 支撑运行：{claim.supportingRuns.length}</footer>
+                </article>)}
+                {!run.claims.some((claim) => claim.decision === 'approve' || claim.decision === 'downgrade') && <p>本次没有获得 H3 授权的实证结论。</p>}
+              </div>
+              {run.manuscript && <article className="manuscript-draft">
+                <header><FileText size={18} /><div><strong>论文初稿 · v{run.manuscript.version}</strong><small>{run.manuscript.auditResult === 'pass_with_no_critical_issues' ? '一致性审计通过' : '尚未通过一致性审计'}</small></div></header>
+                <div className="manuscript-sections">
+                  {run.manuscript.sections.filter((section) => section.status === 'generated').map((section, index) => <section key={section.id} id={`manuscript-${section.id}`}>
+                    <p className="manuscript-section-index">{String(index + 1).padStart(2, '0')} · {section.id}</p>
+                    <h3>{section.title}</h3>
+                    <div className="manuscript-copy">{section.content}</div>
+                    {(section.claimIds.length > 0 || section.runIds.length > 0) && <footer>Claim {section.claimIds.join('、') || '—'} · Run {section.runIds.join('、') || '—'}</footer>}
+                  </section>)}
+                </div>
+                {run.manuscript.disclosures.length > 0 && <aside><strong>写作披露</strong><ul>{run.manuscript.disclosures.map((item) => <li key={item}>{item}</li>)}</ul></aside>}
+              </article>}
+            </>}
+          </section>}
+        </section>
+
+        {compareOpen && <BaselineLane run={baselineRun} busy={busy} caseReady={caseReady} onStart={onStartBaseline} />}
+      </div>
+
+      {compareOpen && (
+        <section className="comparison-panel">
+          <header><div><p className="eyebrow">统一结果</p><h2>流程对比</h2></div><small>同一案例 · 同一模型 · 独立运行</small></header>
+          <div className="comparison-table-wrap">
+            <table className="comparison-table">
+              <thead><tr><th>指标</th><th>HypoWeaver-Qwen</th><th>Agent Laboratory</th></tr></thead>
+              <tbody>
+                <tr><th>进度</th><td>{run ? `${completedStages}/${definition.stages.length} 阶段` : '未启动'}</td><td>{baselineRun ? baselineStatusText[baselineRun.status] : '未启动'}</td></tr>
+                <tr><th>方法</th><td>{findMethodFamily(run)}</td><td>{baselineRun?.methodFamily ?? '待规划'}</td></tr>
+                <tr><th>执行状态</th><td>{run?.executionStatus ?? 'not_started'}</td><td>{baselineRun?.executionStatus ?? 'not_started'}</td></tr>
+                <tr><th>科学状态</th><td>{run?.scientificStatus ?? 'not_assessed'}</td><td>{baselineRun?.scientificStatus ?? 'not_assessed'}</td></tr>
+                <tr><th>结论约束</th><td>{run ? `${run.claims.length} 条 Claim` : '尚未生成'}</td><td>无 ClaimLedger</td></tr>
+                <tr><th>模型用量</th><td>未记录</td><td>{baselineRun ? `${baselineRun.llmCalls} 次 · ${(baselineRun.inputTokens + baselineRun.outputTokens).toLocaleString()} tokens` : '—'}</td></tr>
+                <tr><th>运行时间</th><td>{run ? elapsedSeconds(run.createdAt, run.updatedAt) : '—'}</td><td>{baselineRun ? `${baselineRun.wallTimeSeconds.toFixed(1)} 秒` : '—'}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </main>
   )
 }

@@ -6,12 +6,17 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from unittest.mock import patch
 
 import httpx
+from openai import APIConnectionError
 
 import hypoweaver.api as api_module
 from hypoweaver.adapters import HttpResearchExecutor, QwenModelGateway
+from hypoweaver.engine import PRESET_CASES
+from hypoweaver.models import ResearchPackage
 from hypoweaver.runtime_config import (
     RuntimeConfigStore,
     RuntimeConfigUpdate,
@@ -253,6 +258,7 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/v1/chat/completions")
             self.assertEqual(request.headers["Authorization"], "Bearer test-key")
+            self.assertFalse(json.loads(request.content)["enable_thinking"])
             return httpx.Response(200, json={"choices": []})
 
         result = await test_runtime_connection(
@@ -289,6 +295,53 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(result.success)
         self.assertEqual(result.status_code, 200)
+
+    async def test_qwen_gateway_turns_connection_drop_into_readable_runtime_error(self) -> None:
+        gateway = QwenModelGateway.__new__(QwenModelGateway)
+        gateway.model = "qwen-test"
+        create_completion = AsyncMock(
+            side_effect=APIConnectionError(
+                request=httpx.Request("POST", "https://qwen.example.test/v1/chat/completions")
+            )
+        )
+        gateway.client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(
+                    create=create_completion
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "连接中断或超时"):
+            await gateway.generate(
+                "intake",
+                {"case": PRESET_CASES["green-finance-did"].model_dump(mode="json")},
+                ResearchPackage,
+            )
+        self.assertEqual(
+            create_completion.await_args.kwargs["extra_body"],
+            {"enable_thinking": False},
+        )
+        self.assertEqual(create_completion.await_args.kwargs["max_tokens"], 8192)
+
+    async def test_qwen_gateway_accepts_writer_model_override(self) -> None:
+        effective = SimpleNamespace(
+            qwen_api_key="test-key",
+            qwen_model="qwen3.7-plus",
+            qwen_base_url="https://qwen.example.test/v1",
+        )
+        with (
+            patch("hypoweaver.adapters.RuntimeConfigStore") as store_class,
+            patch("hypoweaver.adapters.AsyncOpenAI") as client_class,
+        ):
+            store_class.return_value.resolve.return_value = effective
+            gateway = QwenModelGateway(model_override="qwen3.7-max")
+
+        self.assertEqual(gateway.model, "qwen3.7-max")
+        client_class.assert_called_once_with(
+            api_key="test-key",
+            base_url="https://qwen.example.test/v1",
+        )
 
 
 if __name__ == "__main__":

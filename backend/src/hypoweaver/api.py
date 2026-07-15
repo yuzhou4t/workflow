@@ -16,7 +16,13 @@ from .case_import import (
     LocalCaseImportRequest,
     LocalCaseImportResponse,
 )
-from .definition import build_app_a_definition
+from .benchmark_runner import (
+    AgentLaboratoryRunner,
+    BaselineRun,
+    BaselineRunNotFoundError,
+    BaselineRunRequest,
+)
+from .definition import DEFINITION_VERSION, build_app_a_definition
 from .engine import WorkflowEngine, WorkflowTransitionError
 from .models import CreateRunRequest, GateDecisionRequest, RevisionRequest, RunState
 from .repository import (
@@ -40,6 +46,7 @@ engine = WorkflowEngine(repository)
 runtime_config_store = RuntimeConfigStore()
 case_importer = LocalCaseImporter()
 case_upload_store = CaseUploadStore()
+baseline_runner = AgentLaboratoryRunner()
 app = FastAPI(
     title="HypoWeaver-Qwen Workflow API",
     version="1.0.0",
@@ -76,7 +83,7 @@ def mutation_actor(
 
 @app.get("/api/v1/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "runtime": "code-native", "definition": "app-a@1.0.0"}
+    return {"status": "ok", "runtime": "code-native", "definition": f"app-a@{DEFINITION_VERSION}"}
 
 
 @app.get("/api/v1/definitions/app-a")
@@ -141,6 +148,40 @@ async def upload_case_file(
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
+@app.post(
+    "/api/v1/baselines/agent-laboratory/runs",
+    response_model=BaselineRun,
+    status_code=202,
+)
+def start_agent_laboratory(
+    request: BaselineRunRequest,
+    _actor: str = Depends(mutation_actor),
+) -> BaselineRun:
+    try:
+        return baseline_runner.start(request)
+    except (CaseImportError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get(
+    "/api/v1/baselines/agent-laboratory/runs",
+    response_model=list[BaselineRun],
+)
+def list_agent_laboratory_runs(case_id: str | None = None) -> list[BaselineRun]:
+    return baseline_runner.list(case_id=case_id)
+
+
+@app.get(
+    "/api/v1/baselines/agent-laboratory/runs/{run_id}",
+    response_model=BaselineRun,
+)
+def get_agent_laboratory_run(run_id: str) -> BaselineRun:
+    try:
+        return baseline_runner.get(run_id)
+    except BaselineRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="baseline run not found") from error
+
+
 @app.get("/api/v1/runs", response_model=list[RunState])
 def list_runs() -> list[RunState]:
     return engine.list_runs()
@@ -167,6 +208,18 @@ def get_run(run_id: str) -> RunState:
         raise HTTPException(status_code=404, detail="run not found") from error
 
 
+@app.delete("/api/v1/runs/{run_id}")
+def delete_run(
+    run_id: str,
+    _actor: str = Depends(mutation_actor),
+) -> dict[str, str]:
+    try:
+        engine.delete_run(run_id)
+    except RunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="run not found") from error
+    return {"deleted_run_id": run_id}
+
+
 @app.post("/api/v1/runs/{run_id}/advance", response_model=RunState)
 async def advance_run(
     run_id: str,
@@ -178,6 +231,21 @@ async def advance_run(
         raise HTTPException(status_code=404, detail="run not found") from error
     except WorkflowTransitionError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/v1/runs/{run_id}/writing/retry", response_model=RunState)
+async def retry_run_writing(
+    run_id: str,
+    _actor: str = Depends(mutation_actor),
+) -> RunState:
+    try:
+        return await engine.retry_writing(run_id)
+    except RunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="run not found") from error
+    except (VersionConflictError, TransitionInProgressError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except WorkflowTransitionError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.post("/api/v1/runs/{run_id}/gates/{gate}", response_model=RunState)

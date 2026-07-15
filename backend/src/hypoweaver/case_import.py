@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import AsyncIterable
 from uuid import uuid4
 
+import numpy as np
+import pandas as pd
 from pydantic import Field
 
 from .models import CaseSubmission, DatasetRef, Hypothesis, StrictModel, VariableSpec
@@ -57,6 +59,7 @@ class _CsvInspection(StrictModel):
     row_count: int = Field(ge=0)
     year_min: int | None = None
     year_max: int | None = None
+    processed_definitions: dict[str, str] = Field(default_factory=dict)
 
 
 class DatasetRegistry:
@@ -215,7 +218,11 @@ class LocalCaseImporter:
             main_data.stem, outcome, exposure
         )
         variables = [
-            VariableSpec(name=name, label=name, role=roles[name])
+            _variable_spec(
+                name,
+                roles[name],
+                inspection.processed_definitions.get(name),
+            )
             for name in inspection.columns
             if roles[name] != "unknown"
         ]
@@ -252,7 +259,7 @@ class LocalCaseImporter:
         ]
         normalized_columns = {_normalized(name) for name in inspection.columns}
         if {"sdlaw", "esgw"}.issubset(normalized_columns):
-            review_items.append("数据同时包含原始与已处理口径；请在 H1 确认使用 SDLA/ESG 还是 SDLA_w/ESG_w。")
+            review_items.append("数据同时包含原始与 _w 处理口径；系统默认使用一套 _w 字段，避免同一构念重复入模，请在 H1 确认该口径。")
         if not has_id or not has_time:
             review_items.append("请补充或确认面板数据的实体与时间主键。")
         if exposure is None:
@@ -284,9 +291,15 @@ def _is_hidden_reference(path: Path, root: Path) -> bool:
     )
 
 
-def _main_csv_sort_key(path: Path) -> tuple[int, int, str]:
+def _main_csv_sort_key(path: Path) -> tuple[int, int, int, str]:
+    is_canonical = path.name.casefold() == "main_data.csv"
     looks_like_data = "数据" in path.stem or "data" in path.stem.casefold()
-    return (0 if looks_like_data else 1, -path.stat().st_size, path.name.casefold())
+    return (
+        0 if is_canonical else 1,
+        0 if looks_like_data else 1,
+        -path.stat().st_size,
+        path.name.casefold(),
+    )
 
 
 def _inspect_csv(path: Path) -> _CsvInspection:
@@ -316,6 +329,7 @@ def _inspect_csv(path: Path) -> _CsvInspection:
         row_count=row_count,
         year_min=year_min,
         year_max=year_max,
+        processed_definitions=_infer_processed_definitions(path, columns, encoding),
     )
 
 
@@ -368,8 +382,16 @@ def _infer_roles(columns: list[str]) -> dict[str, str]:
         "企业代码",
     }
     time_names = {"year", "time", "年份", "年度"}
-    outcome_names = {"sdla", "outcome", "dependent", "dependentvariable", "depvar", "y"}
-    exposure_names = {"esg", "esgscore", "exposure", "x"}
+    outcome_names = {
+        "sd",
+        "sdla",
+        "outcome",
+        "dependent",
+        "dependentvariable",
+        "depvar",
+        "y",
+    }
+    exposure_names = {"gf", "esg", "esgscore", "exposure", "x"}
     treatment_names = {"treat", "treatment", "treatpost", "did"}
     control_names = {
         "size",
@@ -408,17 +430,164 @@ def _infer_roles(columns: list[str]) -> dict[str, str]:
         else:
             role = "unknown"
         roles[name] = role
+
+    # A table may contain both a raw variable and its processed `_w` version.
+    # Keep one executable measurement set instead of placing both versions of
+    # the same construct in the baseline model. H1 still exposes this choice.
+    normalized_columns = {_normalized(name): name for name in columns}
+    for name in columns:
+        normalized = _normalized(name)
+        if not normalized.endswith("w"):
+            continue
+        raw_name = normalized_columns.get(normalized[:-1])
+        if raw_name and roles[raw_name] in {"outcome", "exposure", "control"}:
+            roles[name] = roles[raw_name]
+            roles[raw_name] = "unknown"
     return roles
+
+
+_VARIABLE_LABELS = {
+    "year": "年份",
+    "证券代码": "企业证券代码",
+    "sd": "省级可持续发展指数",
+    "gf": "绿色金融综合指数",
+    "sdla": "企业短债长用程度",
+    "esg": "企业 ESG 表现",
+    "size": "企业规模",
+    "board": "董事会特征",
+    "lev": "资产负债率",
+    "roa": "总资产收益率",
+    "growth": "企业成长性",
+    "cf": "现金流",
+    "fa": "固定资产特征",
+    "top1": "第一大股东持股比例",
+    "q": "企业市场价值指标",
+    "indr": "独立董事特征",
+    "age": "企业年龄",
+    "ci": "资本密集度",
+    "mh": "管理层持股特征",
+    "dual": "两职合一",
+    "soe": "国有企业标识",
+    "ana": "分析师关注",
+    "ins": "机构投资者持股",
+}
+
+
+def _variable_spec(
+    name: str,
+    role: str,
+    processed_definition: str | None = None,
+) -> VariableSpec:
+    normalized = _normalized(name)
+    processed = normalized.endswith("w") and normalized[:-1] in _VARIABLE_LABELS
+    base = normalized[:-1] if processed else normalized
+    label = _VARIABLE_LABELS.get(base, name)
+    if role == "id" and base not in _VARIABLE_LABELS:
+        label = "观测实体标识"
+    definition = f"{label}字段。"
+    if processed_definition:
+        definition += processed_definition
+    elif processed:
+        definition += "当前采用数据表中的 _w 处理版本；具体处理规则需在 H1 结合变量字典确认。"
+    elif role in {"outcome", "exposure", "control"}:
+        definition += "具体计算口径需在 H1 结合变量字典确认。"
+    return VariableSpec(
+        name=name,
+        label=label,
+        role=role,
+        definition=definition,
+        source=(
+            "用户导入的主分析数据表；处理口径已由同表原始列逐行校验，原始数据来源待补充。"
+            if processed_definition
+            else "用户导入的主分析数据表；原始数据来源待变量字典确认。"
+        ),
+    )
+
+
+def _infer_processed_definitions(
+    path: Path,
+    columns: list[str],
+    encoding: str,
+) -> dict[str, str]:
+    by_normalized = {_normalized(name): name for name in columns}
+    pairs: list[tuple[str, str]] = []
+    for processed in columns:
+        normalized = _normalized(processed)
+        if not normalized.endswith("w"):
+            continue
+        raw = by_normalized.get(normalized[:-1])
+        if raw:
+            pairs.append((raw, processed))
+    if not pairs:
+        return {}
+
+    selected = [name for pair in pairs for name in pair]
+    frame = pd.read_csv(
+        path,
+        encoding=encoding,
+        usecols=lambda name: name in selected,
+    )
+    definitions: dict[str, str] = {}
+    for raw_name, processed_name in pairs:
+        raw = pd.to_numeric(frame[raw_name], errors="coerce")
+        processed = pd.to_numeric(frame[processed_name], errors="coerce")
+        valid = raw.notna() & processed.notna()
+        if not valid.any():
+            continue
+        raw_values = raw[valid]
+        processed_values = processed[valid]
+        lower = float(processed_values.min())
+        upper = float(processed_values.max())
+        clipped = raw_values.clip(lower=lower, upper=upper)
+        matches_clip = bool(
+            np.isclose(
+                clipped.to_numpy(dtype=float),
+                processed_values.to_numpy(dtype=float),
+                rtol=1e-9,
+                atol=1e-12,
+            ).all()
+        )
+        if not matches_clip:
+            continue
+        changed = int(
+            (~np.isclose(
+                raw_values.to_numpy(dtype=float),
+                processed_values.to_numpy(dtype=float),
+                rtol=1e-9,
+                atol=1e-12,
+            )).sum()
+        )
+        if changed:
+            below = int((raw_values < lower).sum())
+            above = int((raw_values > upper).sum())
+            definitions[processed_name] = (
+                f"经同表 {raw_name} 与 {processed_name} 逐行校验，"
+                f"该列等价于将原始值截尾至 [{lower:.8g}, {upper:.8g}]；"
+                f"下端 {below} 行、上端 {above} 行被调整。"
+            )
+        else:
+            definitions[processed_name] = (
+                f"经同表 {raw_name} 与 {processed_name} 逐行校验，两列在全部非缺失观测上数值一致。"
+            )
+    return definitions
 
 
 def _research_text(
     data_stem: str, outcome: str, exposure: str | None
 ) -> tuple[str, str, str]:
-    if _normalized(outcome) == "sdla" and exposure and _normalized(exposure) == "esg":
+    outcome_name = _normalized(outcome).removesuffix("w")
+    exposure_name = _normalized(exposure).removesuffix("w") if exposure else None
+    if outcome_name == "sdla" and exposure_name == "esg":
         return (
             "企业ESG表现与短债长用",
             "企业 ESG 表现是否与企业短债长用程度存在系统性关联？",
             "企业 ESG 表现与企业短债长用程度存在系统性关联。",
+        )
+    if outcome_name == "sd" and exposure_name == "gf":
+        return (
+            "绿色金融与省级可持续发展",
+            "绿色金融水平是否与省级可持续发展存在系统性关联？",
+            "绿色金融水平与省级可持续发展存在系统性关联。",
         )
     safe_title = re.sub(r"(?:[-_—]?(数据|data))$", "", data_stem, flags=re.IGNORECASE)
     if exposure:

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { normalizeDefinition, normalizeLocalCaseImport, normalizeRun, normalizeRunList, workflowApi } from '../src/runtime/api'
+import { normalizeBaselineRun, normalizeDefinition, normalizeLocalCaseImport, normalizeRun, normalizeRunList, workflowApi } from '../src/runtime/api'
 
 const definitionPayload = {
   id: 'app-a',
@@ -124,6 +124,7 @@ const actualBackendRunPayload = {
   execution_status: 'fixture_only',
   scientific_status: 'not_evaluated',
   plan_only: true,
+  last_error: '示例错误',
   created_at: '2026-07-14T10:00:00Z',
   updated_at: '2026-07-14T10:01:00Z',
   steps: [{
@@ -137,7 +138,7 @@ const actualBackendRunPayload = {
     logs: ['H3 已暂停'],
   }],
   events: [{ seq: 1, type: 'gate.waiting', message: 'H3 等待人工决定。', timestamp: '2026-07-14T10:01:00Z', node_id: 'h3_gate', status: 'waiting_human' }],
-  claims: [{ claim_id: 'claim-H1', claim_text: '尚未检验', allowed_strength: 'prohibited', supporting_runs: [], opposing_runs: [], evidence_status: 'not_tested', scope: '', robustness_status: 'not_executed', unresolved_risks: [], approval_status: 'pending' }],
+  claims: [{ claim_id: 'claim-H1', claim_text: '尚未检验', final_text: 'H3 最终文本', allowed_strength: 'prohibited', supporting_runs: [], opposing_runs: [], evidence_status: 'not_tested', scope: '', robustness_status: 'not_executed', unresolved_risks: [], approval_status: 'downgraded' }],
   artifacts: {
     claim_ledger: { artifact_id: 'run:claim_ledger', kind: 'claim_ledger', sha256: 'abc', payload: { claims: [] } },
   },
@@ -184,9 +185,78 @@ describe('runtime API adapter', () => {
       executionStatus: 'fixture_only',
       scientificStatus: 'not_evaluated',
       planOnly: true,
+      lastError: '示例错误',
     })
     expect(run.steps[0]).toMatchObject({ nodeId: 'h3_gate', status: 'waiting_human' })
-    expect(run.claims[0]).toMatchObject({ id: 'claim-H1', allowedStrength: 'prohibited' })
+    expect(run.claims[0]).toMatchObject({
+      id: 'claim-H1',
+      finalText: 'H3 最终文本',
+      allowedStrength: 'prohibited',
+      evidenceStatus: 'not_tested',
+      robustnessStatus: 'not_executed',
+      decision: 'downgrade',
+    })
+  })
+
+  it('normalizes a manuscript stored in the code-native artifact dictionary', () => {
+    const sections = ['abstract', 'introduction', 'theory_hypotheses', 'data_variables', 'research_design', 'empirical_results', 'discussion_limitations', 'conclusion']
+      .map((sectionId) => ({ section_id: sectionId, title: sectionId, content_markdown: '正文'.repeat(240), status: 'generated', claim_ids: [], run_ids: [] }))
+    const run = normalizeRun({
+      ...actualBackendRunPayload,
+      mode: 'research',
+      status: 'completed',
+      plan_only: false,
+      artifacts: {
+        manuscript_package: {
+          kind: 'manuscript_package',
+          payload: {
+            version: 2,
+            mode: 'full_manuscript',
+            status: 'ready_for_human_review',
+            research_plan_markdown: '后续计划',
+            manuscript_sections: sections,
+            disclosures: ['引文待补'],
+            unresolved_issues: [],
+            audit_result: 'pass_with_no_critical_issues',
+          },
+        },
+      },
+    })
+
+    expect(run.manuscript).toMatchObject({
+      version: 2,
+      mode: 'full_manuscript',
+      auditResult: 'pass_with_no_critical_issues',
+    })
+    expect(run.manuscript?.sections).toHaveLength(8)
+  })
+
+  it('normalizes Agent Laboratory baseline progress without pretending it is scientifically audited', () => {
+    const baseline = normalizeBaselineRun({
+      id: 'baseline-1',
+      system_id: 'agent_laboratory_social_science_adapted',
+      case_id: 'case-1',
+      case_name: '案例一',
+      status: 'completed',
+      phases: [{ id: 'plan', title: '研究计划', status: 'succeeded' }],
+      execution_status: 'success',
+      scientific_status: 'not_assessed',
+      method_family: 'panel_association',
+      llm_calls: 7,
+      input_tokens: 1200,
+      output_tokens: 600,
+      wall_time_seconds: 42,
+      created_at: '2026-07-14T00:00:00Z',
+      updated_at: '2026-07-14T00:00:42Z',
+    })
+
+    expect(baseline).toMatchObject({
+      id: 'baseline-1',
+      status: 'completed',
+      executionStatus: 'success',
+      scientificStatus: 'not_assessed',
+      llmCalls: 7,
+    })
   })
 
   it('normalizes list envelopes without leaking wire fields into components', () => {
@@ -279,6 +349,49 @@ describe('runtime API adapter', () => {
       model_provider: 'fixture',
       execution_mode: 'fixture',
     })
+  })
+
+  it('deletes one selected run through the history endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204, json: async () => null })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await workflowApi.deleteRun('run-to-delete')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/runs/run-to-delete', expect.objectContaining({ method: 'DELETE' }))
+  })
+
+  it('retries only the writing stage through its explicit endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => runPayload })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await workflowApi.retryWriting('run-writer')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/runs/run-writer/writing/retry', expect.objectContaining({ method: 'POST' }))
+  })
+
+  it('restores persisted Agent Laboratory runs for the selected case', async () => {
+    const payload = [{
+      id: 'baseline-latest',
+      case_id: 'case with spaces',
+      case_name: '案例',
+      status: 'completed',
+      phases: [],
+      execution_status: 'success',
+      scientific_status: 'not_assessed',
+      llm_calls: 6,
+      input_tokens: 10,
+      output_tokens: 5,
+      wall_time_seconds: 12,
+      created_at: '2026-07-15T00:00:00Z',
+      updated_at: '2026-07-15T00:00:12Z',
+    }]
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => payload })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const runs = await workflowApi.listAgentLaboratoryRuns('case with spaces')
+
+    expect(runs[0].id).toBe('baseline-latest')
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/baselines/agent-laboratory/runs?case_id=case%20with%20spaces', expect.any(Object))
   })
 
   it('does not silently downgrade research mode to fixture mode', async () => {

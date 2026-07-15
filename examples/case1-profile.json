@@ -1,0 +1,124 @@
+{
+  "case_id": "case_esg_sdla_blind",
+  "title": "企业ESG表现与短债长用",
+  "research_question": "企业 ESG 表现是否与企业短债长用程度存在系统性关联？",
+  "hypotheses": [
+    {
+      "hypothesis_id": "H1",
+      "statement": "企业 ESG 表现与企业短债长用程度存在系统性关联。",
+      "expected_direction": "unspecified",
+      "mechanism": null
+    }
+  ],
+  "unit_of_analysis": "中国 A 股上市公司—年度",
+  "sample_period": "2009—2021",
+  "data_structure_hint": "panel",
+  "variables": [
+    {
+      "name": "证券代码",
+      "label": "企业证券代码",
+      "role": "id",
+      "definition": "A 股上市公司的唯一证券代码。",
+      "source": "CSMAR"
+    },
+    {
+      "name": "YEAR",
+      "label": "年份",
+      "role": "time",
+      "definition": "自然年度。",
+      "source": "CSMAR"
+    },
+    {
+      "name": "SDLA_w",
+      "label": "短债长用程度",
+      "role": "outcome",
+      "definition": "原始 SDLA=(短期负债/总负债)-(短期资产/总资产)，数值越大表示短债长用程度越高；SDLA_w 为连续变量 1% 与 99% 分位缩尾后的口径。CSV 原始列与处理列的逐行校验表明处理值等价于截尾至 [-0.45222643, 0.73389226]。",
+      "source": "CSMAR 财务数据"
+    },
+    {
+      "name": "ESG_w",
+      "label": "企业 ESG 表现",
+      "role": "exposure",
+      "definition": "原始 ESG=华证 ESG 综合得分/100，数值越高表示 ESG 表现越好；ESG_w 为连续变量 1% 与 99% 分位缩尾后的口径。CSV 原始列与处理列的逐行校验表明处理值等价于截尾至 [0.5596, 0.8422]。",
+      "source": "Wind 资讯金融终端中的华证 ESG 数据"
+    },
+    {
+      "name": "SIZE_w",
+      "label": "企业规模",
+      "role": "control",
+      "definition": "期末总资产的自然对数，按 1% 与 99% 分位缩尾。",
+      "source": "CSMAR"
+    },
+    {
+      "name": "LEV_w",
+      "label": "资产负债率",
+      "role": "control",
+      "definition": "期末总负债/期末总资产，按 1% 与 99% 分位缩尾。",
+      "source": "CSMAR"
+    },
+    {
+      "name": "ROA_w",
+      "label": "资产回报率",
+      "role": "control",
+      "definition": "当期净利润/期末总资产，按 1% 与 99% 分位缩尾。",
+      "source": "CSMAR"
+    },
+    {
+      "name": "GROWTH_w",
+      "label": "企业成长性",
+      "role": "control",
+      "definition": "营业收入增长率，按 1% 与 99% 分位缩尾。",
+      "source": "CSMAR"
+    },
+    {
+      "name": "CF_w",
+      "label": "经营性现金流",
+      "role": "control",
+      "definition": "当期经营活动产生的现金流量净额/期末总资产，按 1% 与 99% 分位缩尾。",
+      "source": "CSMAR"
+    },
+    {
+      "name": "FA_w",
+      "label": "固定资产比重",
+      "role": "control",
+      "definition": "固定资产净额/资产总值，按 1% 与 99% 分位缩尾。",
+      "source": "CSMAR"
+    },
+    {
+      "name": "BOARD_w",
+      "label": "董事会规模",
+      "role": "control",
+      "definition": "董事会总人数的自然对数，按 1% 与 99% 分位缩尾。",
+      "source": "CSMAR"
+    },
+    {
+      "name": "TOP1_w",
+      "label": "股权集中度",
+      "role": "control",
+      "definition": "第一大股东持股比例，按 1% 与 99% 分位缩尾。",
+      "source": "CSMAR"
+    },
+    {
+      "name": "SOE_w",
+      "label": "产权性质",
+      "role": "control",
+      "definition": "国有企业取 1，否则取 0；CSV 校验显示 SOE 与 SOE_w 在非缺失观测上数值一致。",
+      "source": "CSMAR"
+    },
+    {
+      "name": "MH_w",
+      "label": "管理层持股比例",
+      "role": "control",
+      "definition": "管理层持股数量/总股本，按 1% 与 99% 分位缩尾。",
+      "source": "CSMAR"
+    }
+  ],
+  "dataset_refs": [],
+  "known_policy_facts": [],
+  "constraints": [
+    "样本限定为 2009—2021 年沪深 A 股上市公司。",
+    "样本准备阶段排除金融业、当年 PT/ST/ST* 企业及核心字段缺失观测。",
+    "模型可见输入不得包含原论文摘要结论、回归表、显著性、Stata 代码或附录结果。",
+    "预期方向保持 unspecified，系统必须根据真实执行结果独立判断。"
+  ]
+}

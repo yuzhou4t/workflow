@@ -59,6 +59,7 @@ class PanelResearchEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(diagnostics["entity_fixed_effects"])
         self.assertTrue(diagnostics["time_fixed_effects"])
         self.assertEqual(diagnostics["entity_count"], 4)
+        self.assertNotIn("机制", "".join(result.warnings))
 
     async def test_api_reports_capability_and_returns_schema_bound_run(self) -> None:
         original_engine = research_api_module.engine

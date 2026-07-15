@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppHeader, type AppView } from './components/AppHeader'
 import { ExecutionWorkspace } from './components/ExecutionWorkspace'
 import { PreflightPanel } from './components/PreflightPanel'
+import { ResearchBenchLauncher } from './components/ResearchBenchLauncher'
 import { ResearchInputForm } from './components/ResearchInputForm'
 import { SystemConfigPanel } from './components/SystemConfigPanel'
 import { demoResearchDraft, emptyResearchDraft, preflightResearch, type ResearchDraft } from './data/researchDraft'
-import { workflowApi } from './runtime/api'
-import type { CaseImportReport, ConnectionTestResult, GateDecisionInput, RunSnapshot, RunSummary, RuntimeConfigStatus, RuntimeConfigUpdate, WorkflowDefinition } from './runtime/types'
+import { normalizeCaseSubmission, workflowApi } from './runtime/api'
+import { selectCaseFolder, type CaseFolderSelection } from './runtime/caseFolder'
+import type { BaselineRun, CaseImportReport, CaseSubmissionInput, ConnectionTestResult, GateDecisionInput, RunSnapshot, RunSummary, RuntimeConfigStatus, RuntimeConfigUpdate, WorkflowDefinition } from './runtime/types'
 
 function viewFromHash(): AppView {
   const value = window.location.hash.replace('#', '')
@@ -24,6 +26,9 @@ export function App() {
   const [draft, setDraft] = useState<ResearchDraft>(() => emptyResearchDraft())
   const [importReport, setImportReport] = useState<CaseImportReport | null>(null)
   const [showPreflight, setShowPreflight] = useState(false)
+  const [showAdvancedInput, setShowAdvancedInput] = useState(false)
+  const [compareOpen, setCompareOpen] = useState(false)
+  const [baselineRun, setBaselineRun] = useState<BaselineRun | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [busyLabel, setBusyLabel] = useState('')
@@ -81,12 +86,16 @@ export function App() {
           : nextRuns[0]?.id
         if (!preferredId) {
           setRun(null)
+          setBaselineRun(null)
           return
         }
         const nextRun = await workflowApi.getRun(preferredId)
         if (cancelled || requestId !== runRequestRef.current) return
+        const nextBaselines = await workflowApi.listAgentLaboratoryRuns(nextRun.caseId)
+        if (cancelled || requestId !== runRequestRef.current) return
         runIdRef.current = nextRun.id
         setRun(nextRun)
+        setBaselineRun(nextBaselines[0] ?? null)
       })
       .catch((reason) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason))
@@ -99,6 +108,20 @@ export function App() {
       })
     return () => { cancelled = true }
   }, [view])
+
+  useEffect(() => {
+    if (!baselineRun || !['queued', 'running'].includes(baselineRun.status)) return
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      workflowApi.getAgentLaboratoryRun(baselineRun.id)
+        .then((nextRun) => { if (!cancelled) setBaselineRun(nextRun) })
+        .catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason)) })
+    }, 1500)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [baselineRun])
 
   const preflightItems = useMemo(
     () => preflightResearch(draft, config, accessTokenVerified),
@@ -130,12 +153,60 @@ export function App() {
     changeView('runs')
   }
 
-  async function importCaseFile(file: File) {
+  async function startHypoweaver() {
+    const blockers = preflightResearch(draft, config, accessTokenVerified).filter((item) => item.level === 'blocker')
+    if (blockers.length) {
+      setShowPreflight(true)
+      changeView('new')
+      return
+    }
+    await startResearch()
+  }
+
+  async function startBaseline(caseInput: CaseSubmissionInput = draft.case) {
+    if (!caseInput.datasetRefs.length) {
+      setError('当前页面没有可复用的数据文件，请重新选择 CSV。')
+      return
+    }
+    if (!config?.qwenApiKey.configured) {
+      setError('请先在“配置”中保存并测试千问 API。')
+      return
+    }
+    const approved = window.confirm('Agent Laboratory 会在本机执行其生成的 Python 代码。仅应使用可信数据；是否启动本次基线运行？')
+    if (!approved) return
+    const nextRun = await withBusy('正在启动 Agent Laboratory…', () => workflowApi.startAgentLaboratory(caseInput))
+    if (!nextRun) return
+    setBaselineRun(nextRun)
+    setCompareOpen(true)
+    changeView('runs')
+  }
+
+  async function importCaseFile(file: File, target: 'hypoweaver' | 'agent-laboratory' = 'hypoweaver', folder?: CaseFolderSelection) {
     const imported = await withBusy(`正在上传并分析 ${file.name}…`, () => workflowApi.uploadCaseFile(file))
     if (!imported) return
-    const importedDraft: ResearchDraft = { mode: draft.mode, case: imported.case }
+    if (folder) {
+      imported.report.hiddenFileCount = folder.hiddenFileCount
+      imported.report.excludedFileCount = folder.excludedFileCount
+      if (folder.caseProfile) {
+        let profilePayload: unknown
+        try {
+          profilePayload = JSON.parse(await folder.caseProfile.text())
+        } catch {
+          setError('case_profile.json 不是有效的 JSON，已停止启动以避免使用错误研究定义。')
+          return
+        }
+        const profile = normalizeCaseSubmission(profilePayload)
+        imported.case = { ...profile, datasetRefs: imported.case.datasetRefs }
+        imported.report.reviewItems.unshift('已读取 case_profile.json；数据引用由本次上传结果重新绑定。')
+      }
+    }
+    const importedDraft: ResearchDraft = { mode: 'research', case: imported.case }
     setDraft(importedDraft)
     setImportReport(imported.report)
+    if (target === 'agent-laboratory') {
+      await startBaseline(imported.case)
+      return
+    }
     const blockers = preflightResearch(importedDraft, config, accessTokenVerified)
       .filter((item) => item.level === 'blocker')
     if (blockers.length) {
@@ -152,19 +223,61 @@ export function App() {
     changeView('runs')
   }
 
+  async function importCaseFolder(files: File[], target: 'hypoweaver' | 'agent-laboratory') {
+    try {
+      const selection = selectCaseFolder(files)
+      await importCaseFile(selection.mainData, target, selection)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
   async function selectRun(runId: string) {
     const requestId = ++runRequestRef.current
-    const nextRun = await withBusy('正在恢复持久化运行状态…', () => workflowApi.getRun(runId))
-    if (nextRun && requestId === runRequestRef.current) {
-      runIdRef.current = nextRun.id
-      setRun(nextRun)
-    }
+    const restored = await withBusy('正在恢复持久化运行状态…', async () => {
+      const nextRun = await workflowApi.getRun(runId)
+      const nextBaselines = await workflowApi.listAgentLaboratoryRuns(nextRun.caseId)
+      return { nextRun, baselineRun: nextBaselines[0] ?? null }
+    })
+    if (!restored || requestId !== runRequestRef.current) return
+    runIdRef.current = restored.nextRun.id
+    setRun(restored.nextRun)
+    setBaselineRun(restored.baselineRun)
+  }
+
+  async function deleteRun() {
+    if (!run) return
+    const confirmed = window.confirm(`确定删除“${run.caseName}”这条运行记录吗？此操作不会删除案例数据文件。`)
+    if (!confirmed) return
+    const restored = await withBusy('正在删除运行记录…', async () => {
+      await workflowApi.deleteRun(run.id)
+      const nextRuns = await workflowApi.listRuns()
+      const nextRun = nextRuns[0] ? await workflowApi.getRun(nextRuns[0].id) : null
+      const nextBaselines = nextRun
+        ? await workflowApi.listAgentLaboratoryRuns(nextRun.caseId)
+        : []
+      return { nextRuns, nextRun, baselineRun: nextBaselines[0] ?? null }
+    })
+    if (!restored) return
+    setRuns(restored.nextRuns)
+    runIdRef.current = restored.nextRun?.id ?? null
+    setRun(restored.nextRun)
+    setBaselineRun(restored.baselineRun)
   }
 
   async function decideGate(gate: string, input: GateDecisionInput) {
     if (!run) return
     const label = gate === 'H1' ? '正在确认研究边界并设计方法…' : gate === 'H2' ? '正在冻结研究合同并执行计划…' : '正在封存结论并生成成果…'
     const nextRun = await withBusy(label, () => workflowApi.decideGate(run, gate, input))
+    if (!nextRun) return
+    runIdRef.current = nextRun.id
+    setRun(nextRun)
+    await refreshRuns()
+  }
+
+  async function retryWriting() {
+    if (!run) return
+    const nextRun = await withBusy('正在使用已封存的回归结果重新生成完整论文初稿…', () => workflowApi.retryWriting(run.id))
     if (!nextRun) return
     runIdRef.current = nextRun.id
     setRun(nextRun)
@@ -217,6 +330,7 @@ export function App() {
   function changeView(nextView: AppView) {
     setView(nextView)
     window.history.replaceState(null, '', `#${nextView}`)
+    if (nextView === 'new') setShowAdvancedInput(false)
     if (nextView !== 'new') setShowPreflight(false)
   }
 
@@ -228,9 +342,10 @@ export function App() {
       <AppHeader view={view} config={config} onChangeView={changeView} />
       {error && <div className="error-banner" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>关闭</button></div>}
       {view === 'settings' && <SystemConfigPanel status={config} accessTokenPresent={accessTokenPresent} accessTokenVerified={accessTokenVerified} busy={busy} onRefresh={() => withBusy('正在重新读取配置状态…', refreshConfig).then(() => undefined)} onSetAccessToken={(token) => { workflowApi.setAccessToken(token); setAccessTokenPresent(workflowApi.hasAccessToken()); setAccessTokenVerified(false) }} onSave={saveConfig} onTest={testConnection} />}
-      {view === 'new' && !showPreflight && <ResearchInputForm draft={draft} config={config} importReport={importReport} busy={busy} onChange={setDraft} onLoadDemo={() => { setDraft(demoResearchDraft()); setImportReport(null) }} onImportCaseFile={importCaseFile} onOpenSettings={() => changeView('settings')} onCheck={() => setShowPreflight(true)} />}
+      {view === 'new' && !showPreflight && !showAdvancedInput && <ResearchBenchLauncher config={config} importReport={importReport} busy={busy} busyLabel={busyLabel} compareOpen={compareOpen} onToggleCompare={() => setCompareOpen((current) => !current)} onImportCaseFolder={importCaseFolder} onOpenAdvanced={() => setShowAdvancedInput(true)} onOpenSettings={() => changeView('settings')} />}
+      {view === 'new' && !showPreflight && showAdvancedInput && <ResearchInputForm draft={draft} config={config} importReport={importReport} busy={busy} onChange={setDraft} onLoadDemo={() => { setDraft(demoResearchDraft()); setImportReport(null) }} onImportCaseFile={(file) => importCaseFile(file, 'hypoweaver')} onOpenSettings={() => changeView('settings')} onCheck={() => setShowPreflight(true)} />}
       {view === 'new' && showPreflight && <PreflightPanel draft={draft} items={preflightItems} importReport={importReport} busy={busy} onBack={() => setShowPreflight(false)} onStart={startResearch} />}
-      {view === 'runs' && <ExecutionWorkspace definition={definition} run={run} runs={runs} busy={busy} busyLabel={busyLabel} onSelectRun={selectRun} onNewResearch={() => changeView('new')} onGateDecision={decideGate} onSubmitRevision={submitGateRevision} />}
+      {view === 'runs' && <ExecutionWorkspace definition={definition} run={run} runs={runs} baselineRun={baselineRun} compareOpen={compareOpen} caseReady={Boolean(draft.case.datasetRefs.length && (!run || draft.case.caseId === run.caseId) && (!baselineRun || draft.case.caseId === baselineRun.caseId))} busy={busy} busyLabel={busyLabel} onSelectRun={selectRun} onDeleteRun={() => void deleteRun()} onNewResearch={() => { setShowAdvancedInput(false); changeView('new') }} onToggleCompare={() => setCompareOpen((current) => !current)} onStartHypoweaver={startHypoweaver} onStartBaseline={() => startBaseline()} onOpenSettings={() => changeView('settings')} onGateDecision={decideGate} onSubmitRevision={submitGateRevision} onRetryWriting={retryWriting} />}
     </div>
   )
 }

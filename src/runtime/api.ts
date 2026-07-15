@@ -1,10 +1,12 @@
 import type {
+  BaselineRun,
   CaseSubmissionInput,
   ClaimDecision,
   ConnectionTestResult,
   CreateRunInput,
   GateDecisionInput,
   LocalCaseImportResult,
+  ManuscriptPackageView,
   NodeKind,
   PromptContent,
   RunEvent,
@@ -292,12 +294,48 @@ function normalizeClaim(value: unknown, index: number) {
   return {
     id: asString(first(claim, 'id', 'claim_id'), `claim-${index + 1}`),
     text: asString(first(claim, 'text', 'claim_text')),
+    finalText: asString(first(claim, 'final_text', 'finalText'), '') || undefined,
     allowedStrength: asString(first(claim, 'allowed_strength', 'allowedStrength'), '') || undefined,
+    evidenceStatus: asString(first(claim, 'evidence_status', 'evidenceStatus'), '') || undefined,
+    robustnessStatus: asString(first(claim, 'robustness_status', 'robustnessStatus'), '') || undefined,
     supportingRuns: asArray(first(claim, 'supporting_runs', 'supportingRuns')).map(String),
     decision: ['approve', 'downgrade', 'reject', 'hold'].includes(normalizedDecision)
       ? normalizedDecision
       : undefined,
   }
+}
+
+function normalizeManuscript(value: unknown): ManuscriptPackageView | undefined {
+  const manuscript = asRecord(value)
+  if (!Object.keys(manuscript).length) return undefined
+  return {
+    version: Number(manuscript.version ?? 1),
+    mode: asString(manuscript.mode, 'research_plan_only') as ManuscriptPackageView['mode'],
+    status: asString(manuscript.status, 'not_generated') as ManuscriptPackageView['status'],
+    researchPlan: asString(first(manuscript, 'research_plan_markdown', 'researchPlan')),
+    sections: asArray(first(manuscript, 'manuscript_sections', 'sections')).map((value, index) => {
+      const section = asRecord(value)
+      return {
+        id: asString(first(section, 'section_id', 'id'), `section-${index + 1}`),
+        title: asString(section.title, `第 ${index + 1} 节`),
+        content: asString(first(section, 'content_markdown', 'content')),
+        status: asString(section.status, 'not_generated') as 'generated' | 'not_generated',
+        claimIds: asArray(first(section, 'claim_ids', 'claimIds')).map(String),
+        runIds: asArray(first(section, 'run_ids', 'runIds')).map(String),
+      }
+    }),
+    disclosures: asArray(manuscript.disclosures).map(String),
+    unresolvedIssues: asArray(first(manuscript, 'unresolved_issues', 'unresolvedIssues')).map(String),
+    auditResult: asString(first(manuscript, 'audit_result', 'auditResult'), 'not_run') as ManuscriptPackageView['auditResult'],
+  }
+}
+
+function normalizeArtifacts(value: unknown): UnknownRecord[] {
+  if (Array.isArray(value)) return value.map(asRecord)
+  return Object.entries(asRecord(value)).map(([kind, artifact]) => ({
+    kind,
+    ...asRecord(artifact),
+  }))
 }
 
 const artifactKindByStep: Record<string, string[]> = {
@@ -321,7 +359,7 @@ const artifactKindByStep: Record<string, string[]> = {
 export function normalizeRun(payload: unknown): RunSnapshot {
   const envelope = asRecord(payload)
   const run = asRecord(first(envelope, 'run', 'item') ?? payload)
-  const artifacts = asArray(run.artifacts).map(asRecord)
+  const artifacts = normalizeArtifacts(run.artifacts)
   const caseArtifact = artifacts.find((artifact) => asString(artifact.kind) === 'case_submission')
   const casePayload = asRecord(caseArtifact?.payload)
   const researchRunArtifact = artifacts.find((artifact) => asString(artifact.kind) === 'research_run')
@@ -374,6 +412,7 @@ export function normalizeRun(payload: unknown): RunSnapshot {
     status: normalizeRunStatus(run.status),
     currentNodeId: currentStep || undefined,
     currentGate: ['H1', 'H2', 'H3'].includes(currentGate) ? (currentGate as 'H1' | 'H2' | 'H3') : undefined,
+    lastError: asString(first(run, 'last_error', 'lastError'), '') || undefined,
     executionStatus: asString(first(run, 'execution_status', 'executionStatus') ?? researchRunPayload.execution_status, 'not_started'),
     scientificStatus: asString(first(run, 'scientific_status', 'scientificStatus') ?? researchRunPayload.scientific_status, 'not_assessed'),
     planOnly: Boolean(first(run, 'plan_only', 'planOnly')) || manuscriptPayload.mode === 'research_plan_only',
@@ -382,6 +421,7 @@ export function normalizeRun(payload: unknown): RunSnapshot {
     steps: attempts,
     events: normalizedEvents,
     claims: asArray(first(run, 'claims', 'claim_ledger') ?? claimPayload.claims).map(normalizeClaim),
+    manuscript: normalizeManuscript(manuscriptPayload),
     allowedActions: asArray(first(run, 'allowed_actions', 'allowedActions')).map(String),
   }
 }
@@ -485,7 +525,7 @@ function normalizeConfigStatus(payload: unknown): RuntimeConfigStatus {
   }
 }
 
-function normalizeCaseSubmission(payload: unknown): CaseSubmissionInput {
+export function normalizeCaseSubmission(payload: unknown): CaseSubmissionInput {
   const value = asRecord(payload)
   return {
     caseId: asString(first(value, 'case_id', 'caseId')),
@@ -549,6 +589,35 @@ export function normalizeLocalCaseImport(payload: unknown): LocalCaseImportResul
   }
 }
 
+export function normalizeBaselineRun(payload: unknown): BaselineRun {
+  const value = asRecord(payload)
+  return {
+    id: asString(value.id),
+    systemId: 'agent_laboratory_social_science_adapted',
+    caseId: asString(first(value, 'case_id', 'caseId')),
+    caseName: asString(first(value, 'case_name', 'caseName')),
+    status: asString(value.status, 'queued') as BaselineRun['status'],
+    phases: asArray(value.phases).map((item) => {
+      const phase = asRecord(item)
+      return {
+        id: asString(phase.id),
+        title: asString(phase.title),
+        status: asString(phase.status, 'pending') as BaselineRun['phases'][number]['status'],
+      }
+    }),
+    executionStatus: asString(first(value, 'execution_status', 'executionStatus'), 'not_started'),
+    scientificStatus: asString(first(value, 'scientific_status', 'scientificStatus'), 'not_assessed'),
+    methodFamily: asString(first(value, 'method_family', 'methodFamily'), '') || undefined,
+    llmCalls: Number(first(value, 'llm_calls', 'llmCalls') ?? 0),
+    inputTokens: Number(first(value, 'input_tokens', 'inputTokens') ?? 0),
+    outputTokens: Number(first(value, 'output_tokens', 'outputTokens') ?? 0),
+    wallTimeSeconds: Number(first(value, 'wall_time_seconds', 'wallTimeSeconds') ?? 0),
+    error: asString(value.error, '') || undefined,
+    createdAt: asString(first(value, 'created_at', 'createdAt')),
+    updatedAt: asString(first(value, 'updated_at', 'updatedAt')),
+  }
+}
+
 export const workflowApi = {
   hasAccessToken(): boolean {
     return Boolean(accessToken())
@@ -570,6 +639,16 @@ export const workflowApi = {
 
   async getRun(runId: string): Promise<RunSnapshot> {
     return normalizeRun(await request(`/runs/${encodeURIComponent(runId)}`))
+  },
+
+  async deleteRun(runId: string): Promise<void> {
+    await request(`/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' })
+  },
+
+  async retryWriting(runId: string): Promise<RunSnapshot> {
+    return normalizeRun(await request(`/runs/${encodeURIComponent(runId)}/writing/retry`, {
+      method: 'POST',
+    }))
   },
 
   async createRun(input: CreateRunInput): Promise<RunSnapshot> {
@@ -615,6 +694,25 @@ export const workflowApi = {
       throw new Error(message)
     }
     return normalizeLocalCaseImport(payload)
+  },
+
+  async startAgentLaboratory(caseInput: CaseSubmissionInput): Promise<BaselineRun> {
+    return normalizeBaselineRun(await request('/baselines/agent-laboratory/runs', {
+      method: 'POST',
+      body: JSON.stringify({
+        case: serializeCase(caseInput),
+        execute_generated_code: true,
+      }),
+    }))
+  },
+
+  async getAgentLaboratoryRun(runId: string): Promise<BaselineRun> {
+    return normalizeBaselineRun(await request(`/baselines/agent-laboratory/runs/${encodeURIComponent(runId)}`))
+  },
+
+  async listAgentLaboratoryRuns(caseId: string): Promise<BaselineRun[]> {
+    const payload = await request(`/baselines/agent-laboratory/runs?case_id=${encodeURIComponent(caseId)}`)
+    return asArray(payload).map(normalizeBaselineRun)
   },
 
   async getRuntimeConfig(): Promise<RuntimeConfigStatus> {

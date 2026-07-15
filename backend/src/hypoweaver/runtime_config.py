@@ -327,6 +327,7 @@ async def test_runtime_connection(
             "messages": [{"role": "user", "content": "Reply only: OK"}],
             "temperature": 0,
             "max_tokens": 1,
+            "enable_thinking": False,
         }
         method = "POST"
     else:

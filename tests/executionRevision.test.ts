@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { returnedRevisionGate, revisionSeed } from '../src/components/ExecutionWorkspace'
+import { manuscriptQuality, returnedRevisionGate, revisionSeed } from '../src/components/ExecutionWorkspace'
 import type { RunSnapshot, StepAttempt } from '../src/runtime/types'
 
 function step(input: Partial<StepAttempt> & Pick<StepAttempt, 'id' | 'nodeId' | 'status'>): StepAttempt {
@@ -75,5 +75,32 @@ describe('gate revision recovery', () => {
     ], 'analysis_plan_merge')
 
     expect(returnedRevisionGate(snapshot)).toBeUndefined()
+  })
+
+  it('opens an H2 plan revision when the critics block the plan', () => {
+    const snapshot = run([
+      step({ id: 'plan', nodeId: 'analysis_plan_merge', status: 'succeeded', output: { plan_version: 1, method_family: 'panel_association' } }),
+      step({ id: 'critics', nodeId: 'critic_merge', status: 'blocked', output: { verdict: 'blocked', issues: [{ severity: 'critical' }] } }),
+    ], 'critic_merge')
+
+    expect(returnedRevisionGate(snapshot)).toBe('H2')
+    expect(JSON.parse(revisionSeed(snapshot, 'H2'))).toMatchObject({ plan_version: 2, method_family: 'panel_association' })
+  })
+
+  it('does not treat a short result card as a complete manuscript', () => {
+    const snapshot = run([], 'complete')
+    snapshot.status = 'completed'
+    snapshot.manuscript = {
+      version: 1,
+      mode: 'full_manuscript',
+      status: 'ready_for_human_review',
+      researchPlan: '',
+      sections: [{ id: 'abstract', title: '摘要', content: '短结果', status: 'generated', claimIds: [], runIds: [] }],
+      disclosures: [],
+      unresolvedIssues: [],
+      auditResult: 'pass_with_no_critical_issues',
+    }
+
+    expect(manuscriptQuality(snapshot)).toEqual({ complete: false, characterCount: 3 })
   })
 })

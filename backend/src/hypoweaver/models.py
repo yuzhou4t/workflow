@@ -399,6 +399,25 @@ class ManuscriptSection(StrictModel):
     run_ids: list[str] = Field(default_factory=list)
 
 
+FULL_MANUSCRIPT_SECTION_IDS = (
+    "abstract",
+    "introduction",
+    "theory_hypotheses",
+    "data_variables",
+    "research_design",
+    "empirical_results",
+    "discussion_limitations",
+    "conclusion",
+)
+TRACEABLE_MANUSCRIPT_SECTION_IDS = {
+    "abstract",
+    "empirical_results",
+    "discussion_limitations",
+    "conclusion",
+}
+MIN_FULL_MANUSCRIPT_CHARS = 3200
+
+
 class ManuscriptPackage(StrictModel):
     package_id: str
     case_id: str
@@ -416,6 +435,39 @@ class ManuscriptPackage(StrictModel):
     def validate_plan_only_boundary(self) -> "ManuscriptPackage":
         if self.mode == "research_plan_only" and self.empirical_findings_status == "included":
             raise ValueError("research_plan_only cannot include empirical findings")
+        if self.mode != "full_manuscript":
+            return self
+        if self.status == "not_generated":
+            raise ValueError("full_manuscript cannot have status=not_generated")
+        generated = [
+            section for section in self.manuscript_sections
+            if section.status == "generated"
+        ]
+        section_ids = [section.section_id for section in generated]
+        if len(section_ids) != len(set(section_ids)):
+            raise ValueError("full_manuscript section_id values must be unique")
+        missing = [
+            section_id for section_id in FULL_MANUSCRIPT_SECTION_IDS
+            if section_id not in section_ids
+        ]
+        if missing:
+            raise ValueError(
+                "full_manuscript is missing required sections: " + ", ".join(missing)
+            )
+        short_sections = [
+            section.section_id for section in generated
+            if section.section_id in FULL_MANUSCRIPT_SECTION_IDS
+            and len(section.content_markdown.strip()) < 180
+        ]
+        if short_sections:
+            raise ValueError(
+                "full_manuscript sections are too short: " + ", ".join(short_sections)
+            )
+        total_chars = sum(len(section.content_markdown.strip()) for section in generated)
+        if total_chars < MIN_FULL_MANUSCRIPT_CHARS:
+            raise ValueError(
+                f"full_manuscript requires at least {MIN_FULL_MANUSCRIPT_CHARS} content characters; got {total_chars}"
+            )
         return self
 
 
