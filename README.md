@@ -259,14 +259,6 @@ python3.11 -m uvicorn hypoweaver.blind_api:app --port 8002
 
 `05_AppB_BlindEvaluator.yml` 同样只是历史设计参考，不参与运行。
 
-## 从“公文”工作流借鉴了什么
-
-参考公共目录中 `公文/renhang_smartreport` 的代码链路，本项目采用了阶段进度、节点级输入输出与调试产物、并行后汇合、确定性校验和任务状态查询。同时做了三项关键加强：
-
-- 用 SQLite Run 快照替代协程内可变上下文；
-- 用服务端 `waiting_human` 状态替代前端取消请求式“暂停”；
-- 页面刷新和状态读取使用持久化短请求，不依赖一条 SSE 连接保存运行状态。
-
 ## 目录
 
 ```text
