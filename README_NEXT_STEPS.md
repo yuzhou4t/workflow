@@ -73,6 +73,33 @@ npm run dev -- --port 5174
 | 查看本轮真实案例证据 | `docs/cases/case_001_esg_sdla/FINAL_EXECUTION_REPORT.md` |
 | 查看 Group 2 边界与 Benchmark 设计 | `docs/GROUP2_WORKFLOW_ARCHITECTURE.md` |
 
+### 1.4 可直接交给 AI 协作者的开工指令
+
+把下面这段连同仓库地址一起发给接手同学使用的 AI 即可：
+
+```text
+你正在接手 HypoWeaver-Qwen 的 Group 2 Task 3。工作范围仅限：
+“给定研究假设、中立变量说明和数据，完成分析方案设计、真实执行、
+证据审计、Claim 约束与论文初稿生成”。不要扩展到数据中心、RAG、
+假设生成或科研绘图。
+
+开始前请完整阅读 README.md 与 README_NEXT_STEPS.md，并先检查 git status。
+按 README 的从零安装命令配置 Python 3.11、Node.js 和依赖；没有 API Key
+或真实案例时，只运行离线单元测试、生产构建和 Fixture，不得伪造实证结果。
+
+必须遵守：
+1. 不读取或提交原论文、作者代码、隐藏参考、原始案例数据和 backend/var/；
+2. 不把 API Key、Token、数据库、上传文件、绝对本机路径写入代码或 Git；
+3. 不改变 Agent Laboratory 的基线逻辑；
+4. execution_status=success 不等于 scientific_status=valid；
+5. 只做当前里程碑要求的最小改动，先写可复现测试，再实现并验证；
+6. 未经仓库所有者明确同意，不推送远端、不执行真实付费模型调用，
+   也不运行模型生成的任意代码。
+
+接手时先输出：当前理解、拟修改文件、成功标准、最小测试命令和任何阻塞；
+完成时输出：修改摘要、测试证据、仍未覆盖的科学边界和 git status。
+```
+
 ## 2. 对“AI Scientist 工作流优化”讨论的判断
 
 参考讨论最有价值的启发不是某一个新 Agent 名称，而是下面这个判断：
