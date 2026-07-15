@@ -47,22 +47,43 @@
 - Agent Laboratory 独立基线启动器：复用同一 Dataset ID 与文件哈希，通过同级仓库的适配器异步运行并回传阶段状态；
 - 页面级运行配置入口，支持脱敏状态、私有保存与 Qwen/Research Engine 连接测试。
 
-## 本地启动
+## 从零安装与本地启动
 
-要求 Python 3.11、Node.js 20.19+。
-
-后端：
+要求 Python 3.11、Node.js 20.19+ 和 Git。下面命令适用于 macOS / Linux：
 
 ```bash
-PYTHONPATH=backend/src python3.11 -m uvicorn hypoweaver.api:app --reload --port 8000
+git clone https://github.com/yuzhou4t/workflow.git
+cd workflow
+
+python3.11 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r backend/requirements.txt
+npm ci
 ```
 
-前端：
+先在仓库根目录运行离线验证；这一步不需要 API Key 或案例数据：
 
 ```bash
-npm install
+PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v
+npm test
+npm run build
+```
+
+然后分别在三个终端启动主后端、研究执行器和前端：
+
+```bash
+PYTHONPATH=backend/src .venv/bin/python -m uvicorn hypoweaver.api:app --port 8000
+```
+
+```bash
+PYTHONPATH=backend/src .venv/bin/python -m uvicorn hypoweaver.research_api:app --port 9000
+```
+
+```bash
 npm run dev -- --port 5174
 ```
+
+Windows PowerShell 可使用 `py -3.11 -m venv .venv`，并将上面的 `.venv/bin/python` 替换为 `.venv\Scripts\python.exe`；运行 Python 命令前设置 `$env:PYTHONPATH="backend/src"`。
 
 前端开发服务器会把 `/api` 代理到 `http://127.0.0.1:8000`。也可以设置 `VITE_API_TARGET` 指向其他后端地址。
 
@@ -73,6 +94,28 @@ http://127.0.0.1:5174/#new       详细研究输入与开始前检查
 http://127.0.0.1:5174/#runs      运行过程、人工审核与结果
 http://127.0.0.1:5174/#settings  API Key、模型和执行器配置
 ```
+
+健康检查：
+
+```bash
+curl -s http://127.0.0.1:8000/api/v1/health
+curl -s http://127.0.0.1:9000/v1/health
+```
+
+## 首次配置与测试范围
+
+打开 `http://127.0.0.1:5174/#settings`，按顺序填写并测试：
+
+1. Qwen API Key：只在本机页面填写，不要写进源码、README、Issue 或提交记录；
+2. 模型 ID：当前完整链路按 `qwen3.7-plus` 测试，模型名区分大小写；
+3. Qwen Base URL：`https://dashscope.aliyuncs.com/compatible-mode/v1`；
+4. Research Engine URL：本地执行器使用 `http://127.0.0.1:9000`；
+5. Research Engine Token：本机未设置 `RESEARCH_ENGINE_TOKEN` 时保持为空；如果设置了，两端必须使用同一个值；
+6. 保存后分别点击 Qwen 和 Research Engine 连接测试，两项都成功后再启动真实研究。
+
+四类 Reviewer 和写作质量失败后的升级会调用 `qwen3.7-max`，因此完整真实流程还要求同一个百炼账号有该模型权限。没有 API Key 或真实数据时，仍可运行全部单元测试、生产构建和 Fixture 流程；Fixture 不会生成统计结果。
+
+公开仓库不包含原始案例 CSV、论文、作者代码或隐藏参考。真实盲测需要另行取得符合规范的案例文件夹；最少包含一份主 CSV，建议同时提供不含论文结果的 `case_profile.json` 和中立变量字典。Agent Laboratory 只用于可选对照；未在同级目录安装该仓库时，不影响 HypoWeaver 本身、Fixture、单元测试或本地执行器运行。
 
 ## 一键导入案例包
 

@@ -39,9 +39,13 @@
 ### 1.2 本地启动与基础验证
 
 ```bash
-cd hypoweaver-workflow
-npm install
-PYTHONPATH=backend/src python3.11 -m unittest discover -s backend/tests -v
+git clone https://github.com/yuzhou4t/workflow.git
+cd workflow
+python3.11 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r backend/requirements.txt
+npm ci
+PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v
 npm test
 npm run build
 ```
@@ -49,12 +53,12 @@ npm run build
 启动三个本地服务：
 
 ```bash
-PYTHONPATH=backend/src python3.11 -m uvicorn hypoweaver.api:app --port 8000
-PYTHONPATH=backend/src python3.11 -m uvicorn hypoweaver.research_api:app --port 9000
+PYTHONPATH=backend/src .venv/bin/python -m uvicorn hypoweaver.api:app --port 8000
+PYTHONPATH=backend/src .venv/bin/python -m uvicorn hypoweaver.research_api:app --port 9000
 npm run dev -- --port 5174
 ```
 
-前端地址为 `http://127.0.0.1:5174`。真实案例、API Key、运行数据库和上传文件不在 Git 仓库中；需要在本机单独配置和导入。
+前端地址为 `http://127.0.0.1:5174`。进入 `#settings` 后配置 `qwen3.7-plus`、百炼兼容接口和本机 `http://127.0.0.1:9000` 执行器；完整流程还需要账号具备 `qwen3.7-max` 权限。真实案例、API Key、运行数据库和上传文件不在 Git 仓库中，需要在本机单独配置和导入。Agent Laboratory 是可选对照，不是运行本 Task 的前置依赖。更完整的首次配置与 Windows 命令见主 [`README.md`](README.md)。
 
 ### 1.3 建议先读的代码
 
