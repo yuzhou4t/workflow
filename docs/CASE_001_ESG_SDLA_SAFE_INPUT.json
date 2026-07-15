@@ -1,0 +1,108 @@
+{
+  "definition_id": "app-a",
+  "mode": "research",
+  "model_provider": "qwen",
+  "execution_mode": "external",
+  "case": {
+    "case_id": "case_001_esg_sdla_retest_v5_20260715",
+    "title": "企业ESG表现与短债长用",
+    "research_question": "企业ESG表现是否与中国A股上市公司的投融资期限错配有关，以及信息环境、机构投资者期限结构和投资决策质量是否构成可能的传导渠道？",
+    "hypotheses": [
+      {
+        "hypothesis_id": "H1",
+        "statement": "企业ESG表现越高，企业短债长用程度越低。",
+        "expected_direction": "negative"
+      },
+      {
+        "hypothesis_id": "H2",
+        "statement": "信息透明度可能影响ESG表现与短债长用之间的关系。",
+        "expected_direction": "unspecified",
+        "mechanism": "信息透明度"
+      },
+      {
+        "hypothesis_id": "H3",
+        "statement": "长期机构投资者持股可能影响ESG表现与短债长用之间的关系。",
+        "expected_direction": "unspecified",
+        "mechanism": "机构投资者期限结构"
+      },
+      {
+        "hypothesis_id": "H4",
+        "statement": "过度投资可能影响ESG表现与短债长用之间的关系。",
+        "expected_direction": "unspecified",
+        "mechanism": "投资决策质量"
+      }
+    ],
+    "unit_of_analysis": "中国A股上市公司—年度",
+    "sample_period": "2009—2021",
+    "data_structure_hint": "panel",
+    "variables": [
+      {"name": "S", "label": "企业数值代码", "role": "id", "definition": "企业面板个体识别码；与 YEAR 组成唯一主键。", "source": "企业基础信息/CSMAR"},
+      {"name": "YEAR", "label": "会计年度", "role": "time", "definition": "观测所属会计年度。", "source": "企业基础信息/CSMAR"},
+      {"name": "SDLA_w", "label": "短债长用程度（缩尾）", "role": "outcome", "definition": "SDLA 的 1% 与 99% 分位缩尾版本；SDLA 为短期负债占总负债比例减去短期资产占总资产比例。", "source": "CSMAR 及派生字段"},
+      {"name": "SLEV_w", "label": "短期负债替代指标（缩尾）", "role": "outcome", "definition": "用于替代口径检验的结果变量，存在少量缺失。", "source": "CSMAR 及派生字段"},
+      {"name": "ESG_w", "label": "企业ESG得分（缩尾）", "role": "exposure", "definition": "华证 ESG 综合得分除以 100 后的 1% 与 99% 分位缩尾版本。", "source": "华证指数/Wind"},
+      {"name": "ESG评级", "label": "华证ESG评级赋值", "role": "exposure", "definition": "华证 ESG 字母评级的数值化替代口径。", "source": "华证指数/Wind"},
+      {"name": "商道融绿ESG", "label": "商道融绿ESG评级赋值", "role": "exposure", "definition": "替代评级口径；仅部分年份和企业可用，缺失率较高。", "source": "商道融绿"},
+      {"name": "SIZE_w", "label": "企业规模", "role": "control", "definition": "企业规模缩尾值。", "source": "CSMAR"},
+      {"name": "LEV_w", "label": "资产负债率", "role": "control", "definition": "资产负债率缩尾值。", "source": "CSMAR"},
+      {"name": "ROA_w", "label": "总资产收益率", "role": "control", "definition": "总资产收益率缩尾值。", "source": "CSMAR"},
+      {"name": "GROWTH_w", "label": "企业成长性", "role": "control", "definition": "企业成长性缩尾值。", "source": "CSMAR"},
+      {"name": "CF_w", "label": "经营现金流", "role": "control", "definition": "经营现金流相关指标缩尾值。", "source": "CSMAR"},
+      {"name": "FA_w", "label": "固定资产特征", "role": "control", "definition": "固定资产相关指标缩尾值。", "source": "CSMAR"},
+      {"name": "BOARD_w", "label": "董事会规模", "role": "control", "definition": "董事会规模相关指标缩尾值。", "source": "CSMAR"},
+      {"name": "TOP1_w", "label": "第一大股东持股比例", "role": "control", "definition": "第一大股东持股比例缩尾值。", "source": "CSMAR"},
+      {"name": "SOE_w", "label": "国有企业标识", "role": "control", "definition": "企业产权性质标识。", "source": "CSMAR"},
+      {"name": "MH_w", "label": "管理层持股", "role": "control", "definition": "管理层持股比例缩尾值。", "source": "CSMAR"},
+      {"name": "ABSDA1", "label": "操纵性应计利润绝对值1", "role": "mediator", "definition": "修正 Jones 模型形成的信息透明度候选代理变量。", "source": "CSMAR 及派生字段"},
+      {"name": "ABSDA2", "label": "操纵性应计利润绝对值2", "role": "mediator", "definition": "非线性应计模型形成的信息透明度候选代理变量。", "source": "CSMAR 及派生字段"},
+      {"name": "重述", "label": "财务重述次数", "role": "mediator", "definition": "上市公司年度财务重述次数。", "source": "CSMAR 及公司事件数据"},
+      {"name": "长期投资持股比例", "label": "长期机构投资者持股比例", "role": "mediator", "definition": "按机构投资期限分类后的长期机构投资者持股比例。", "source": "基金/机构持仓数据"},
+      {"name": "短期投资持股比例", "label": "短期机构投资者持股比例", "role": "mediator", "definition": "按机构投资期限分类后的短期机构投资者持股比例。", "source": "基金/机构持仓数据"},
+      {"name": "Over_INV", "label": "过度投资", "role": "mediator", "definition": "基于投资期望模型形成的过度投资候选代理变量；缺失率较高。", "source": "CSMAR 及派生字段"}
+    ],
+    "dataset_refs": [
+      {
+        "dataset_id": "ds_dad550862bf59b05",
+        "role": "main",
+        "filename": "main_data.csv",
+        "mime_type": "text/csv",
+        "sha256": "dad550862bf59b059e67c9bfadcc7b2659fc75d3e281fde72b3396ca5c1b4714",
+        "size_bytes": 41972980
+      }
+    ],
+    "design_envelope": {
+      "benchmark_track": "reproduction_aligned",
+      "research_goal": "mechanism",
+      "target_estimands": [
+        "同一企业内 ESG 表现变化与短债长用程度变化之间的条件关联",
+        "控制共同年份冲击后的主假设关联参数",
+        "预先给定候选机制变量与主关联之间的证据边界"
+      ],
+      "design_constraints": [
+        "必须利用企业—年度面板结构，并明确个体异质性、共同年份冲击与面板内相关的处理方式。",
+        "主模型优先使用 SDLA_w 与 ESG_w；替代结果和替代评级仅作为预先声明的稳健性候选，不得按显著性切换。",
+        "不得读取 02_hidden_reference 中的论文、作者代码、回归表或参考结论。",
+        "机制变量缺失或执行器能力不足时应如实标记未执行，不得用基准系数方向代替机制证据。",
+        "任何未在 H2 冻结的模型、样本筛选或变量切换均不得在结果产生后追加。"
+      ],
+      "required_diagnostics": [
+        "S 与 YEAR 组合主键唯一性",
+        "核心变量缺失率与面板内变异",
+        "固定效应设定与聚类标准误层级",
+        "共线性、残差与模型执行警告",
+        "替代口径和机制分析的实际可执行状态"
+      ],
+      "allowed_claim_strength": "associational"
+    },
+    "known_policy_facts": [
+      "华证指数自 2009 年起提供相关 ESG 评价。",
+      "样本为 2009—2021 年中国沪深 A 股上市公司企业—年度观测。"
+    ],
+    "constraints": [
+      "S + YEAR 在当前分析数据中无重复且无缺失。",
+      "连续变量的 _w 字段与同表原始字段逐行核验后符合 1% 与 99% 分位缩尾特征。",
+      "当前数据已经过案例提供方预处理；工作流不得声称自行完成原始数据库清洗或匹配。",
+      "ESG 评级覆盖可能存在样本选择风险；商业数据库内容的使用须遵守原授权。"
+    ]
+  }
+}

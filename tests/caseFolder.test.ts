@@ -45,4 +45,19 @@ describe('selectCaseFolder', () => {
     expect(result.hiddenFileCount).toBe(1)
     expect(result.excludedFileCount).toBe(1)
   })
+
+  it('keeps a declared spatial weight matrix as a safe supplementary asset', () => {
+    const result = selectCaseFolder([
+      folderFile('case/01_model_input/main_data.csv', 100),
+      folderFile('case/01_model_input/spatial_weights.csv', 80),
+      folderFile('case/01_model_input/province_capital_coordinates.csv', 50),
+      folderFile('case/01_model_input/case_profile.json'),
+      folderFile('case/02_hidden_reference/reference_results.csv', 1000),
+    ])
+
+    expect(result.mainData.name).toBe('main_data.csv')
+    expect(result.supplementaryData.map((file) => file.name)).toEqual(['spatial_weights.csv'])
+    expect(result.hiddenFileCount).toBe(1)
+    expect(result.excludedFileCount).toBe(1)
+  })
 })

@@ -185,6 +185,11 @@ export function App() {
     const imported = await withBusy(`正在上传并分析 ${file.name}…`, () => workflowApi.uploadCaseFile(file))
     if (!imported) return
     if (folder) {
+      const supplementaryRefs = folder.supplementaryData.length
+        ? await withBusy('正在登记空间权重矩阵…', () => Promise.all(folder.supplementaryData.map((asset) => workflowApi.uploadCaseAsset(asset))))
+        : []
+      if (supplementaryRefs === null) return
+      const datasetRefs = [...imported.case.datasetRefs, ...supplementaryRefs]
       imported.report.hiddenFileCount = folder.hiddenFileCount
       imported.report.excludedFileCount = folder.excludedFileCount
       if (folder.caseProfile) {
@@ -196,8 +201,10 @@ export function App() {
           return
         }
         const profile = normalizeCaseSubmission(profilePayload)
-        imported.case = { ...profile, datasetRefs: imported.case.datasetRefs }
+        imported.case = { ...profile, datasetRefs }
         imported.report.reviewItems.unshift('已读取 case_profile.json；数据引用由本次上传结果重新绑定。')
+      } else {
+        imported.case = { ...imported.case, datasetRefs }
       }
     }
     const importedDraft: ResearchDraft = { mode: 'research', case: imported.case }
@@ -267,7 +274,13 @@ export function App() {
 
   async function decideGate(gate: string, input: GateDecisionInput) {
     if (!run) return
-    const label = gate === 'H1' ? '正在确认研究边界并设计方法…' : gate === 'H2' ? '正在冻结研究合同并执行计划…' : '正在封存结论并生成成果…'
+    const label = gate === 'H1'
+      ? '正在确认研究边界并生成候选方案…'
+      : gate === 'H2'
+        ? '正在冻结所选研究合同、执行并独立复现…'
+        : gate === 'H3'
+          ? '正在按授权结论生成完整论文初稿…'
+          : '正在封存 H4 已批准的最终初稿…'
     const nextRun = await withBusy(label, () => workflowApi.decideGate(run, gate, input))
     if (!nextRun) return
     runIdRef.current = nextRun.id

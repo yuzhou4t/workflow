@@ -4,8 +4,10 @@ import type {
   ClaimDecision,
   ConnectionTestResult,
   CreateRunInput,
+  DatasetReferenceInput,
   GateDecisionInput,
   LocalCaseImportResult,
+  DesignArenaView,
   ManuscriptPackageView,
   NodeKind,
   PromptContent,
@@ -330,6 +332,50 @@ function normalizeManuscript(value: unknown): ManuscriptPackageView | undefined 
   }
 }
 
+function normalizeDesignArena(value: unknown): DesignArenaView | undefined {
+  const arena = asRecord(value)
+  if (!Object.keys(arena).length) return undefined
+  const reports = asArray(first(arena, 'reviewer_reports', 'reviewerReports')).map(asRecord)
+  return {
+    id: asString(first(arena, 'arena_id', 'id')),
+    candidates: asArray(arena.candidates).map((value) => {
+      const candidate = asRecord(value)
+      const plan = asRecord(candidate.plan)
+      const model = asRecord(asArray(first(plan, 'baseline_models', 'baselineModels'))[0])
+      const probe = asRecord(first(candidate, 'probe_report', 'probeReport'))
+      const candidateId = asString(first(candidate, 'candidate_id', 'id'))
+      const candidateReviews = reports.flatMap((report) => (
+        asArray(first(report, 'candidate_reviews', 'candidateReviews'))
+          .map(asRecord)
+          .filter((review) => asString(first(review, 'candidate_id', 'candidateId')) === candidateId)
+      ))
+      return {
+        id: candidateId,
+        strategy: asString(candidate.strategy, 'direct_baseline') as DesignArenaView['candidates'][number]['strategy'],
+        rationale: asString(candidate.rationale),
+        methodFamily: asString(first(plan, 'method_family', 'methodFamily')),
+        estimator: asString(model.estimator),
+        formula: asString(model.formula, '') || undefined,
+        probeVerdict: asString(probe.verdict, 'fail') as DesignArenaView['candidates'][number]['probeVerdict'],
+        executorReady: Boolean(first(probe, 'executor_ready', 'executorReady')),
+        probeChecks: asArray(probe.checks).map((item) => {
+          const check = asRecord(item)
+          return {
+            id: asString(first(check, 'check_id', 'id')),
+            status: asString(check.status, 'fail') as 'pass' | 'warn' | 'fail',
+            evidence: asString(check.evidence),
+          }
+        }),
+        reviewIssueCount: candidateReviews.reduce((total, review) => total + asArray(review.issues).length, 0),
+        reviewerRejected: candidateReviews.some((review) => asString(review.verdict) === 'reject'),
+      }
+    }),
+    recommendedCandidateIds: asArray(first(arena, 'recommended_candidate_ids', 'recommendedCandidateIds')).map(String),
+    provisionalCandidateId: asString(first(arena, 'provisional_candidate_id', 'provisionalCandidateId'), '') || undefined,
+    selectionRationale: asArray(first(arena, 'selection_rationale', 'selectionRationale')).map(String),
+  }
+}
+
 function normalizeArtifacts(value: unknown): UnknownRecord[] {
   if (Array.isArray(value)) return value.map(asRecord)
   return Object.entries(asRecord(value)).map(([kind, artifact]) => ({
@@ -366,6 +412,8 @@ export function normalizeRun(payload: unknown): RunSnapshot {
   const researchRunPayload = asRecord(researchRunArtifact?.payload)
   const manuscriptArtifact = artifacts.find((artifact) => asString(artifact.kind) === 'manuscript_package')
   const manuscriptPayload = asRecord(manuscriptArtifact?.payload)
+  const designArenaArtifact = artifacts.find((artifact) => asString(artifact.kind) === 'design_arena')
+  const designArenaPayload = asRecord(designArenaArtifact?.payload)
   const modeValue = asString(first(run, 'mode', 'run_mode', 'execution_mode') ?? casePayload.execution_mode, 'fixture').toLowerCase()
   const currentStep = asString(first(run, 'current_step', 'current_node_id', 'currentNodeId', 'current_step_key'))
   const explicitGate = asString(first(run, 'current_gate', 'currentGate')).toUpperCase()
@@ -375,6 +423,8 @@ export function normalizeRun(payload: unknown): RunSnapshot {
       ? 'H2'
       : ['await_h3', 'h3_gate'].includes(currentStep)
         ? 'H3'
+        : ['await_h4', 'h4_gate'].includes(currentStep)
+          ? 'H4'
         : '')
   const eventRecords = asArray(run.events).map(asRecord)
   const attempts = asArray(first(run, 'steps', 'step_runs', 'step_attempts', 'attempts')).map((value, index) => {
@@ -411,7 +461,7 @@ export function normalizeRun(payload: unknown): RunSnapshot {
     mode: modeValue === 'research' ? 'research' : 'fixture',
     status: normalizeRunStatus(run.status),
     currentNodeId: currentStep || undefined,
-    currentGate: ['H1', 'H2', 'H3'].includes(currentGate) ? (currentGate as 'H1' | 'H2' | 'H3') : undefined,
+    currentGate: ['H1', 'H2', 'H3', 'H4'].includes(currentGate) ? (currentGate as 'H1' | 'H2' | 'H3' | 'H4') : undefined,
     lastError: asString(first(run, 'last_error', 'lastError'), '') || undefined,
     executionStatus: asString(first(run, 'execution_status', 'executionStatus') ?? researchRunPayload.execution_status, 'not_started'),
     scientificStatus: asString(first(run, 'scientific_status', 'scientificStatus') ?? researchRunPayload.scientific_status, 'not_assessed'),
@@ -422,6 +472,7 @@ export function normalizeRun(payload: unknown): RunSnapshot {
     events: normalizedEvents,
     claims: asArray(first(run, 'claims', 'claim_ledger') ?? claimPayload.claims).map(normalizeClaim),
     manuscript: normalizeManuscript(manuscriptPayload),
+    designArena: normalizeDesignArena(designArenaPayload),
     allowedActions: asArray(first(run, 'allowed_actions', 'allowedActions')).map(String),
   }
 }
@@ -495,6 +546,16 @@ function serializeCase(input: NonNullable<CreateRunInput['case']>) {
       sha256: dataset.sha256,
       size_bytes: dataset.sizeBytes,
     })),
+    ...(input.designEnvelope ? {
+      design_envelope: {
+        benchmark_track: input.designEnvelope.benchmarkTrack,
+        research_goal: input.designEnvelope.researchGoal,
+        target_estimands: input.designEnvelope.targetEstimands,
+        design_constraints: input.designEnvelope.designConstraints,
+        required_diagnostics: input.designEnvelope.requiredDiagnostics,
+        allowed_claim_strength: input.designEnvelope.allowedClaimStrength,
+      },
+    } : {}),
     known_policy_facts: input.knownPolicyFacts.map((item) => item.trim()).filter(Boolean),
     constraints: input.constraints.map((item) => item.trim()).filter(Boolean),
   }
@@ -564,8 +625,32 @@ export function normalizeCaseSubmission(payload: unknown): CaseSubmissionInput {
         sizeBytes: Number(first(dataset, 'size_bytes', 'sizeBytes') ?? 0),
       }
     }),
+    designEnvelope: (() => {
+      const envelope = asRecord(first(value, 'design_envelope', 'designEnvelope'))
+      if (!Object.keys(envelope).length) return undefined
+      return {
+        benchmarkTrack: asString(first(envelope, 'benchmark_track', 'benchmarkTrack'), 'strict_blind') as NonNullable<CaseSubmissionInput['designEnvelope']>['benchmarkTrack'],
+        researchGoal: asString(first(envelope, 'research_goal', 'researchGoal'), 'mixed') as NonNullable<CaseSubmissionInput['designEnvelope']>['researchGoal'],
+        targetEstimands: asArray(first(envelope, 'target_estimands', 'targetEstimands')).map(String),
+        designConstraints: asArray(first(envelope, 'design_constraints', 'designConstraints')).map(String),
+        requiredDiagnostics: asArray(first(envelope, 'required_diagnostics', 'requiredDiagnostics')).map(String),
+        allowedClaimStrength: asString(first(envelope, 'allowed_claim_strength', 'allowedClaimStrength'), 'not_prespecified') as NonNullable<CaseSubmissionInput['designEnvelope']>['allowedClaimStrength'],
+      }
+    })(),
     knownPolicyFacts: asArray(first(value, 'known_policy_facts', 'knownPolicyFacts')).map(String),
     constraints: asArray(value.constraints).map(String),
+  }
+}
+
+function normalizeDatasetReference(payload: unknown): DatasetReferenceInput {
+  const dataset = asRecord(payload)
+  return {
+    datasetId: asString(first(dataset, 'dataset_id', 'datasetId')),
+    role: asString(dataset.role, 'supplementary') as DatasetReferenceInput['role'],
+    filename: asString(dataset.filename),
+    mimeType: asString(first(dataset, 'mime_type', 'mimeType'), 'text/csv'),
+    sha256: asString(dataset.sha256),
+    sizeBytes: Number(first(dataset, 'size_bytes', 'sizeBytes') ?? 0),
   }
 }
 
@@ -696,6 +781,26 @@ export const workflowApi = {
     return normalizeLocalCaseImport(payload)
   },
 
+  async uploadCaseAsset(file: File): Promise<DatasetReferenceInput> {
+    if (file.name.toLowerCase() !== 'spatial_weights.csv') throw new Error('仅支持 spatial_weights.csv 补充资产。')
+    const token = accessToken()
+    const response = await fetch(`${API_BASE}/case-imports/assets/upload?filename=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': file.type || 'text/csv',
+        ...(token ? { 'X-Hypoweaver-Token': token } : {}),
+      },
+      body: file,
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      const message = asString(first(asRecord(payload), 'detail', 'message'), `HTTP ${response.status}`)
+      throw new Error(message)
+    }
+    return normalizeDatasetReference(payload)
+  },
+
   async startAgentLaboratory(caseInput: CaseSubmissionInput): Promise<BaselineRun> {
     return normalizeBaselineRun(await request('/baselines/agent-laboratory/runs', {
       method: 'POST',
@@ -768,6 +873,7 @@ export const workflowApi = {
           final_text: claim.finalText,
           reason: claim.reason ?? input.comment ?? '',
         })) ?? [],
+        selected_candidate_id: input.selectedCandidateId ?? null,
       }),
     })
     return normalizeRun(payload)

@@ -231,6 +231,54 @@ describe('runtime API adapter', () => {
     expect(run.manuscript?.sections).toHaveLength(8)
   })
 
+  it('normalizes the H2 design arena and keeps only viable candidates selectable', () => {
+    const run = normalizeRun({
+      ...actualBackendRunPayload,
+      current_node_id: 'h2_gate',
+      current_gate: 'H2',
+      artifacts: {
+        design_arena: {
+          kind: 'design_arena',
+          payload: {
+            arena_id: 'arena-1',
+            provisional_candidate_id: 'candidate-direct_baseline',
+            recommended_candidate_ids: ['candidate-direct_baseline'],
+            selection_rationale: ['Probe 不读取统计结果。'],
+            candidates: [{
+              candidate_id: 'candidate-direct_baseline',
+              strategy: 'direct_baseline',
+              rationale: '最小可执行基准',
+              plan: {
+                method_family: 'panel_association',
+                baseline_models: [{ estimator: '双向固定效应', formula: 'y ~ x' }],
+              },
+              probe_report: {
+                verdict: 'pass',
+                executor_ready: true,
+                checks: [{ check_id: 'fields', status: 'pass', evidence: '字段齐全' }],
+              },
+            }],
+            reviewer_reports: [{
+              candidate_reviews: [{ candidate_id: 'candidate-direct_baseline', verdict: 'pass', issues: [] }],
+            }],
+          },
+        },
+      },
+    })
+
+    expect(run.currentGate).toBe('H2')
+    expect(run.designArena).toMatchObject({
+      id: 'arena-1',
+      provisionalCandidateId: 'candidate-direct_baseline',
+      recommendedCandidateIds: ['candidate-direct_baseline'],
+    })
+    expect(run.designArena?.candidates[0]).toMatchObject({
+      estimator: '双向固定效应',
+      probeVerdict: 'pass',
+      executorReady: true,
+    })
+  })
+
   it('normalizes Agent Laboratory baseline progress without pretending it is scientifically audited', () => {
     const baseline = normalizeBaselineRun({
       id: 'baseline-1',
@@ -324,6 +372,32 @@ describe('runtime API adapter', () => {
 
     expect(imported.report.datasetFilename).toBe('main data.csv')
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/case-imports/upload?filename=main%20data.csv', expect.objectContaining({
+      method: 'POST',
+      body: file,
+    }))
+  })
+
+  it('uploads a visible spatial matrix as a supplementary dataset', async () => {
+    const payload = {
+      dataset_id: 'ds-weights',
+      role: 'supplementary',
+      filename: 'spatial_weights.csv',
+      mime_type: 'text/csv',
+      sha256: 'c'.repeat(64),
+      size_bytes: 42,
+    }
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => payload })
+    vi.stubGlobal('fetch', fetchMock)
+    const file = Object.assign(new Blob(['spatial_id,A\nA,0\n'], { type: 'text/csv' }), { name: 'spatial_weights.csv' }) as File
+
+    const reference = await workflowApi.uploadCaseAsset(file)
+
+    expect(reference).toMatchObject({
+      datasetId: 'ds-weights',
+      role: 'supplementary',
+      filename: 'spatial_weights.csv',
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/case-imports/assets/upload?filename=spatial_weights.csv', expect.objectContaining({
       method: 'POST',
       body: file,
     }))
@@ -481,6 +555,21 @@ describe('runtime API adapter', () => {
       idempotency_key: 'decision-001',
       claims: [{ claim_id: 'claim-1', decision: 'hold' }],
     })
+  })
+
+  it('sends the explicitly selected H2 candidate to the server', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => runPayload })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('crypto', { randomUUID: () => 'decision-h2' })
+    const run = normalizeRun(runPayload)
+
+    await workflowApi.decideGate(run, 'H2', {
+      action: 'approve',
+      selectedCandidateId: 'candidate-identification_first',
+    })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.selected_candidate_id).toBe('candidate-identification_first')
   })
 
   it('keeps the workflow access token in session storage and sends it on requests', async () => {

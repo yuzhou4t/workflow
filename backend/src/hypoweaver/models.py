@@ -99,6 +99,25 @@ class DatasetRef(StrictModel):
     size_bytes: int = Field(ge=0)
 
 
+class DesignEnvelope(StrictModel):
+    benchmark_track: Literal["strict_blind", "reproduction_aligned"] = "strict_blind"
+    research_goal: Literal[
+        "causal",
+        "associational",
+        "mechanism",
+        "prediction",
+        "measurement",
+        "structural",
+        "mixed",
+    ] = "mixed"
+    target_estimands: list[str] = Field(default_factory=list)
+    design_constraints: list[str] = Field(default_factory=list)
+    required_diagnostics: list[str] = Field(default_factory=list)
+    allowed_claim_strength: Literal[
+        "causal", "associational", "descriptive", "not_prespecified"
+    ] = "not_prespecified"
+
+
 class CaseSubmission(StrictModel):
     case_id: str
     title: str
@@ -111,6 +130,7 @@ class CaseSubmission(StrictModel):
     ] = "unknown"
     variables: list[VariableSpec]
     dataset_refs: list[DatasetRef] = Field(default_factory=list)
+    design_envelope: DesignEnvelope | None = None
     known_policy_facts: list[str] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
 
@@ -276,6 +296,87 @@ class CriticReport(StrictModel):
     remaining_risks: list[str]
 
 
+class ProbeCheck(StrictModel):
+    check_id: str
+    status: Literal["pass", "warn", "fail"]
+    evidence: str
+    required_follow_up: str | None = None
+
+
+class ProbeReport(StrictModel):
+    report_id: str
+    candidate_id: str
+    verdict: Literal["pass", "warn", "fail"]
+    checks: list[ProbeCheck]
+    executor_ready: bool
+    used_outcome_results: Literal[False] = False
+
+
+class DesignCandidate(StrictModel):
+    candidate_id: str
+    strategy: Literal[
+        "direct_baseline", "identification_first", "measurement_robustness"
+    ]
+    rationale: str
+    plan: AnalysisPlan
+    probe_report: ProbeReport
+
+
+class CandidateDesignSet(StrictModel):
+    candidate_set_id: str
+    candidates: list[DesignCandidate] = Field(min_length=2, max_length=3)
+
+    @model_validator(mode="after")
+    def validate_candidates(self) -> "CandidateDesignSet":
+        candidate_ids = [candidate.candidate_id for candidate in self.candidates]
+        if len(candidate_ids) != len(set(candidate_ids)):
+            raise ValueError("candidate design ids must be unique")
+        return self
+
+
+class CandidateReview(StrictModel):
+    candidate_id: str
+    verdict: Literal["pass", "revise", "reject"]
+    strengths: list[str] = Field(default_factory=list)
+    issues: list[CriticIssue] = Field(default_factory=list)
+    required_follow_ups: list[str] = Field(default_factory=list)
+
+
+class DesignReviewerReport(StrictModel):
+    report_id: str
+    dimension: Literal["measurement", "causal", "statistical", "reproducibility"]
+    reviewer_policy: str
+    candidate_reviews: list[CandidateReview]
+    remaining_risks: list[str] = Field(default_factory=list)
+
+
+class DesignArena(StrictModel):
+    arena_id: str
+    candidates: list[DesignCandidate]
+    reviewer_reports: list[DesignReviewerReport]
+    recommended_candidate_ids: list[str]
+    provisional_candidate_id: str | None = None
+    selection_rationale: list[str]
+
+    @model_validator(mode="after")
+    def validate_candidate_references(self) -> "DesignArena":
+        candidate_ids = [candidate.candidate_id for candidate in self.candidates]
+        if len(candidate_ids) != len(set(candidate_ids)):
+            raise ValueError("design candidate ids must be unique")
+        known = set(candidate_ids)
+        if not set(self.recommended_candidate_ids).issubset(known):
+            raise ValueError("recommended candidate id is not in the arena")
+        if self.recommended_candidate_ids and self.provisional_candidate_id not in self.recommended_candidate_ids:
+            raise ValueError("provisional candidate must be recommended")
+        if not self.recommended_candidate_ids and self.provisional_candidate_id is not None:
+            raise ValueError("blocked design arena cannot have a provisional candidate")
+        for report in self.reviewer_reports:
+            reviewed = {item.candidate_id for item in report.candidate_reviews}
+            if reviewed != known:
+                raise ValueError("every reviewer must assess every design candidate")
+        return self
+
+
 class ContractBudget(StrictModel):
     max_executions: int = Field(default=12, ge=1)
     max_llm_calls: int = Field(default=20, ge=1)
@@ -337,6 +438,16 @@ class ResearchRun(StrictModel):
             if execution.estimates or execution.diagnostic_results:
                 raise ValueError("fixture execution cannot contain empirical estimates or diagnostics")
         return self
+
+
+class ReproductionAudit(StrictModel):
+    audit_id: str
+    primary_run_id: str
+    replication_run_id: str | None = None
+    status: Literal["matched", "diverged", "not_applicable", "failed"]
+    compared_fields: list[str] = Field(default_factory=list)
+    differences: list[str] = Field(default_factory=list)
+    numeric_tolerance: float = Field(default=1e-8, gt=0)
 
 
 class EvidenceAssessment(StrictModel):
@@ -503,10 +614,11 @@ class RunEvent(StrictModel):
 
 class DecisionRecord(StrictModel):
     decision_id: str = Field(default_factory=lambda: str(uuid4()))
-    gate: Literal["H1", "H2", "H3"]
+    gate: Literal["H1", "H2", "H3", "H4"]
     action: str
     actor: str
     comment: str = ""
+    selected_candidate_id: str | None = None
     reviewed_hashes: dict[str, str] = Field(default_factory=dict)
     claim_decisions: dict[str, str] = Field(default_factory=dict)
     created_at: str = Field(default_factory=utc_now)
@@ -523,7 +635,7 @@ class RunState(StrictModel):
     execution_mode: Literal["fixture", "external"] = "fixture"
     status: RunStatus = "created"
     current_node_id: str | None = None
-    current_gate: Literal["H1", "H2", "H3"] | None = None
+    current_gate: Literal["H1", "H2", "H3", "H4"] | None = None
     version: int = Field(default=1, ge=1)
     execution_status: str = "not_started"
     scientific_status: str = "not_evaluated"
@@ -586,6 +698,7 @@ class GateDecisionRequest(StrictModel):
     idempotency_key: str = Field(default_factory=lambda: str(uuid4()))
     reviewed_artifact_hashes: dict[str, str] = Field(default_factory=dict)
     claims: list[ClaimDecisionInput] = Field(default_factory=list)
+    selected_candidate_id: str | None = None
 
     @model_validator(mode="after")
     def unique_claim_decisions(self) -> "GateDecisionRequest":

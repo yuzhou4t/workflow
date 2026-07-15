@@ -83,6 +83,11 @@ class BlindEngineTests(unittest.IsolatedAsyncioTestCase):
                 ],
             ),
         )
+        run = await self.app_a.decide_gate(
+            run.id,
+            "H4",
+            GateDecisionRequest(action="approve", idempotency_key="blind-h4"),
+        )
         return BlindEvaluationRequest(
             case_id=run.case_id,
             sealed_output=run.artifacts["sealed_output"]["payload"],

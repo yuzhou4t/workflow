@@ -1,0 +1,997 @@
+{
+  "case_id": "case_001_esg_sdla_complete_dictionary_v1",
+  "title": "企业ESG表现与短债长用",
+  "research_question": "企业ESG表现是否与中国A股上市公司的投融资期限错配有关，以及信息环境、机构投资者期限结构和投资决策质量是否构成可能的传导渠道？",
+  "hypotheses": [
+    {
+      "hypothesis_id": "H1",
+      "statement": "企业ESG表现越高，企业短债长用程度越低。",
+      "expected_direction": "negative"
+    },
+    {
+      "hypothesis_id": "H2",
+      "statement": "信息透明度可能影响ESG表现与短债长用之间的关系。",
+      "expected_direction": "unspecified",
+      "mechanism": "信息透明度"
+    },
+    {
+      "hypothesis_id": "H3",
+      "statement": "长期机构投资者持股可能影响ESG表现与短债长用之间的关系。",
+      "expected_direction": "unspecified",
+      "mechanism": "机构投资者期限结构"
+    },
+    {
+      "hypothesis_id": "H4",
+      "statement": "过度投资可能影响ESG表现与短债长用之间的关系。",
+      "expected_direction": "unspecified",
+      "mechanism": "投资决策质量"
+    }
+  ],
+  "unit_of_analysis": "中国A股上市公司—年度",
+  "sample_period": "2009—2021",
+  "data_structure_hint": "panel",
+  "variables": [
+    {
+      "name": "S",
+      "label": "企业数值代码",
+      "role": "id",
+      "definition": "企业面板个体识别码；与 YEAR 组成唯一主键。",
+      "source": "企业基础信息/CSMAR"
+    },
+    {
+      "name": "YEAR",
+      "label": "年份",
+      "role": "time",
+      "definition": "观测所属会计年度。",
+      "source": "企业基础信息/CSMAR"
+    },
+    {
+      "name": "证券代码",
+      "label": "证券代码",
+      "role": "id",
+      "definition": "带交易所后缀的证券代码，按文本保存。",
+      "source": "企业基础信息/CSMAR"
+    },
+    {
+      "name": "综合评级",
+      "label": "华证ESG综合评级",
+      "role": "exposure",
+      "definition": "华证ESG字母评级。",
+      "source": "华证指数/Wind"
+    },
+    {
+      "name": "综合得分",
+      "label": "华证ESG原始综合得分",
+      "role": "exposure",
+      "definition": "华证ESG原始综合得分。",
+      "source": "华证指数/Wind"
+    },
+    {
+      "name": "SDLA",
+      "label": "短债长用程度",
+      "role": "outcome",
+      "definition": "短期负债/总负债减去短期资产/总资产。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ESG",
+      "label": "企业ESG得分",
+      "role": "exposure",
+      "definition": "综合得分除以100。",
+      "source": "华证指数/Wind"
+    },
+    {
+      "name": "SIZE",
+      "label": "企业规模",
+      "role": "control",
+      "definition": "期末总资产的自然对数。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "BOARD",
+      "label": "董事会规模",
+      "role": "control",
+      "definition": "董事会总人数的自然对数。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "LEV",
+      "label": "资产负债率",
+      "role": "control",
+      "definition": "期末总负债/期末总资产。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ROA",
+      "label": "资产回报率",
+      "role": "control",
+      "definition": "当期净利润/期末总资产。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "GROWTH",
+      "label": "营业收入增长率",
+      "role": "control",
+      "definition": "营业收入增长率。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "经营活动产生的现金流量净额",
+      "label": "经营活动产生的现金流量净额",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“经营活动产生的现金流量净额”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "总资产企业规模",
+      "label": "总资产（企业规模）",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“总资产（企业规模）”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "CF",
+      "label": "经营性现金流",
+      "role": "control",
+      "definition": "经营活动现金流量净额/期末总资产。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "FA",
+      "label": "固定资产比重",
+      "role": "control",
+      "definition": "固定资产净额/资产总额。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "TOP1",
+      "label": "第一大股东持股比例",
+      "role": "control",
+      "definition": "第一大股东持股比例。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "Q",
+      "label": "托宾Q",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“Q”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "INDR",
+      "label": "独立董事比例",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“INDR”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "AGE",
+      "label": "企业年龄",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“AGE”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "固定资产净额",
+      "label": "固定资产净额",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“固定资产净额”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "员工人数",
+      "label": "员工人数",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“员工人数”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "CI",
+      "label": "资本密集度",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“CI”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "MH",
+      "label": "管理层持股比例",
+      "role": "control",
+      "definition": "管理层持股数量/总股本。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "DUAL",
+      "label": "两职合一",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“DUAL”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "SOE",
+      "label": "产权性质",
+      "role": "control",
+      "definition": "国有企业取1，否则取0。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ANA",
+      "label": "分析师关注",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“ANA”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "INS",
+      "label": "机构投资者持股",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“INS”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "INDUSTRY",
+      "label": "行业代码",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“INDUSTRY”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "企业基础信息/CSMAR"
+    },
+    {
+      "name": "省份",
+      "label": "所属省份",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“所属省份”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "企业基础信息/CSMAR"
+    },
+    {
+      "name": "SDLA_w",
+      "label": "SFLI_刘晓光",
+      "role": "outcome",
+      "definition": "SDLA 的 1% 与 99% 分位缩尾版本；SDLA 为短期负债占总负债比例减去短期资产占总资产比例。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ESG_w",
+      "label": "ESG",
+      "role": "exposure",
+      "definition": "华证 ESG 综合得分除以 100 后的 1% 与 99% 分位缩尾版本。",
+      "source": "华证指数/Wind"
+    },
+    {
+      "name": "SIZE_w",
+      "label": "SIZE",
+      "role": "control",
+      "definition": "企业规模缩尾值。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "BOARD_w",
+      "label": "BOARD",
+      "role": "control",
+      "definition": "董事会规模相关指标缩尾值。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "LEV_w",
+      "label": "LEV",
+      "role": "control",
+      "definition": "资产负债率缩尾值。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ROA_w",
+      "label": "ROA",
+      "role": "control",
+      "definition": "总资产收益率缩尾值。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "GROWTH_w",
+      "label": "GROWTH",
+      "role": "control",
+      "definition": "企业成长性缩尾值。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "CF_w",
+      "label": "CF",
+      "role": "control",
+      "definition": "经营现金流相关指标缩尾值。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "FA_w",
+      "label": "FA",
+      "role": "control",
+      "definition": "固定资产相关指标缩尾值。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "TOP1_w",
+      "label": "TOP1",
+      "role": "control",
+      "definition": "第一大股东持股比例缩尾值。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "Q_w",
+      "label": "Q",
+      "role": "outcome",
+      "definition": "Q 的 1% 与 99% 分位缩尾版本；原始列与处理列均保留。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "INDR_w",
+      "label": "INDR",
+      "role": "control",
+      "definition": "INDR 的 1% 与 99% 分位缩尾版本；原始列与处理列均保留。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "AGE_w",
+      "label": "AGE",
+      "role": "control",
+      "definition": "AGE 的 1% 与 99% 分位缩尾版本；原始列与处理列均保留。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "CI_w",
+      "label": "CI",
+      "role": "control",
+      "definition": "CI 的 1% 与 99% 分位缩尾版本；原始列与处理列均保留。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "MH_w",
+      "label": "MH",
+      "role": "control",
+      "definition": "管理层持股比例缩尾值。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "DUAL_w",
+      "label": "DUAL",
+      "role": "control",
+      "definition": "DUAL 的 1% 与 99% 分位缩尾版本；原始列与处理列均保留。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "SOE_w",
+      "label": "SOE",
+      "role": "control",
+      "definition": "企业产权性质标识。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ANA_w",
+      "label": "ANA",
+      "role": "control",
+      "definition": "ANA 的 1% 与 99% 分位缩尾版本；原始列与处理列均保留。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "INS_w",
+      "label": "INS",
+      "role": "control",
+      "definition": "INS 的 1% 与 99% 分位缩尾版本；原始列与处理列均保留。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "E",
+      "label": "环境维度",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“E”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "华证指数/Wind"
+    },
+    {
+      "name": "D",
+      "label": "社会维度",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“S”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "华证指数/Wind"
+    },
+    {
+      "name": "G",
+      "label": "治理维度",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“G”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "华证指数/Wind"
+    },
+    {
+      "name": "Z值",
+      "label": "财务风险Z值",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“Z值”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "SA指数",
+      "label": "融资约束SA指数",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“SA指数”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ESG评级",
+      "label": "华证ESG评级赋值",
+      "role": "exposure",
+      "definition": "华证 ESG 字母评级的数值化替代口径。",
+      "source": "华证指数/Wind"
+    },
+    {
+      "name": "商道融绿ESG综合评级",
+      "label": "商道融绿ESG综合评级",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“商道融绿ESG综合评级”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "商道融绿"
+    },
+    {
+      "name": "商道融绿ESG",
+      "label": "商道融绿ESG评级赋值",
+      "role": "exposure",
+      "definition": "替代评级口径；仅部分年份和企业可用，缺失率较高。",
+      "source": "商道融绿"
+    },
+    {
+      "name": "SFLIDUM",
+      "label": "SFLIDUM",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "meansfli",
+      "label": "meansfli",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ESGDUM",
+      "label": "ESGDUM",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "sflidum",
+      "label": "sflidum",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "盈利波动性pre",
+      "label": "盈利波动性pre",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“盈利波动性pre”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "盈利波动性post",
+      "label": "盈利波动性post",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“盈利波动性post”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "MEDIANROAPOST",
+      "label": "MEDIANROAPOST",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ROAPOSTDUM",
+      "label": "ROAPOSTDUM",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "MEDIANFA",
+      "label": "MEDIANFA",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "FADUM",
+      "label": "FADUM",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "市场化总指数",
+      "label": "市场化总指数",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“市场化总指数”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "MEDIAN市场化总指数",
+      "label": "MEDIAN市场化总指数",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "市场化总指数DUM",
+      "label": "市场化总指数DUM",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "meanesg1",
+      "label": "meanesg1",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "meanesg2",
+      "label": "meanesg2",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "industry",
+      "label": "INDUSTRY",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“INDUSTRY”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "企业基础信息/CSMAR"
+    },
+    {
+      "name": "MEANESG0",
+      "label": "MEANESG0",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "MISLA",
+      "label": "MISLA",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“MISLA”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "非流动资产",
+      "label": "非流动资产",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“非流动资产”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "所有者权益合计",
+      "label": "所有者权益合计",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“所有者权益合计”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "长期负债合计",
+      "label": "长期负债合计",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“长期负债合计”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "MISLA_w",
+      "label": "MISLA",
+      "role": "outcome",
+      "definition": "MISLA 的 1% 与 99% 分位缩尾版本；原始列与处理列均保留。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ZESG",
+      "label": "ZESG",
+      "role": "unknown",
+      "definition": "ESG_w × Z值；已在模型可见数据内逐行核验乘积关系。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "SDLAESG",
+      "label": "SDLAESG",
+      "role": "unknown",
+      "definition": "SDLA_w × ESG_w；已在模型可见数据内逐行核验乘积关系。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "RISKO",
+      "label": "RISKO",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "盈利波动性2",
+      "label": "盈利波动性2",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“盈利波动性2”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "盈利波动性3",
+      "label": "盈利波动性3",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“盈利波动性3”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "RISKROA2",
+      "label": "RISKROA2",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "RISKROA3",
+      "label": "RISKROA3",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "OScore",
+      "label": "O-Score破产风险",
+      "role": "outcome",
+      "definition": "Ohlson型企业破产风险得分。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "OScore_w",
+      "label": "O-Score",
+      "role": "outcome",
+      "definition": "OScore 的 1% 与 99% 分位缩尾版本；原始列与处理列均保留。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "LOScore",
+      "label": "LOScore",
+      "role": "outcome",
+      "definition": "下一年度O-Score。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "LROA",
+      "label": "LROA",
+      "role": "outcome",
+      "definition": "下一年度资产回报率。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "LLEV_IND",
+      "label": "LLEV_IND",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "LF",
+      "label": "长期债务融资能力",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“Residuals”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "LF_MEDIAN",
+      "label": "LF_MEDIAN",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "LFDUM",
+      "label": "LFDUM",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "LLEV_IND1",
+      "label": "LLEV_IND1",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "LLEV_IND_w",
+      "label": "LLEV_IND",
+      "role": "moderator",
+      "definition": "LLEV_IND 的 1% 与 99% 分位缩尾版本；原始列与处理列均保留。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "NEW_INDUSTRY",
+      "label": "INDUSTRY",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“INDUSTRY”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "企业基础信息/CSMAR"
+    },
+    {
+      "name": "ESGFV",
+      "label": "泛ESG基金持股市值",
+      "role": "unknown",
+      "definition": "被泛ESG基金持有的市值。",
+      "source": "基金/机构持仓数据"
+    },
+    {
+      "name": "持股数量",
+      "label": "持股数量",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“持股数量”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "基金/机构持仓数据"
+    },
+    {
+      "name": "ESGQ",
+      "label": "泛ESG基金持股家数",
+      "role": "unknown",
+      "definition": "持有该企业的泛ESG基金家数。",
+      "source": "基金/机构持仓数据"
+    },
+    {
+      "name": "资产总计",
+      "label": "资产总计",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“资产总计”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "负债合计",
+      "label": "负债合计",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“负债合计”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "重述",
+      "label": "重述",
+      "role": "mediator",
+      "definition": "上市公司年度财务重述次数。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ESG重述",
+      "label": "ESG重述",
+      "role": "unknown",
+      "definition": "ESG_w × 重述；已在模型可见数据内逐行核验乘积关系。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "流动负债合计",
+      "label": "流动负债合计",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“流动负债合计”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "MAT",
+      "label": "MAT",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“MAT”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "非流动负债合计",
+      "label": "非流动负债合计",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“非流动负债合计”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "LLEV",
+      "label": "LLEV",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“LLEV”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "托宾Q值",
+      "label": "托宾Q值A",
+      "role": "outcome",
+      "definition": "数据库口径的托宾Q值。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "托宾Q值_w",
+      "label": "托宾Q值A",
+      "role": "outcome",
+      "definition": "托宾Q值 的 1% 与 99% 分位缩尾版本；原始列与处理列均保留。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "L托宾Q值",
+      "label": "L托宾Q值",
+      "role": "outcome",
+      "definition": "下一年度托宾Q值。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "Inveffi",
+      "label": "投资效率",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“Inveffi”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "Over_INV",
+      "label": "过度投资",
+      "role": "mediator",
+      "definition": "基于投资期望模型形成的过度投资候选代理变量；缺失率较高。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "OVERESG",
+      "label": "OVERESG",
+      "role": "unknown",
+      "definition": "ESG_w × Over_INV；已在模型可见数据内逐行核验乘积关系。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "短期投资持股比例",
+      "label": "短期投资持股比例",
+      "role": "mediator",
+      "definition": "按机构投资期限分类后的短期机构投资者持股比例。",
+      "source": "基金/机构持仓数据"
+    },
+    {
+      "name": "长期投资持股比例",
+      "label": "长期投资持股比例",
+      "role": "mediator",
+      "definition": "按机构投资期限分类后的长期机构投资者持股比例。",
+      "source": "基金/机构持仓数据"
+    },
+    {
+      "name": "LONGESG",
+      "label": "LONGESG",
+      "role": "unknown",
+      "definition": "ESG_w × 长期投资持股比例；已在模型可见数据内逐行核验乘积关系。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "SHORTESG",
+      "label": "SHORTESG",
+      "role": "unknown",
+      "definition": "ESG_w × 短期投资持股比例；已在模型可见数据内逐行核验乘积关系。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "短期借款",
+      "label": "短期借款",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“短期借款”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "SLEV",
+      "label": "短期借款占总资产比重",
+      "role": "outcome",
+      "definition": "短期借款/总资产。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "SLEV_w",
+      "label": "SLEV",
+      "role": "outcome",
+      "definition": "用于替代口径检验的结果变量，存在少量缺失。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "DA2",
+      "label": "操纵性应计利润2",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“DA2”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ABSDA2",
+      "label": "操纵性应计利润绝对值2",
+      "role": "mediator",
+      "definition": "非线性应计模型形成的信息透明度候选代理变量。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ESGABSDA2",
+      "label": "ESGABSDA2",
+      "role": "unknown",
+      "definition": "ESG_w × ABSDA2；已在模型可见数据内逐行核验乘积关系。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "DA1",
+      "label": "操纵性应计利润1",
+      "role": "unknown",
+      "definition": "附件数据字段；Stata标签为“DA1”。完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ABSDA1",
+      "label": "操纵性应计利润绝对值1",
+      "role": "mediator",
+      "definition": "修正 Jones 模型形成的信息透明度候选代理变量。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ESGABSDA1",
+      "label": "ESGABSDA1",
+      "role": "unknown",
+      "definition": "ESG_w × ABSDA1；已在模型可见数据内逐行核验乘积关系。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ESGMEAN",
+      "label": "ESGMEAN",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "diff",
+      "label": "diff",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ESGMEAN1",
+      "label": "ESGMEAN1",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "ESGMEAN2",
+      "label": "ESGMEAN2",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    },
+    {
+      "name": "diff2",
+      "label": "diff2",
+      "role": "unknown",
+      "definition": "附件数据中的原始或派生字段；完整计算口径未在数据标签中给出，需结合变量生成记录复核。",
+      "source": "CSMAR或其派生字段（需结合生成代码复核）"
+    }
+  ],
+  "dataset_refs": [],
+  "design_envelope": {
+    "benchmark_track": "reproduction_aligned",
+    "research_goal": "mechanism",
+    "target_estimands": [
+      "同一企业内 ESG 表现变化与短债长用程度变化之间的条件关联",
+      "控制共同年份冲击后的主假设关联参数",
+      "预先给定候选机制变量与主关联之间的证据边界"
+    ],
+    "design_constraints": [
+      "必须利用企业—年度面板结构，并明确个体异质性、共同年份冲击与面板内相关的处理方式。",
+      "主模型优先使用 SDLA_w 与 ESG_w；替代结果和替代评级仅作为预先声明的稳健性候选，不得按显著性切换。",
+      "不得读取 02_hidden_reference 中的论文、作者代码、回归表或参考结论。",
+      "机制变量缺失或执行器能力不足时应如实标记未执行，不得用基准系数方向代替机制证据。",
+      "任何未在 H2 冻结的模型、样本筛选或变量切换均不得在结果产生后追加。",
+      "面板固定效应模型默认删除单例实体观测并记录删除数量；如需保留，必须在 H2 冻结前明确说明。",
+      "按实体聚类时采用可复现的有限样本校正，并分别报告模型、组内、总体、含固定效应和调整后含固定效应 R²。",
+      "替代变量、证伪与交互机制步骤只有在 H2 明确冻结且执行器真实返回记录后才能进入结论。"
+    ],
+    "required_diagnostics": [
+      "S 与 YEAR 组合主键唯一性",
+      "核心变量缺失率与面板内变异",
+      "固定效应设定与聚类标准误层级",
+      "共线性、残差与模型执行警告",
+      "替代口径和机制分析的实际可执行状态"
+    ],
+    "allowed_claim_strength": "associational"
+  },
+  "known_policy_facts": [
+    "华证指数自 2009 年起提供相关 ESG 评价。",
+    "样本为 2009—2021 年中国沪深 A 股上市公司企业—年度观测。"
+  ],
+  "constraints": [
+    "S + YEAR 在当前分析数据中无重复且无缺失。",
+    "连续变量的 _w 字段与同表原始字段逐行核验后符合 1% 与 99% 分位缩尾特征。",
+    "当前数据已经过案例提供方预处理；工作流不得声称自行完成原始数据库清洗或匹配。",
+    "ESG 评级覆盖可能存在样本选择风险；商业数据库内容的使用须遵守原授权。"
+  ]
+}

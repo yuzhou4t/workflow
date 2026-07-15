@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -22,7 +24,12 @@ from .case_import import CaseImportError, DatasetRegistry
 from .models import (
     AnalysisPlan,
     CaseSubmission,
+    CandidateDesignSet,
     ClaimLedger,
+    DesignArena,
+    DesignCandidate,
+    DesignEnvelope,
+    DesignReviewerReport,
     CriticIssue,
     CriticReport,
     DataProfile,
@@ -35,8 +42,11 @@ from .models import (
     ManuscriptSection,
     MethodRoute,
     PromptContent,
+    ProbeCheck,
+    ProbeReport,
     ResearchPackage,
     ResearchRun,
+    ReproductionAudit,
     RevisionRequest,
     RunEvent,
     RunState,
@@ -50,6 +60,7 @@ from .models import (
 from .prompts import get_prompt
 from .repository import RunRepository, VersionConflictError
 from .seal import canonical_sha256, sign_manifest
+from .spatial import SpatialWeights, is_spatial_weights_filename
 
 
 class WorkflowTransitionError(RuntimeError):
@@ -116,6 +127,13 @@ LEGACY_OVERBROAD_EXECUTION_WARNING = (
     "稳健性、证伪、机制和异质性步骤尚未执行，因此科学状态标记为 limited。"
 )
 WRITER_ESCALATION_MODEL = "qwen3.7-max"
+REVIEWER_MODEL = "qwen3.7-max"
+DESIGN_RETRY_MODEL = "qwen3.7-max"
+DESIGN_STRATEGIES: tuple[tuple[str, str], ...] = (
+    ("direct_baseline", "以目标估计量和最小可执行模型为优先，不追逐显著性。"),
+    ("identification_first", "优先处理识别威胁、竞争解释与证伪条件。"),
+    ("measurement_robustness", "优先处理变量口径、缺失样本与测量敏感性。"),
+)
 WRITER_ESCALATION_SECTION_IDS = {
     "introduction",
     "theory_hypotheses",
@@ -153,7 +171,7 @@ MANUSCRIPT_SECTION_SPECS: tuple[dict[str, str], ...] = (
         "title": "三、数据、样本与变量",
         "target_characters": "650-900",
         "focus": "完整交代分析单位、样本时期、筛选规则、变量角色、定义、来源、预处理和已知数据质量情况；每个来源必须忠于输入。",
-        "evidence_keys": "research_context,data_profile,frozen_design,writing_requirements",
+        "evidence_keys": "research_context,data_profile,frozen_design,executed_evidence,writing_requirements",
     },
     {
         "section_id": "research_design",
@@ -207,6 +225,11 @@ class WorkflowEngine:
 
     def _gateway(self, state: RunState) -> ModelGateway:
         return QwenModelGateway() if state.model_provider == "qwen" else FixtureModelGateway()
+
+    def _reviewer_gateway(self, state: RunState) -> ModelGateway:
+        if state.model_provider == "qwen":
+            return QwenModelGateway(model_override=REVIEWER_MODEL)
+        return FixtureModelGateway()
 
     @staticmethod
     def _event(
@@ -373,7 +396,12 @@ class WorkflowEngine:
         selected_columns = list(dict.fromkeys(variable.name for variable in package.variables))
         key_columns = [*entity_keys, *time_keys]
         try:
-            source = self.dataset_registry.resolve(package.dataset_refs[0])
+            main_ref = next(
+                (item for item in package.dataset_refs if item.role == "main"),
+                package.dataset_refs[0],
+            )
+            source = self.dataset_registry.resolve(main_ref)
+            _verify_dataset_hash(source, main_ref.sha256)
             frame, column_count = _read_profile_csv(source, selected_columns)
         except (CaseImportError, OSError, ValueError) as error:
             return DataProfile(
@@ -425,8 +453,43 @@ class WorkflowEngine:
         blocking_reasons: list[str] = []
         if missing_columns:
             blocking_reasons.append("冻结计划所需字段与实际数据表不一致。")
-        if package.data_structure_hint == "panel" and (not entity_keys or not time_keys):
+        if package.data_structure_hint in {"panel", "spatial_panel"} and (
+            not entity_keys or not time_keys
+        ):
             blocking_reasons.append("面板数据缺少实体或时间主键。")
+
+        spatial_facts: list[str] = []
+        if package.data_structure_hint == "spatial_panel":
+            if not spatial_keys:
+                blocking_reasons.append("空间面板缺少 spatial_id 字段。")
+            weights_ref = next(
+                (
+                    item
+                    for item in package.dataset_refs
+                    if item.role == "supplementary"
+                    and is_spatial_weights_filename(item.filename)
+                ),
+                None,
+            )
+            if weights_ref is None:
+                blocking_reasons.append("空间面板缺少 spatial_weights.csv 权重资产。")
+            elif spatial_keys and spatial_keys[0] in frame.columns:
+                try:
+                    weights_path = self.dataset_registry.resolve(weights_ref)
+                    _verify_dataset_hash(weights_path, weights_ref.sha256)
+                    weights = SpatialWeights.from_csv(weights_path)
+                    weights.aligned(
+                        sorted(frame[spatial_keys[0]].dropna().astype(str).unique())
+                    )
+                    spatial_facts.extend(
+                        [
+                            f"空间权重矩阵包含 {len(weights.labels)} 个唯一空间单元。",
+                            "空间权重矩阵行列标签一致、对角线为 0、行和为 1。",
+                            f"空间权重资产 SHA256 已核验：{weights_ref.sha256}。",
+                        ]
+                    )
+                except (CaseImportError, OSError, ValueError) as error:
+                    blocking_reasons.append(f"空间权重资产校验失败：{error}")
 
         return DataProfile(
             profile_execution_status="succeeded",
@@ -444,6 +507,7 @@ class WorkflowEngine:
                 f"案例声明的数据结构为 {package.data_structure_hint}。",
                 f"变量字典包含 {len(package.variables)} 个字段。",
                 f"实际 CSV 共 {len(frame)} 行、{column_count} 列。",
+                *spatial_facts,
             ],
             measurement_risks=risks,
             merge_risks=[],
@@ -586,7 +650,8 @@ class WorkflowEngine:
             state.status == "completed"
             and "manuscript_package" in state.artifacts
         )
-        if not failed_writer and not completed_draft:
+        waiting_h4 = state.status == "waiting_human" and state.current_gate == "H4"
+        if not failed_writer and not completed_draft and not waiting_h4:
             raise WorkflowTransitionError("当前 Run 不在可重试的论文写作状态。")
 
         current_version = state.version
@@ -597,6 +662,21 @@ class WorkflowEngine:
             idempotency_key=transition_key,
         )
         try:
+            human_review_feedback = None
+            if (
+                state.decisions
+                and state.decisions[-1].gate == "H4"
+                and state.decisions[-1].action == "revise"
+            ):
+                h4_decision = state.decisions[-1]
+                feedback_already_attempted = any(
+                    step.node_id == "scientific_writer"
+                    and bool(step.started_at)
+                    and step.started_at >= h4_decision.created_at
+                    for step in state.steps
+                )
+                if not feedback_already_attempted:
+                    human_review_feedback = h4_decision.comment.strip() or None
             previous_version = int(
                 state.artifacts.get("manuscript_package", {})
                 .get("payload", {})
@@ -667,6 +747,7 @@ class WorkflowEngine:
                     manuscript_version=previous_version + 1,
                     existing_sections=existing_sections,
                     reuse_existing_if_valid=failed_writer,
+                    human_review_feedback=human_review_feedback,
                 )
             except Exception as error:
                 state.status = "failed"
@@ -677,6 +758,93 @@ class WorkflowEngine:
                     "run.failed",
                     f"论文写作失败：{error}",
                     node_id="scientific_writer",
+                    status="failed",
+                )
+            return self.repository.save(state, expected_version=current_version)
+        finally:
+            self.repository.release_transition(run_id, transition_key)
+
+    async def retry_design(self, run_id: str) -> RunState:
+        state = self.repository.get(run_id)
+        if (
+            state.status != "failed"
+            or state.current_node_id is None
+            or not (
+                state.current_node_id.startswith("design_")
+                or state.current_node_id.startswith("critic_")
+            )
+        ):
+            raise WorkflowTransitionError(
+                "只有候选设计或 Reviewer 失败的 Run 可以重试设计阶段。"
+            )
+        required_artifacts = (
+            "research_package",
+            "testable_hypotheses",
+            "data_profile",
+            "method_route",
+            "design_envelope",
+        )
+        if any(key not in state.artifacts for key in required_artifacts):
+            raise WorkflowTransitionError("设计阶段恢复所需 Artifact 不完整。")
+
+        current_version = state.version
+        transition_key = f"retry-design-{uuid4()}"
+        self.repository.claim_transition(
+            run_id,
+            expected_version=current_version,
+            idempotency_key=transition_key,
+        )
+        try:
+            state.status = "running"
+            state.last_error = None
+            package = self._artifact(state, "research_package", ResearchPackage)
+            hypotheses = self._artifact(
+                state, "testable_hypotheses", TestableHypotheses
+            )
+            profile = self._artifact(state, "data_profile", DataProfile)
+            route = self._artifact(state, "method_route", MethodRoute)
+            envelope = self._artifact(state, "design_envelope", DesignEnvelope)
+            selected_node = f"design_{route.primary_route}"
+            try:
+                if "candidate_design_set" in state.artifacts:
+                    candidate_set = self._artifact(
+                        state, "candidate_design_set", CandidateDesignSet
+                    )
+                else:
+                    retry_gateway = (
+                        QwenModelGateway(model_override=DESIGN_RETRY_MODEL)
+                        if state.model_provider == "qwen"
+                        else None
+                    )
+                    candidate_set = await self._generate_design_candidates(
+                        state,
+                        selected_node,
+                        package,
+                        hypotheses,
+                        profile,
+                        route,
+                        envelope,
+                        gateway=retry_gateway,
+                    )
+                    self._put_artifact(
+                        state, "candidate_design_set", candidate_set
+                    )
+                await self._review_design_arena(
+                    state,
+                    package,
+                    profile,
+                    route,
+                    envelope,
+                    candidate_set,
+                )
+            except Exception as error:
+                state.status = "failed"
+                state.last_error = str(error)
+                self._event(
+                    state,
+                    "run.failed",
+                    f"设计阶段恢复失败：{error}",
+                    node_id=state.current_node_id,
                     status="failed",
                 )
             return self.repository.save(state, expected_version=current_version)
@@ -706,12 +874,18 @@ class WorkflowEngine:
                 f"run {run_id} changed; expected version {expected}, actual {state.version}"
             )
         normalized_gate = gate.upper()
-        if normalized_gate not in ("H1", "H2", "H3"):
+        if normalized_gate not in ("H1", "H2", "H3", "H4"):
             raise WorkflowTransitionError(f"unknown gate: {gate}")
         if state.status != "waiting_human" or state.current_gate != normalized_gate:
             raise WorkflowTransitionError(
                 f"run is not waiting at {normalized_gate}; current gate is {state.current_gate}"
             )
+        if (
+            normalized_gate == "H4"
+            and request.action == "revise"
+            and not request.comment.strip()
+        ):
+            raise WorkflowTransitionError("H4 revise requires a concrete review comment")
 
         current_version = state.version
         self.repository.claim_transition(
@@ -734,6 +908,7 @@ class WorkflowEngine:
                 action=request.action,
                 actor=request.actor,
                 comment=request.comment,
+                selected_candidate_id=request.selected_candidate_id,
                 reviewed_hashes=reviewed_hashes,
                 claim_decisions={item.claim_id: item.decision for item in request.claims},
             )
@@ -754,11 +929,12 @@ class WorkflowEngine:
                 self._event(state, "run.stopped", state.last_error)
                 return self.repository.save(state, expected_version=current_version)
             if request.action == "revise":
-                state.status = "blocked"
+                state.status = "failed" if normalized_gate == "H4" else "blocked"
                 state.current_node_id = {
                     "H1": "input_validation",
                     "H2": "analysis_plan_merge",
                     "H3": "claim_ledger",
+                    "H4": "scientific_writer",
                 }[normalized_gate]
                 state.last_error = (
                     f"{normalized_gate} 已退回；需要通过 revisions API 提交修订 Artifact。"
@@ -781,8 +957,14 @@ class WorkflowEngine:
                     if request.action != "approve":
                         raise WorkflowTransitionError("H2 only accepts approve, revise or reject")
                     await self._after_h2(state, decision)
-                else:
+                elif normalized_gate == "H3":
                     await self._after_h3(state, request)
+                else:
+                    if request.action != "approve":
+                        raise WorkflowTransitionError(
+                            "H4 only accepts approve, revise or reject"
+                        )
+                    self._after_h4(state)
             except WorkflowTransitionError:
                 raise
             except Exception as error:
@@ -803,8 +985,9 @@ class WorkflowEngine:
     def _gate_artifact_hashes(state: RunState, gate: str) -> dict[str, str]:
         keys = {
             "H1": ("research_package",),
-            "H2": ("analysis_plan", "critic_report"),
+            "H2": ("design_arena", "analysis_plan", "critic_report"),
             "H3": ("claim_ledger", "research_run"),
+            "H4": ("manuscript_package",),
         }[gate]
         return {
             key: state.artifacts[key]["sha256"]
@@ -829,7 +1012,7 @@ class WorkflowEngine:
         critic_revision = (
             state.status == "blocked"
             and request.gate == "H2"
-            and state.current_node_id == "critic_merge"
+            and state.current_node_id in {"critic_merge", "design_arena_merge"}
             and "analysis_plan" in state.artifacts
             and "critic_report" in state.artifacts
         )
@@ -902,6 +1085,10 @@ class WorkflowEngine:
                     output_value=plan,
                     logs=["人工修订 AnalysisPlan 已提交；重新进入四类 Critic。"],
                 )
+                if "design_arena" in state.artifacts:
+                    state.artifacts["superseded_design_arena"] = state.artifacts.pop(
+                        "design_arena"
+                    )
                 self._put_artifact(state, "analysis_plan", plan)
                 await self._review_plan(
                     state,
@@ -923,11 +1110,12 @@ class WorkflowEngine:
     async def _after_h1(self, state: RunState) -> None:
         state.status = "running"
         package = self._artifact(state, "research_package", ResearchPackage)
+        llm_package = self._llm_research_package(package)
         hypotheses = await self._llm_step(
             state,
             "hypothesis_decomposition",
             "hypothesis_decomposition",
-            {"research_package": package.model_dump(mode="json")},
+            {"research_package": llm_package},
             TestableHypotheses,
         )
         self._put_artifact(state, "testable_hypotheses", hypotheses)
@@ -950,7 +1138,7 @@ class WorkflowEngine:
         )
         self._put_artifact(state, "data_profile", profile)
         route_input = {
-            "research_package": package.model_dump(mode="json"),
+            "research_package": llm_package,
             "testable_hypotheses": hypotheses.model_dump(mode="json"),
             "data_profile": profile.model_dump(mode="json"),
         }
@@ -997,28 +1185,867 @@ class WorkflowEngine:
                     input_value=route,
                     logs=[f"互斥路由未选择 {family}。"],
                 )
-        plan = await self._llm_step(
+        envelope = self._derive_design_envelope(package, route)
+        self._put_artifact(state, "design_envelope", envelope)
+        candidate_set = await self._generate_design_candidates(
             state,
             selected,
-            "analysis_design",
-            {
-                "research_package": package.model_dump(mode="json"),
-                "testable_hypotheses": hypotheses.model_dump(mode="json"),
-                "data_profile": profile.model_dump(mode="json"),
-                "method_route": route.model_dump(mode="json"),
-            },
-            AnalysisPlan,
+            package,
+            hypotheses,
+            profile,
+            route,
+            envelope,
+        )
+        self._put_artifact(state, "candidate_design_set", candidate_set)
+        await self._review_design_arena(
+            state,
+            package,
+            profile,
+            route,
+            envelope,
+            candidate_set,
+        )
+
+    @staticmethod
+    def _derive_design_envelope(
+        package: ResearchPackage,
+        route: MethodRoute,
+    ) -> DesignEnvelope:
+        if package.design_envelope is not None:
+            return package.design_envelope
+        text = " ".join(
+            [
+                package.research_question,
+                *package.known_policy_facts,
+                *package.constraints,
+            ]
+        ).casefold()
+        target_estimands = ["主假设对应的核心效应或关联参数"]
+        if route.primary_route == "spatial":
+            target_estimands = []
+            if any(term in text for term in ("本地", "本省", "直接")):
+                target_estimands.append("本地直接效应")
+            if any(term in text for term in ("跨省", "跨地区", "邻近", "溢出", "间接")):
+                target_estimands.append("跨地区间接效应")
+            if any(term in text for term in ("总效应", "合计", "总体")):
+                target_estimands.append("直接与间接效应合计的总效应")
+            if not target_estimands:
+                target_estimands.append("空间关联参数")
+        allowed_strength = (
+            "causal"
+            if route.research_goal == "causal"
+            else "associational"
+            if route.research_goal in ("associational", "mechanism", "mixed")
+            else "descriptive"
+        )
+        return DesignEnvelope(
+            benchmark_track="strict_blind",
+            research_goal=route.research_goal,
+            target_estimands=target_estimands,
+            design_constraints=package.constraints,
+            required_diagnostics=route.testable_assumptions,
+            allowed_claim_strength=allowed_strength,
+        )
+
+    @staticmethod
+    def _llm_research_package(package: ResearchPackage) -> dict[str, Any]:
+        payload = package.model_dump(mode="json")
+        payload["variables"] = [
+            variable.model_dump(mode="json")
+            for variable in package.variables
+            if variable.role != "unknown"
+        ]
+        return payload
+
+    async def _generate_design_candidates(
+        self,
+        state: RunState,
+        selected_node: str,
+        package: ResearchPackage,
+        hypotheses: TestableHypotheses,
+        profile: DataProfile,
+        route: MethodRoute,
+        envelope: DesignEnvelope,
+        *,
+        gateway: ModelGateway | None = None,
+    ) -> CandidateDesignSet:
+        compact_package = {
+            "case_id": package.case_id,
+            "title": package.title,
+            "research_question": package.research_question,
+            "hypotheses": [
+                item.model_dump(mode="json") for item in package.hypotheses
+            ],
+            "unit_of_analysis": package.unit_of_analysis,
+            "sample_period": package.sample_period,
+            "data_structure_hint": package.data_structure_hint,
+            "variables": [
+                item.model_dump(mode="json")
+                for item in package.variables
+                if item.role != "unknown"
+            ],
+            "dataset_refs": [
+                item.model_dump(mode="json") for item in package.dataset_refs
+            ],
+            "known_policy_facts": package.known_policy_facts,
+            "constraints": package.constraints,
+        }
+        compact_hypotheses = {
+            "items": [
+                {
+                    "hypothesis_id": item.hypothesis_id,
+                    "theoretical_claim": item.theoretical_claim,
+                    "observable_prediction": item.observable_prediction,
+                    "boundary_conditions": item.boundary_conditions,
+                    "competing_explanations": item.competing_explanations,
+                    "falsification_conditions": item.falsification_conditions,
+                }
+                for item in hypotheses.items
+            ]
+        }
+        compact_profile = {
+            "profile_execution_status": profile.profile_execution_status,
+            "data_structure": profile.data_structure,
+            "unit_of_observation": profile.unit_of_observation,
+            "entity_key": profile.entity_key,
+            "time_key": profile.time_key,
+            "spatial_key": profile.spatial_key,
+            "event_date_key": profile.event_date_key,
+            "row_count": profile.row_count,
+            "column_count": profile.column_count,
+            "duplicate_key_count": profile.duplicate_key_count,
+            "missingness": [
+                item.model_dump(mode="json")
+                for item in profile.missingness
+                if item.missing_rate
+                and any(
+                    variable.name == item.variable and variable.role != "unknown"
+                    for variable in package.variables
+                )
+            ],
+            "confirmed_facts": profile.confirmed_facts,
+            "measurement_risks": profile.measurement_risks,
+            "merge_risks": profile.merge_risks,
+            "supported_method_families": profile.supported_method_families,
+            "readiness": profile.readiness,
+            "blocking_reasons": profile.blocking_reasons,
+        }
+
+        async def generate(strategy: str, rationale: str) -> DesignCandidate:
+            candidate_id = f"candidate-{strategy}"
+            existing_step = next(
+                (
+                    step
+                    for step in reversed(state.steps)
+                    if step.node_id == selected_node
+                    and step.status == "succeeded"
+                    and isinstance(step.input, dict)
+                    and step.input.get("candidate_strategy") == strategy
+                ),
+                None,
+            )
+            if existing_step is not None:
+                plan = AnalysisPlan.model_validate(existing_step.output)
+                self._record_step(
+                    state,
+                    "design_candidate_reuse",
+                    "succeeded",
+                    input_value={
+                        "source_step_id": existing_step.id,
+                        "candidate_strategy": strategy,
+                    },
+                    output_value={"candidate_id": candidate_id},
+                    logs=[f"复用已通过 Schema 的候选 {candidate_id}。"],
+                )
+            else:
+                plan = await self._llm_step(
+                    state,
+                    selected_node,
+                    "analysis_design",
+                    {
+                        "candidate_id": candidate_id,
+                        "candidate_strategy": strategy,
+                        "candidate_rationale": rationale,
+                        "design_envelope": envelope.model_dump(mode="json"),
+                        "research_package": compact_package,
+                        "testable_hypotheses": compact_hypotheses,
+                        "data_profile": compact_profile,
+                        "method_route": route.model_dump(mode="json"),
+                        "design_model_policy": (
+                            {
+                                "tier": "escalated_after_transport_failure",
+                                "model": getattr(
+                                    gateway, "model", DESIGN_RETRY_MODEL
+                                ),
+                            }
+                            if gateway is not None
+                            else {
+                                "tier": "default",
+                                "model": state.model_provider,
+                            }
+                        ),
+                    },
+                    AnalysisPlan,
+                    gateway=gateway,
+                )
+            plan = plan.model_copy(
+                update={
+                    "plan_id": f"plan-{state.case_id}-{strategy}",
+                    "plan_version": 1,
+                    "revision_round": 0,
+                }
+            )
+            plan = self._bind_spatial_assets(package, plan)
+            probe = self._probe_candidate(
+                state,
+                package,
+                profile,
+                route,
+                envelope,
+                candidate_id,
+                plan,
+            )
+            return DesignCandidate(
+                candidate_id=candidate_id,
+                strategy=strategy,
+                rationale=rationale,
+                plan=plan,
+                probe_report=probe,
+            )
+
+        candidates: list[DesignCandidate] = []
+        candidate_errors: list[str] = []
+        for strategy, rationale in DESIGN_STRATEGIES:
+            try:
+                candidates.append(await generate(strategy, rationale))
+            except Exception as error:
+                candidate_errors.append(f"{strategy}: {error}")
+        if len(candidates) < 2:
+            raise RuntimeError(
+                "候选研究设计不足两个，无法进入 Reviewer Arena："
+                + "；".join(candidate_errors)
+            )
+        candidate_set = CandidateDesignSet(
+            candidate_set_id=f"candidate-set-{uuid4()}",
+            candidates=candidates,
         )
         self._record_step(
             state,
-            "analysis_plan_merge",
+            "candidate_design_set",
             "succeeded",
-            input_value={selected: plan.model_dump(mode="json")},
-            output_value=plan,
-            logs=["唯一命中的方法分支已汇合为 AnalysisPlan。"],
+            input_value={"selected_method_node": selected_node},
+            output_value=candidate_set,
+            prompts=[
+                {
+                    "id": "candidate_design_set:code",
+                    "role": "code",
+                    "template": "Bounded candidate set with three prespecified design strategies",
+                    "rendered": "三种候选策略在查看任何统计结果前生成；不按系数方向或 p 值筛选。",
+                }
+            ],
+            logs=[
+                f"{len(candidates)} 个候选研究设计已形成，进入无结果可见的 Probe 与 Reviewer Arena。"
+                + (
+                    f" 另有 {len(candidate_errors)} 个候选调用失败，失败记录已保留。"
+                    if candidate_errors
+                    else ""
+                )
+            ],
         )
-        self._put_artifact(state, "analysis_plan", plan)
-        await self._review_plan(state, package, profile, route, plan)
+        self._record_step(
+            state,
+            "probe_run",
+            "succeeded",
+            input_value={
+                "candidate_ids": [candidate.candidate_id for candidate in candidates],
+                "forbidden_inputs": ["estimate", "coefficient", "p_value", "significance"],
+            },
+            output_value={
+                candidate.candidate_id: candidate.probe_report
+                for candidate in candidates
+            },
+            prompts=[
+                {
+                    "id": "probe_run:code",
+                    "role": "code",
+                    "template": "Deterministic pre-result feasibility probe",
+                    "rendered": "仅检查字段、结构、资产、识别条件与执行器能力；used_outcome_results 固定为 false。",
+                }
+            ],
+            logs=["三个候选均已完成无结果可见 Probe。"],
+        )
+        return candidate_set
+
+    @staticmethod
+    def _spatial_model_type(model: Any) -> str | None:
+        declared = str(model.parameters.get("spatial_model", "")).casefold()
+        if declared in {"sdm", "sar", "sem"}:
+            return declared
+        estimator = model.estimator.casefold()
+        if any(term in estimator for term in ("sdm", "durbin", "杜宾")):
+            return "sdm"
+        if any(term in estimator for term in ("sar", "spatial lag", "空间滞后")):
+            return "sar"
+        if any(term in estimator for term in ("sem", "spatial error", "空间误差")):
+            return "sem"
+        return None
+
+    def _probe_candidate(
+        self,
+        state: RunState,
+        package: ResearchPackage,
+        profile: DataProfile,
+        route: MethodRoute,
+        envelope: DesignEnvelope,
+        candidate_id: str,
+        plan: AnalysisPlan,
+    ) -> ProbeReport:
+        checks: list[ProbeCheck] = []
+
+        def add(
+            check_id: str,
+            status: str,
+            evidence: str,
+            required_follow_up: str | None = None,
+        ) -> None:
+            checks.append(
+                ProbeCheck(
+                    check_id=check_id,
+                    status=status,
+                    evidence=evidence,
+                    required_follow_up=required_follow_up,
+                )
+            )
+
+        visible_fields = {variable.name for variable in package.variables}
+        missing = sorted(set(plan.required_data_fields) - visible_fields)
+        add(
+            "required_fields",
+            "fail" if missing else "pass",
+            "缺少字段：" + "、".join(missing) if missing else "计划所需字段均在安全变量字典中。",
+            "删除不可用字段或补充安全可见数据。" if missing else None,
+        )
+        design_only_probe = plan.design_only or state.execution_mode == "fixture"
+        add(
+            "data_readiness",
+            (
+                "warn"
+                if profile.readiness == "blocked" and design_only_probe
+                else "fail"
+                if profile.readiness == "blocked"
+                else "warn"
+                if profile.readiness == "partially_ready"
+                else "pass"
+            ),
+            f"DataProfile.readiness={profile.readiness}；仅使用结构、主键、缺失与资产信息。",
+            (
+                "当前仅形成研究计划；接入真实数据后必须重新执行 Probe。"
+                if profile.readiness == "blocked" and design_only_probe
+                else "先修复 DataProfile 阻塞项。"
+                if profile.readiness == "blocked"
+                else None
+            ),
+        )
+        add(
+            "method_route",
+            "fail" if plan.method_family != route.primary_route else "pass",
+            f"候选方法家族={plan.method_family}；路由家族={route.primary_route}。",
+            "候选方案不得越过 H1 后的确定性方法家族路由。"
+            if plan.method_family != route.primary_route
+            else None,
+        )
+        if not plan.baseline_models:
+            add("baseline_model", "fail", "候选方案没有基准模型。", "补充可执行基准模型。")
+        else:
+            model = plan.baseline_models[0]
+            add(
+                "core_variables",
+                "fail" if not model.outcome or not model.treatments_or_exposures else "pass",
+                f"outcome={model.outcome or 'missing'}；exposures={model.treatments_or_exposures}。",
+                "必须绑定一个结果变量和至少一个处理或暴露变量。"
+                if not model.outcome or not model.treatments_or_exposures
+                else None,
+            )
+            if profile.data_structure in ("panel", "spatial_panel"):
+                fixed_effects = set(model.fixed_effects)
+                entity_effect_recorded = bool(
+                    fixed_effects.intersection(profile.entity_key)
+                    or (
+                        profile.data_structure == "spatial_panel"
+                        and profile.spatial_key in fixed_effects
+                    )
+                )
+                missing_fixed_effects = set()
+                if profile.entity_key and not entity_effect_recorded:
+                    missing_fixed_effects.update(profile.entity_key)
+                if profile.time_key and profile.time_key not in fixed_effects:
+                    missing_fixed_effects.add(profile.time_key)
+                add(
+                    "panel_effects",
+                    "warn" if missing_fixed_effects else "pass",
+                    (
+                        "尚未控制面板键对应的固定效应："
+                        + "、".join(sorted(missing_fixed_effects))
+                        if missing_fixed_effects
+                        else "候选模型已显式记录面板层级固定效应。"
+                    ),
+                    "由 H2 判断是否接受该识别风险。" if missing_fixed_effects else None,
+                )
+
+        executor_ready = state.execution_mode == "fixture"
+        if state.execution_mode == "external":
+            executor_ready = plan.method_family in {
+                "panel_association",
+                "mechanism_boundary",
+            }
+        if plan.method_family == "spatial" and plan.baseline_models:
+            model = plan.baseline_models[0]
+            spatial_model = self._spatial_model_type(model)
+            weights_ref = next(
+                (
+                    item
+                    for item in package.dataset_refs
+                    if item.role == "supplementary"
+                    and is_spatial_weights_filename(item.filename)
+                ),
+                None,
+            )
+            spatial_keys = _names(package, "spatial_id")
+            add(
+                "spatial_assets",
+                "fail" if weights_ref is None or not spatial_keys else "pass",
+                "空间权重资产或空间标识缺失。"
+                if weights_ref is None or not spatial_keys
+                else "空间权重 SHA256 与空间标识均已登记。",
+                "补充安全可见的空间权重和对齐标识。"
+                if weights_ref is None or not spatial_keys
+                else None,
+            )
+            target_text = " ".join(
+                [*envelope.target_estimands, *envelope.design_constraints]
+            ).casefold()
+            requires_covariate_lags = any(
+                term in target_text
+                for term in (
+                    "解释变量空间滞后",
+                    "协变量空间滞后",
+                    "spatially lagged covariate",
+                    "exposure spillover",
+                )
+            )
+            requires_indirect = any(
+                term in target_text
+                for term in ("间接", "跨地区", "跨省", "溢出", "indirect")
+            )
+            spatial_status = "pass"
+            spatial_follow_up = None
+            if spatial_model is None:
+                spatial_status = "fail"
+                spatial_follow_up = "明确空间依赖来源和可识别的空间模型。"
+            elif spatial_model == "sem" and requires_indirect:
+                spatial_status = "fail"
+                spatial_follow_up = "该目标需要可分解的跨地区效应，空间误差模型不能单独承担。"
+            elif spatial_model != "sdm" and requires_covariate_lags:
+                spatial_status = "fail"
+                spatial_follow_up = "目标要求区分解释变量的空间滞后项，当前候选未覆盖。"
+            elif spatial_model == "sar" and requires_indirect:
+                spatial_status = "warn"
+                spatial_follow_up = "确认仅由结果变量空间反馈产生的间接效应是否满足目标。"
+            add(
+                "spatial_estimands",
+                spatial_status,
+                f"声明的空间模型={spatial_model or 'unknown'}；目标估计量={envelope.target_estimands}。",
+                spatial_follow_up,
+            )
+            executor_ready = state.execution_mode == "fixture" or spatial_model == "sdm"
+
+        add(
+            "executor_capability",
+            "pass" if executor_ready else "fail",
+            (
+                "当前执行器能够执行该候选的冻结基准模型。"
+                if executor_ready
+                else "当前方法库尚无该候选的可审计执行器，不能在本轮静默替换方法。"
+            ),
+            None if executor_ready else "由 Task2 补充执行器，或选择已有能力覆盖的科学可行候选。",
+        )
+        verdict = (
+            "fail"
+            if any(check.status == "fail" for check in checks)
+            else "warn"
+            if any(check.status == "warn" for check in checks)
+            else "pass"
+        )
+        return ProbeReport(
+            report_id=f"probe-{candidate_id}",
+            candidate_id=candidate_id,
+            verdict=verdict,
+            checks=checks,
+            executor_ready=executor_ready,
+            used_outcome_results=False,
+        )
+
+    async def _review_design_arena(
+        self,
+        state: RunState,
+        package: ResearchPackage,
+        profile: DataProfile,
+        route: MethodRoute,
+        envelope: DesignEnvelope,
+        candidate_set: CandidateDesignSet,
+    ) -> None:
+        semaphore = asyncio.Semaphore(2)
+        compact_package = self._llm_research_package(package)
+        compact_profile = profile.model_dump(mode="json")
+        visible_names = {
+            variable.name for variable in package.variables if variable.role != "unknown"
+        }
+        compact_profile["missingness"] = [
+            item
+            for item in compact_profile.get("missingness", [])
+            if item.get("variable") in visible_names
+        ]
+
+        async def review_dimension(dimension: str) -> DesignReviewerReport:
+            node_id = f"critic_{dimension}"
+            existing_step = next(
+                (
+                    step
+                    for step in reversed(state.steps)
+                    if step.node_id == node_id
+                    and step.status == "succeeded"
+                    and isinstance(step.input, dict)
+                    and step.input.get("dimension") == dimension
+                ),
+                None,
+            )
+            if existing_step is not None:
+                report = DesignReviewerReport.model_validate(existing_step.output)
+                self._record_step(
+                    state,
+                    "design_reviewer_reuse",
+                    "succeeded",
+                    input_value={
+                        "source_step_id": existing_step.id,
+                        "dimension": dimension,
+                    },
+                    output_value={"dimension": dimension},
+                    logs=[f"复用已通过 Schema 的 {dimension} Reviewer 报告。"],
+                )
+            else:
+                async with semaphore:
+                    report = await self._llm_step(
+                        state,
+                        node_id,
+                        "design_reviewer",
+                        {
+                            "dimension": dimension,
+                            "reviewer_policy": (
+                                f"qwen:{REVIEWER_MODEL}:isolated-context"
+                                if state.model_provider == "qwen"
+                                else "fixture:isolated-context"
+                            ),
+                            "research_package": compact_package,
+                            "design_envelope": envelope.model_dump(mode="json"),
+                            "data_profile": compact_profile,
+                            "method_route": route.model_dump(mode="json"),
+                            "candidates": [
+                                candidate.model_dump(mode="json")
+                                for candidate in candidate_set.candidates
+                            ],
+                        },
+                        DesignReviewerReport,
+                        gateway=self._reviewer_gateway(state),
+                    )
+            if report.dimension != dimension:
+                raise WorkflowTransitionError(
+                    f"Reviewer dimension mismatch: expected {dimension}, got {report.dimension}"
+                )
+            return report
+
+        reports = list(
+            await asyncio.gather(
+                *(review_dimension(dimension) for dimension in (
+                    "measurement",
+                    "causal",
+                    "statistical",
+                    "reproducibility",
+                ))
+            )
+        )
+        candidate_ids = {candidate.candidate_id for candidate in candidate_set.candidates}
+        recommended: list[DesignCandidate] = []
+        for candidate in candidate_set.candidates:
+            reviews = [
+                item
+                for report in reports
+                for item in report.candidate_reviews
+                if item.candidate_id == candidate.candidate_id
+            ]
+            if len(reviews) != len(reports):
+                raise WorkflowTransitionError(
+                    f"Reviewer did not assess every candidate: {candidate.candidate_id}"
+                )
+            has_reject = any(review.verdict == "reject" for review in reviews)
+            has_critical = any(
+                issue.severity == "critical" and issue.status == "open"
+                for review in reviews
+                for issue in review.issues
+            )
+            if (
+                candidate.probe_report.verdict != "fail"
+                and candidate.probe_report.executor_ready
+                and not has_reject
+                and not has_critical
+            ):
+                recommended.append(candidate)
+        if candidate_ids != {
+            item.candidate_id
+            for report in reports
+            for item in report.candidate_reviews
+        }:
+            raise WorkflowTransitionError("Reviewer candidate ids do not match the candidate set")
+        strategy_order = {
+            strategy: index for index, (strategy, _rationale) in enumerate(DESIGN_STRATEGIES)
+        }
+        recommended.sort(
+            key=lambda candidate: (
+                candidate.probe_report.verdict != "pass",
+                sum(
+                    len(item.issues)
+                    for report in reports
+                    for item in report.candidate_reviews
+                    if item.candidate_id == candidate.candidate_id
+                ),
+                strategy_order[candidate.strategy],
+            )
+        )
+        provisional = recommended[0] if recommended else None
+        arena = DesignArena(
+            arena_id=f"design-arena-{uuid4()}",
+            candidates=candidate_set.candidates,
+            reviewer_reports=reports,
+            recommended_candidate_ids=[item.candidate_id for item in recommended],
+            provisional_candidate_id=(
+                provisional.candidate_id if provisional is not None else None
+            ),
+            selection_rationale=[
+                "Probe 只检查字段、结构、资产、识别条件与执行器能力，不读取模型结果。",
+                "Reviewer 不投票决定真理；任何硬失败或 critical 问题都会淘汰候选。",
+                "多个可行候选保留到 H2，由人工选择后冻结。",
+            ],
+        )
+        self._put_artifact(state, "design_arena", arena)
+        self._record_step(
+            state,
+            "design_arena_merge",
+            "succeeded" if provisional is not None else "blocked",
+            input_value={"candidate_design_set": candidate_set, "reviewer_reports": reports},
+            output_value=arena,
+            prompts=[
+                {
+                    "id": "design_arena_merge:code",
+                    "role": "code",
+                    "template": "Eliminate hard failures and preserve all viable candidates",
+                    "rendered": "无总分、无多数投票；依据 Probe 硬约束与结构化 Reviewer 问题形成候选集。",
+                }
+            ],
+            logs=[
+                f"Reviewer Arena 完成；保留 {len(recommended)} 个可行候选。"
+            ],
+        )
+        fallback = provisional or candidate_set.candidates[0]
+        critic = self._critic_report_for_candidate(arena, fallback.candidate_id)
+        self._put_artifact(state, "analysis_plan", fallback.plan)
+        self._put_artifact(state, "critic_report", critic)
+        self._record_step(
+            state,
+            "analysis_plan_merge",
+            "succeeded" if provisional is not None else "blocked",
+            input_value={"design_arena_id": arena.arena_id},
+            output_value=fallback.plan,
+            logs=[
+                "已形成 H2 暂定计划；人工仍可在可行候选中选择。"
+                if provisional is not None
+                else "没有候选同时通过 Probe 与 Reviewer，暂定首个方案仅供人工修订。"
+            ],
+        )
+        if provisional is None:
+            state.status = "blocked"
+            state.current_node_id = "design_arena_merge"
+            state.last_error = "候选研究设计均存在硬失败或 critical 问题，H2 未开放。"
+            self._event(
+                state,
+                "run.blocked",
+                state.last_error,
+                node_id="design_arena_merge",
+                status="blocked",
+            )
+            return
+        self._pause_at_gate(
+            state,
+            "H2",
+            {
+                "design_arena": arena.model_dump(mode="json"),
+                "analysis_plan": provisional.plan.model_dump(mode="json"),
+                "critic_report": critic.model_dump(mode="json"),
+            },
+        )
+
+    @staticmethod
+    def _critic_report_for_candidate(
+        arena: DesignArena,
+        candidate_id: str,
+    ) -> CriticReport:
+        issues = [
+            issue
+            for report in arena.reviewer_reports
+            for review in report.candidate_reviews
+            if review.candidate_id == candidate_id
+            for issue in review.issues
+        ]
+        open_issues = [issue for issue in issues if issue.status == "open"]
+        verdict = (
+            "blocked"
+            if any(issue.severity == "critical" for issue in open_issues)
+            else "revise"
+            if open_issues
+            else "pass"
+        )
+        return CriticReport(
+            report_id=f"arena-critic-{candidate_id}",
+            review_round=1,
+            verdict=verdict,
+            issues=issues,
+            approved_elements=[
+                strength
+                for report in arena.reviewer_reports
+                for review in report.candidate_reviews
+                if review.candidate_id == candidate_id
+                for strength in review.strengths
+            ],
+            remaining_risks=[
+                *[
+                    risk
+                    for report in arena.reviewer_reports
+                    for risk in report.remaining_risks
+                ],
+                *[
+                    follow_up
+                    for report in arena.reviewer_reports
+                    for review in report.candidate_reviews
+                    if review.candidate_id == candidate_id
+                    for follow_up in review.required_follow_ups
+                ],
+            ],
+        )
+
+    @staticmethod
+    def _bind_spatial_assets(
+        package: ResearchPackage,
+        plan: AnalysisPlan,
+    ) -> AnalysisPlan:
+        if plan.method_family != "spatial" or not plan.baseline_models:
+            return plan
+        weights_ref = next(
+            (
+                item
+                for item in package.dataset_refs
+                if item.role == "supplementary"
+                and is_spatial_weights_filename(item.filename)
+            ),
+            None,
+        )
+        spatial_keys = _names(package, "spatial_id")
+        if weights_ref is None or not spatial_keys:
+            return plan
+
+        model = plan.baseline_models[0]
+        spatial_model = WorkflowEngine._spatial_model_type(model)
+        parameters = {
+            **model.parameters,
+            "spatial_weights_dataset_id": weights_ref.dataset_id,
+            "spatial_weights_sha256": weights_ref.sha256,
+            "spatial_id": spatial_keys[0],
+        }
+        if spatial_model is not None:
+            parameters["spatial_model"] = spatial_model
+        if spatial_model in {"sdm", "sar"}:
+            parameters["effect_decomposition"] = ["direct", "indirect", "total"]
+        if spatial_model == "sdm":
+            parameters.update(
+                {
+                    "spatially_lagged_covariates": [
+                        *model.treatments_or_exposures,
+                        *model.controls,
+                    ],
+                }
+            )
+        baseline_models = [
+            model.model_copy(update={"parameters": parameters}),
+            *plan.baseline_models[1:],
+        ]
+        return plan.model_copy(
+            update={
+                "baseline_models": baseline_models,
+                "required_data_fields": list(
+                    dict.fromkeys([*plan.required_data_fields, spatial_keys[0]])
+                ),
+            }
+        )
+
+    @staticmethod
+    def _validate_spatial_plan(
+        package: ResearchPackage,
+        plan: AnalysisPlan,
+    ) -> None:
+        if plan.method_family != "spatial":
+            return
+        problems: list[str] = []
+        weights_ref = next(
+            (
+                item
+                for item in package.dataset_refs
+                if item.role == "supplementary"
+                and is_spatial_weights_filename(item.filename)
+            ),
+            None,
+        )
+        spatial_keys = _names(package, "spatial_id")
+        if weights_ref is None:
+            problems.append("缺少冻结的 spatial_weights.csv")
+        if not spatial_keys:
+            problems.append("缺少 spatial_id 字段")
+        if not plan.baseline_models:
+            problems.append("缺少空间基准模型")
+        else:
+            model = plan.baseline_models[0]
+            parameters = model.parameters
+            spatial_model = WorkflowEngine._spatial_model_type(model)
+            if spatial_model is None:
+                problems.append("空间模型没有明确声明为 SDM、SAR 或 SEM")
+            if weights_ref is not None and (
+                parameters.get("spatial_weights_dataset_id") != weights_ref.dataset_id
+                or parameters.get("spatial_weights_sha256") != weights_ref.sha256
+            ):
+                problems.append("空间权重资产 ID 或 SHA256 未绑定到 H2 合同")
+            if spatial_keys and parameters.get("spatial_id") != spatial_keys[0]:
+                problems.append("空间标识字段未绑定到权重矩阵")
+            if spatial_model in {"sdm", "sar"} and set(
+                parameters.get("effect_decomposition", [])
+            ) != {"direct", "indirect", "total"}:
+                problems.append("可分解空间模型未冻结直接、间接和总效应")
+            if spatial_model == "sdm":
+                regressors = {
+                    *model.treatments_or_exposures,
+                    *model.controls,
+                }
+                if set(parameters.get("spatially_lagged_covariates", [])) != regressors:
+                    problems.append("SDM 未冻结全部解释变量的空间滞后项")
+        if problems:
+            raise WorkflowTransitionError(
+                "H2 空间合同不完整：" + "；".join(problems)
+            )
 
     async def _review_plan(
         self,
@@ -1029,6 +2056,7 @@ class WorkflowEngine:
         initial_plan: AnalysisPlan,
     ) -> None:
         plan = initial_plan
+        compact_package = self._llm_research_package(package)
         for round_number in (1, 2):
             gateway = self._gateway(state)
 
@@ -1040,7 +2068,7 @@ class WorkflowEngine:
                     {
                         "dimension": dimension,
                         "review_round": round_number,
-                        "research_package": package.model_dump(mode="json"),
+                        "research_package": compact_package,
                         "data_profile": profile.model_dump(mode="json"),
                         "method_route": route.model_dump(mode="json"),
                         "analysis_plan": plan.model_dump(mode="json"),
@@ -1106,10 +2134,51 @@ class WorkflowEngine:
     async def _after_h2(self, state: RunState, decision: DecisionRecord) -> None:
         state.status = "running"
         package = self._artifact(state, "research_package", ResearchPackage)
-        plan = self._artifact(state, "analysis_plan", AnalysisPlan)
-        critic = self._artifact(state, "critic_report", CriticReport)
+        if "design_arena" in state.artifacts:
+            arena = self._artifact(state, "design_arena", DesignArena)
+            selected_candidate_id = (
+                decision.selected_candidate_id or arena.provisional_candidate_id
+            )
+            if selected_candidate_id not in arena.recommended_candidate_ids:
+                raise WorkflowTransitionError(
+                    "H2 must select one of the Reviewer Arena recommended candidates"
+                )
+            selected_candidate = next(
+                candidate
+                for candidate in arena.candidates
+                if candidate.candidate_id == selected_candidate_id
+            )
+            decision.selected_candidate_id = selected_candidate_id
+            plan = selected_candidate.plan
+            critic = self._critic_report_for_candidate(arena, selected_candidate_id)
+            self._put_artifact(state, "analysis_plan", plan)
+            self._put_artifact(state, "critic_report", critic)
+            self._record_step(
+                state,
+                "design_selection",
+                "succeeded",
+                input_value={
+                    "design_arena_id": arena.arena_id,
+                    "recommended_candidate_ids": arena.recommended_candidate_ids,
+                    "human_decision": decision,
+                },
+                output_value=selected_candidate,
+                prompts=[
+                    {
+                        "id": "design_selection:code",
+                        "role": "code",
+                        "template": "Human selects one viable candidate before contract freeze",
+                        "rendered": "H2 只能选择 Probe 与 Reviewer 均未淘汰的候选；选择结果写入决策记录。",
+                    }
+                ],
+                logs=[f"H2 选择并冻结候选 {selected_candidate_id}。"],
+            )
+        else:
+            plan = self._artifact(state, "analysis_plan", AnalysisPlan)
+            critic = self._artifact(state, "critic_report", CriticReport)
         if any(issue.severity == "critical" and issue.status == "open" for issue in critic.issues):
             raise WorkflowTransitionError("H2 cannot freeze a plan with unresolved critical issues")
+        self._validate_spatial_plan(package, plan)
         contract = FormalResearchContract(
             contract_id=f"contract-{uuid4()}",
             case_id=state.case_id,
@@ -1195,6 +2264,97 @@ class WorkflowEngine:
             output_value=research_run,
             logs=["执行状态与科学状态已分别保留。"],
         )
+        reproduction_audit: ReproductionAudit
+        if use_fixture:
+            reproduction_audit = ReproductionAudit(
+                audit_id=f"reproduction-{uuid4()}",
+                primary_run_id=research_run.research_run_id,
+                status="not_applicable",
+                differences=["Fixture 不含可复现的统计结果。"],
+            )
+        else:
+            try:
+                replication_run = await executor.execute(contract)
+                self._validate_research_run_binding(replication_run, contract)
+                differences = self._research_run_differences(
+                    research_run,
+                    replication_run,
+                )
+                reproduction_audit = ReproductionAudit(
+                    audit_id=f"reproduction-{uuid4()}",
+                    primary_run_id=research_run.research_run_id,
+                    replication_run_id=replication_run.research_run_id,
+                    status="diverged" if differences else "matched",
+                    compared_fields=[
+                        "execution_status",
+                        "scientific_status",
+                        "executions",
+                        "deviations",
+                        "failed_runs",
+                        "warnings",
+                    ],
+                    differences=differences,
+                )
+                self._put_artifact(state, "replication_run", replication_run)
+                self._record_step(
+                    state,
+                    "replication_executor",
+                    "succeeded",
+                    input_value=contract,
+                    output_value=replication_run,
+                    logs=["独立重新调用同一冻结合同；未复用主运行结果。"],
+                )
+            except Exception as error:
+                reproduction_audit = ReproductionAudit(
+                    audit_id=f"reproduction-{uuid4()}",
+                    primary_run_id=research_run.research_run_id,
+                    status="failed",
+                    differences=[str(error)],
+                )
+                self._record_step(
+                    state,
+                    "replication_executor",
+                    "failed",
+                    input_value=contract,
+                    error=str(error),
+                    logs=["独立复现执行失败；没有用主运行结果代替。"],
+                )
+        self._put_artifact(state, "reproduction_audit", reproduction_audit)
+        self._record_step(
+            state,
+            "reproduction_audit",
+            (
+                "succeeded"
+                if reproduction_audit.status in {"matched", "not_applicable"}
+                else "blocked"
+            ),
+            input_value={
+                "primary_run_id": research_run.research_run_id,
+                "replication_run_id": reproduction_audit.replication_run_id,
+            },
+            output_value=reproduction_audit,
+            prompts=[
+                {
+                    "id": "reproduction_audit:code",
+                    "role": "code",
+                    "template": "Deterministic comparison of two executions of one frozen contract",
+                    "rendered": "忽略运行 UUID；比较状态、估计、诊断、警告与偏离，数值容差为 1e-8。",
+                }
+            ],
+            logs=[f"独立复现审计结果：{reproduction_audit.status}。"],
+        )
+        if reproduction_audit.status in {"diverged", "failed"}:
+            state.status = "blocked"
+            state.current_node_id = "reproduction_audit"
+            state.last_error = "独立复现未通过，禁止进入结论生成。"
+            self._event(
+                state,
+                "run.blocked",
+                state.last_error,
+                node_id="reproduction_audit",
+                status="blocked",
+            )
+            return
         state.execution_status = research_run.execution_status
         state.scientific_status = research_run.scientific_status
         state.plan_only = research_run.fixture_only or research_run.execution_status in (
@@ -1207,7 +2367,10 @@ class WorkflowEngine:
             state,
             "evidence_assessment",
             "evidence_assessment",
-            {"research_run": research_run.model_dump(mode="json")},
+            {
+                "research_run": research_run.model_dump(mode="json"),
+                "reproduction_audit": reproduction_audit.model_dump(mode="json"),
+            },
             EvidenceAssessment,
         )
         self._put_artifact(state, "evidence_assessment", assessment)
@@ -1218,6 +2381,7 @@ class WorkflowEngine:
             {
                 "contract": contract.model_dump(mode="json"),
                 "research_run": research_run.model_dump(mode="json"),
+                "reproduction_audit": reproduction_audit.model_dump(mode="json"),
                 "evidence_assessment": assessment.model_dump(mode="json"),
             },
             ScientificAudit,
@@ -1231,10 +2395,11 @@ class WorkflowEngine:
             "claim_ledger",
             "claim_ledger",
             {
-                "research_package": package.model_dump(mode="json"),
+                "research_package": self._llm_research_package(package),
                 "research_run": research_run.model_dump(mode="json"),
                 "evidence_assessment": assessment.model_dump(mode="json"),
                 "scientific_audit": audit.model_dump(mode="json"),
+                "reproduction_audit": reproduction_audit.model_dump(mode="json"),
             },
             ClaimLedger,
         )
@@ -1314,10 +2479,11 @@ class WorkflowEngine:
         manuscript_version: int = 1,
         existing_sections: list[ManuscriptSection] | None = None,
         reuse_existing_if_valid: bool = False,
+        human_review_feedback: str | None = None,
     ) -> None:
         if state.plan_only:
             writer_payload = {
-                "research_package": package.model_dump(mode="json"),
+                "research_package": self._llm_research_package(package),
                 "analysis_plan": plan.model_dump(mode="json"),
                 "research_run": run.model_dump(mode="json"),
                 "approved_claims": approved_claims,
@@ -1343,6 +2509,7 @@ class WorkflowEngine:
                 writer_payload["writing_evidence_pack"],
                 existing_sections=existing_sections,
                 reuse_existing_if_valid=reuse_existing_if_valid,
+                human_review_feedback=human_review_feedback,
             )
         manuscript.version = max(manuscript.version, manuscript_version)
 
@@ -1409,6 +2576,16 @@ class WorkflowEngine:
             state.last_error = "论文初稿未通过一致性审计；可以调整写作后重试。"
             return
         self._put_artifact(state, "manuscript_package", manuscript)
+        self._pause_at_gate(state, "H4", manuscript)
+
+    def _after_h4(self, state: RunState) -> None:
+        if not self._has_quality_manuscript(state) and not state.plan_only:
+            raise WorkflowTransitionError(
+                "H4 cannot approve a manuscript that has not passed the quality audit"
+            )
+        self._seal_output(state)
+
+    def _seal_output(self, state: RunState) -> None:
         sealed = {
             "run_id": state.id,
             "seal_algorithm": "hmac-sha256",
@@ -1444,10 +2621,18 @@ class WorkflowEngine:
         *,
         existing_sections: list[ManuscriptSection] | None = None,
         reuse_existing_if_valid: bool = False,
+        human_review_feedback: str | None = None,
     ) -> ManuscriptPackage:
         gateway = self._gateway(state)
         escalated_gateway: ModelGateway | None = None
         semaphore = asyncio.Semaphore(4)
+        control_variable_names = [
+            str(variable.get("name", ""))
+            for variable in evidence_pack.get("research_context", {}).get(
+                "variables", []
+            )
+            if variable.get("role") == "control" and variable.get("name")
+        ]
 
         def normalize_section_text(value: str) -> str:
             normalized = (
@@ -1455,11 +2640,27 @@ class WorkflowEngine:
                 .replace("SDL A", "SDLA")
                 .replace("\x08eta", "β")
                 .replace("回归元", "回归变量")
+                .replace("极易被误判", "可能被误判")
+                .replace("极易被模型误判", "可能被模型误判")
+                .replace("极度接近", "接近")
+                .replace("极为谨慎", "谨慎")
+                .replace("极度谨慎", "谨慎")
+                .replace("appropriateness", "适用性")
+                .replace(
+                    "不存在统计上显著的",
+                    "未发现达到常用统计显著性阈值的",
+                )
                 .replace(
                     "在控制变量取值相同且去除个体与时间均值后",
                     "在控制企业特征并吸收企业与年份固定效应后",
                 )
             )
+            for variable_name in control_variable_names:
+                normalized = re.sub(
+                    rf"核心解释变量\s*{re.escape(variable_name)}",
+                    f"控制变量 {variable_name}",
+                    normalized,
+                )
             return re.sub(
                 r"去除个体均值(?:和|及)时间均值后",
                 "去除个体均值后",
@@ -1564,6 +2765,41 @@ class WorkflowEngine:
                 )
                 if execution.get("execution_status") == "succeeded"
             ]
+            completed_run_counts = {
+                run_type: section_spec["executed_run_types"].count(run_type)
+                for run_type in (
+                    "diagnostic",
+                    "robustness",
+                    "falsification",
+                    "mechanism",
+                    "heterogeneity",
+                )
+            }
+            category_run_types = {
+                "diagnostics": "diagnostic",
+                "robustness": "robustness",
+                "falsification": "falsification",
+                "mechanisms": "mechanism",
+                "heterogeneity": "heterogeneity",
+            }
+            section_spec["completed_frozen_plan_categories"] = [
+                category
+                for category, steps in frozen_categories.items()
+                if steps
+                and completed_run_counts[category_run_types[category]] >= len(steps)
+            ]
+            section_spec["pending_frozen_plan_categories"] = [
+                category
+                for category, steps in frozen_categories.items()
+                if steps
+                and completed_run_counts[category_run_types[category]] < len(steps)
+            ]
+            if not section_spec["pending_frozen_plan_categories"]:
+                section_spec["execution_completion_policy"] = (
+                    "所有非空的冻结检验类别均已完成；不得把其中任何步骤写成"
+                    "尚待执行、后续执行或未来计划。未来工作只能说明超出冻结计划的"
+                    "新分析需要新数据、新识别设计和另行审批。"
+                )
             if not any(
                 run_type in {"data_preparation", "data_cleaning", "data_merge"}
                 for run_type in section_spec["executed_run_types"]
@@ -1661,6 +2897,13 @@ class WorkflowEngine:
             if sections
             else []
         )
+        if sections and human_review_feedback:
+            content_problems.extend(
+                f"{section_id} H4 人工审稿意见：{human_review_feedback}"
+                for section_id in self._human_review_target_sections(
+                    human_review_feedback
+                )
+            )
         if not sections or (not content_problems and not reuse_existing_if_valid):
             results = await asyncio.gather(
                 *(write_section(spec) for spec in MANUSCRIPT_SECTION_SPECS),
@@ -1828,7 +3071,88 @@ class WorkflowEngine:
             for record in executed_records
             if isinstance(record, dict)
         )
+        robustness_executed = any(
+            record.get("execution_status") == "succeeded"
+            and record.get("run_type") == "robustness"
+            for record in executed_records
+            if isinstance(record, dict)
+        )
+        baseline_record = next(
+            (
+                record
+                for record in executed_records
+                if isinstance(record, dict)
+                and record.get("run_type") == "baseline"
+                and record.get("execution_status") == "succeeded"
+            ),
+            {},
+        )
+        baseline_diagnostics = baseline_record.get("diagnostic_results", {})
+        input_row_count = evidence_pack.get("data_profile", {}).get("row_count")
+        baseline_rows_used = baseline_diagnostics.get("rows_used")
+        baseline_controls = {
+            str(control)
+            for model in frozen_design.get("baseline_models", [])
+            for control in model.get("controls", [])
+        }
+        declared_control_fields = {
+            str(variable.get("name"))
+            for variable in evidence_pack.get("research_context", {}).get("variables", [])
+            if variable.get("role") == "control" and variable.get("name")
+        }
+        baseline_control_roots = {
+            field[:-2] if field.endswith("_w") else field
+            for field in baseline_controls
+        }
+        unsupported_control_labels = {
+            str(variable.get("label"))
+            for variable in evidence_pack.get("research_context", {}).get("variables", [])
+            if variable.get("role") == "control"
+            and variable.get("name")
+            and variable.get("label")
+            and (
+                str(variable.get("name"))[:-2]
+                if str(variable.get("name")).endswith("_w")
+                else str(variable.get("name"))
+            )
+            not in baseline_control_roots
+        }
+        derived_targets = {
+            str(step.get("parameters", {}).get("target"))
+            for step in frozen_design.get("variable_construction", [])
+            if step.get("parameters", {}).get("target")
+        }
+        executed_run_types = {
+            str(record.get("run_type"))
+            for record in executed_records
+            if isinstance(record, dict)
+            and record.get("execution_status") == "succeeded"
+        }
+        planned_steps_by_run_type = {
+            "diagnostic": frozen_design.get("planned_diagnostics", []),
+            "robustness": frozen_design.get("planned_robustness", []),
+            "falsification": frozen_design.get("planned_falsification", []),
+            "mechanism": frozen_design.get("planned_mechanisms", []),
+            "heterogeneity": frozen_design.get("planned_heterogeneity", []),
+        }
+        successful_run_counts = {
+            run_type: sum(
+                1
+                for record in executed_records
+                if isinstance(record, dict)
+                and record.get("execution_status") == "succeeded"
+                and record.get("run_type") == run_type
+            )
+            for run_type in planned_steps_by_run_type
+        }
+        all_frozen_steps_executed = all(
+            not steps or successful_run_counts[run_type] >= len(steps)
+            for run_type, steps in planned_steps_by_run_type.items()
+        )
         problems: list[str] = []
+        withheld_estimate_terms = requirements.get(
+            "withheld_estimate_terms", []
+        )
         explicit_plan_absence_markers = (
             "为空",
             "未预设",
@@ -1837,6 +3161,8 @@ class WorkflowEngine:
             "未包含",
             "未列入",
             "未单列",
+            "未提供",
+            "缺乏",
             "未在",
             "未冻结",
             "没有单列",
@@ -1851,17 +3177,209 @@ class WorkflowEngine:
             "不在冻结",
             "不属于冻结",
             "不在本研究计划",
+            "超出冻结计划",
+            "另行审批",
             "推测性质",
         )
         for section in sections:
             content = section.content_markdown
+            if (
+                section.section_id == "data_variables"
+                and isinstance(input_row_count, int)
+                and isinstance(baseline_rows_used, int)
+                and input_row_count != baseline_rows_used
+            ):
+                input_formats = {
+                    str(input_row_count),
+                    f"{input_row_count:,}",
+                }
+                sample_sentences = [
+                    sentence
+                    for sentence in re.split(r"[。！？；\n]", content)
+                    if any(value in sentence for value in input_formats)
+                    and re.search(r"(?:最终|进入|用于).{0,18}(?:基准|回归|有效样本)", sentence)
+                ]
+                if sample_sentences:
+                    problems.append(
+                        "data_variables 将输入总行数误写为基准模型有效样本量"
+                    )
+                used_formats = {
+                    str(baseline_rows_used),
+                    f"{baseline_rows_used:,}",
+                }
+                if not any(value in content for value in used_formats):
+                    problems.append(
+                        "data_variables 未报告基准模型删除缺失、重复键和单例后的实际样本量"
+                    )
+            for target in derived_targets:
+                if not target or target not in content:
+                    continue
+                target_sentences = [
+                    sentence
+                    for sentence in re.split(r"[。！？；\n]", content)
+                    if target in sentence
+                    and re.search(r"输入(?:数据|案例包).{0,20}(?:生成|已有|保留)", sentence)
+                ]
+                if target_sentences:
+                    problems.append(
+                        f"{section.section_id} 将执行时构造字段 {target} 错写为输入数据已有"
+                    )
+            for run_type, marker in (
+                ("diagnostic", "诊断"),
+                ("robustness", "稳健性"),
+                ("falsification", "证伪"),
+                ("mechanism", "机制"),
+                ("heterogeneity", "异质性"),
+            ):
+                if run_type not in executed_run_types:
+                    continue
+                pending_sentences = [
+                    sentence
+                    for sentence in re.split(r"[。！？；\n]", content)
+                    if marker in sentence
+                    and re.search(
+                        r"(?:尚待执行|待执行|尚未执行|需完成|后续执行|计划使用|计划执行|后续.{0,18}(?:执行|使用|完成))",
+                        sentence,
+                    )
+                    and not any(
+                        negation in sentence
+                        for negation in (
+                            "没有尚待",
+                            "并非尚待",
+                            "不再待执行",
+                            "暂无待执行",
+                            "暂无额外待执行",
+                            "无额外待执行",
+                            "另行审批",
+                            "新设计",
+                            "新的",
+                        )
+                    )
+                ]
+                if pending_sentences:
+                    problems.append(
+                        f"{section.section_id} 将已成功执行的{marker}步骤写成待执行"
+                    )
+            controlled_terms = re.findall(
+                r"(?:模型|回归).{0,16}(?:已)?控制\s*([A-Za-z][A-Za-z0-9_]*)",
+                content,
+            )
+            for term in controlled_terms:
+                if term not in baseline_controls:
+                    problems.append(
+                        f"{section.section_id} 声称基准模型控制了冻结计划之外的 {term}"
+                    )
+            for term in declared_control_fields - baseline_controls:
+                escaped_term = rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])"
+                unsupported_control_sentences = [
+                    sentence
+                    for sentence in re.split(r"[。！？；\n]", content)
+                    if re.search(escaped_term, sentence)
+                    and re.search(
+                        r"(?:模型|回归).{0,30}(?:控制|纳入).{0,50}" + escaped_term,
+                        sentence,
+                    )
+                    and not any(
+                        marker in sentence
+                        for marker in ("未控制", "没有控制", "未纳入", "不纳入", "移除")
+                    )
+                ]
+                if unsupported_control_sentences:
+                    problems.append(
+                        f"{section.section_id} 声称基准模型控制了冻结计划之外的 {term}"
+                    )
+            for label in unsupported_control_labels:
+                label_pattern = (
+                    rf"(?<![A-Za-z0-9_]){re.escape(label)}(?![A-Za-z0-9_])"
+                    if label.isascii()
+                    else re.escape(label)
+                )
+                unsupported_label_sentences = [
+                    sentence
+                    for sentence in re.split(r"[。！？；\n]", content)
+                    if re.search(label_pattern, sentence)
+                    and re.search(r"(?:模型|回归).{0,40}(?:纳入|控制).{0,80}", sentence)
+                    and "控制变量" in sentence
+                    and not any(
+                        marker in sentence
+                        for marker in ("未控制", "没有控制", "未纳入", "不纳入", "移除")
+                    )
+                ]
+                if unsupported_label_sentences:
+                    problems.append(
+                        f"{section.section_id} 声称基准模型控制了冻结计划之外的变量标签 {label}"
+                    )
+            interaction_main_effect_sentences = [
+                sentence
+                for sentence in re.split(r"[。！？；\n]", content)
+                if "交互边界" in sentence
+                and re.search(r"(?:主效应|核心解释变量).{0,24}不显著", sentence)
+                and not re.search(r"交互项.{0,24}显著", sentence)
+            ]
+            if interaction_main_effect_sentences:
+                problems.append(
+                    f"{section.section_id} 用主效应显著性代替交互项判断调节边界"
+                )
+            contradictory_interaction_paragraphs = [
+                paragraph
+                for paragraph in re.split(r"\n\s*\n", content)
+                if re.search(r"交互项.{0,50}显著", paragraph)
+                and re.search(
+                    r"(?:主效应|核心解释变量).{0,40}(?:不显著|失去.{0,8}显著性)",
+                    paragraph,
+                )
+                and re.search(
+                    r"(?:无法确认|不足以支持).{0,45}(?:调节|交互).{0,10}边界",
+                    paragraph,
+                )
+            ]
+            if contradictory_interaction_paragraphs:
+                problems.append(
+                    f"{section.section_id} 已承认交互项显著，却因主效应不显著否认调节边界"
+                )
+            if (
+                section.section_id == "discussion_limitations"
+                and all_frozen_steps_executed
+                and re.search(r"后续可执行的检验(?:步骤)?包括", content)
+            ):
+                problems.append(
+                    "discussion_limitations 将已完成的冻结检验整体列为后续执行"
+                )
+            if (
+                section.section_id in TRACEABLE_MANUSCRIPT_SECTION_IDS
+                and (research_goal == "associational" or scientific_status == "limited")
+                and re.search(r"对应(?:提高|降低|上升|下降|减少)", content)
+            ):
+                problems.append(
+                    f"{section.section_id} 将关联系数写成方向性变化而非对应差异"
+                )
+            for term in withheld_estimate_terms:
+                escaped_term = rf"(?<![A-Za-z0-9_]){re.escape(str(term))}(?![A-Za-z0-9_])"
+                result_marker = (
+                    r"(?:系数|估计值|标准误|p\s*[=<]|p\s*值|显著|"
+                    r"置信区间|直接效应|间接效应|总效应)"
+                )
+                unauthorized_result_pattern = re.compile(
+                    rf"(?:{escaped_term}.{{0,20}}{result_marker}|"
+                    rf"{result_marker}.{{0,20}}{escaped_term})",
+                    flags=re.IGNORECASE,
+                )
+                unauthorized_result_sentences = [
+                    sentence
+                    for sentence in re.split(r"[。！？；\n]", content)
+                    if unauthorized_result_pattern.search(sentence)
+                ]
+                if unauthorized_result_sentences:
+                    problems.append(
+                        f"{section.section_id} 写入了 H3 未授权估计项 {term}"
+                    )
             certainty_content = re.sub(
                 r"(?:不能|无法|未能)(?:彻底|完全)排除",
                 "",
                 content,
             )
             certainty_content = re.sub(
-                r"(?:并非|而非|不是).{0,12}必然(?:结果|关系|影响)?",
+                r"(?:并非|并不|而非|不是).{0,12}必然(?:结果|关系|影响)?",
                 "",
                 certainty_content,
             )
@@ -1879,7 +3397,7 @@ class WorkflowEngine:
                 )
                 or re.search(r"(?:参照|参考).{0,8}文献", content)
                 or re.search(
-                    r"(?:缺乏|尚无).{0,24}(?:直接)?(?:经验|实证|文献)证据",
+                    r"(?:缺乏|尚无).{0,24}(?:针对|关于).{0,16}(?:直接)?(?:经验|实证|文献)证据",
                     content,
                 )
             ):
@@ -1975,12 +3493,72 @@ class WorkflowEngine:
                 problems.append(
                     f"{section.section_id} 将个体固定效应系数误写为企业间比较"
                 )
+            if (
+                entity_fixed_effects
+                and section.section_id in TRACEABLE_MANUSCRIPT_SECTION_IDS
+            ):
+                between_entity_sentences = [
+                    sentence
+                    for sentence in re.split(r"[。！？\n]", content)
+                    if re.search(
+                        r"(?:得分|评分|表现|水平|取值).{0,10}(?:较高|更高)的(?:企业|个体|地区).{0,50}(?:对应|具有|表现为).{0,20}(?:较低|更低|较高|更高)",
+                        sentence,
+                    )
+                ]
+                unqualified_unit_sentences = [
+                    sentence
+                    for sentence in re.split(r"[。！？\n]", content)
+                    if re.search(
+                        r"相差.{0,12}(?:单位).{0,35}(?:对应|平均相差)",
+                        sentence,
+                    )
+                    and not any(
+                        marker in sentence
+                        for marker in (
+                            "同一企业内",
+                            "同一家",
+                            "同一个体",
+                            "同一主体",
+                            "企业内",
+                            "个体内",
+                            "随时间",
+                            "不同时点",
+                        )
+                    )
+                ]
+                if between_entity_sentences or unqualified_unit_sentences:
+                    problems.append(
+                        f"{section.section_id} 未按个体内随时间变化解释固定效应系数"
+                    )
+            if section.section_id == "theory_hypotheses" and not literature_provided:
+                unconditional_mechanism_sentences = [
+                    sentence
+                    for sentence in re.split(r"[。！？\n]", content)
+                    if re.search(
+                        r"(?:是.{0,20}(?:关键|主要).{0,8}(?:路径|机制)|(?:减少了|降低了|提升了|改善了).{0,60}(?:使|从而|进而)|(?:使得|导致).{0,45}(?:增加|降低|减少|提升|改善))",
+                        sentence,
+                    )
+                    and not any(
+                        marker in sentence
+                        for marker in ("可能", "或许", "若", "如果", "假设", "理论上")
+                    )
+                ]
+                if unconditional_mechanism_sentences:
+                    problems.append(
+                        "theory_hypotheses 将无文献支持的理论机制写成既定事实"
+                    )
             endogeneity_plan_claims = [
                 sentence
                 for sentence in re.split(r"[。！？\n]", content)
-                if re.search(
-                    r"(?:冻结|预设|计划).{0,55}内生性(?:处理|检验)步骤",
-                    sentence,
+                if (
+                    re.search(
+                        r"(?:冻结|预设|计划).{0,55}内生性(?:处理|检验)步骤",
+                        sentence,
+                    )
+                    or re.search(
+                        r"(?:依据|按照).{0,12}冻结计划.{0,35}(?:处理|解决|缓解).{0,16}内生性",
+                        sentence,
+                    )
                 )
                 and not any(
                     marker in sentence
@@ -2003,11 +3581,48 @@ class WorkflowEngine:
                 problems.append(
                     f"{section.section_id} 对拟合指标作了无比较基准的价值判断"
                 )
-            if re.search(
-                r"(?:组内\s*R|Within\s+R).{0,80}(?:控制变量与固定效应|固定效应.{0,20}(?:解释|贡献))",
-                content,
-                flags=re.IGNORECASE,
-            ):
+            unearned_robustness_sentences = [
+                sentence
+                for sentence in re.split(r"[。！？\n]", content)
+                if re.search(
+                    r"(?:(?:稳定|稳健|可靠).{0,6}(?:关联|结果|系数|发现|证据)|(?:关联|结果|系数|发现|证据).{0,6}(?:稳定|稳健|可靠)(?!性))",
+                    sentence,
+                )
+                and not any(
+                    marker in sentence
+                    for marker in (
+                        "尚不能",
+                        "不能",
+                        "无法",
+                        "未能",
+                        "尚未",
+                        "未验证",
+                        "待检验",
+                        "待执行",
+                        "有待",
+                        "不得",
+                        "不代表",
+                    )
+                )
+            ]
+            if not robustness_executed and unearned_robustness_sentences:
+                problems.append(
+                    f"{section.section_id} 在未执行稳健性检验时声称结果稳定"
+                )
+            overstated_within_fit_sentences = [
+                sentence
+                for sentence in re.split(r"[。！？\n]", content)
+                if re.search(
+                    r"(?:组内\s*R|Within\s+R).{0,80}(?:控制变量与固定效应|固定效应.{0,20}(?:解释|贡献))",
+                    sentence,
+                    flags=re.IGNORECASE,
+                )
+                and not any(
+                    marker in sentence
+                    for marker in ("不代表", "不应归因", "不能归因", "并非")
+                )
+            ]
+            if overstated_within_fit_sentences:
                 problems.append(
                     f"{section.section_id} 错误解释了固定效应模型的组内拟合指标"
                 )
@@ -2036,7 +3651,14 @@ class WorkflowEngine:
                 )
                 and not any(
                     marker in sentence
-                    for marker in ("不能", "无法", "不得", "不应")
+                    for marker in (
+                        "不能",
+                        "无法",
+                        "不得",
+                        "不应",
+                        "未解决",
+                        "尚未解决",
+                    )
                 )
             ]
             if overstated_residual_sentences:
@@ -2059,7 +3681,14 @@ class WorkflowEngine:
                 )
                 and not any(
                     marker in sentence
-                    for marker in ("不能", "无法", "不得", "不应")
+                    for marker in (
+                        "不能",
+                        "无法",
+                        "不得",
+                        "不应",
+                        "未解决",
+                        "尚未解决",
+                    )
                 )
             ]
             if overstated_endogeneity_sentences:
@@ -2231,6 +3860,26 @@ class WorkflowEngine:
         return problems
 
     @staticmethod
+    def _human_review_target_sections(comment: str) -> list[str]:
+        normalized = comment.casefold()
+        keywords = {
+            "abstract": ("摘要", "abstract"),
+            "introduction": ("引言", "introduction"),
+            "theory_hypotheses": ("理论", "假设", "theory", "hypoth"),
+            "data_variables": ("数据", "变量", "data", "variable"),
+            "research_design": ("研究设计", "方法", "design", "method"),
+            "empirical_results": ("实证", "结果", "result"),
+            "discussion_limitations": ("讨论", "局限", "discussion", "limitation"),
+            "conclusion": ("结论", "conclusion"),
+        }
+        targets = [
+            section_id
+            for section_id, markers in keywords.items()
+            if any(marker in normalized for marker in markers)
+        ]
+        return targets or list(FULL_MANUSCRIPT_SECTION_IDS)
+
+    @staticmethod
     def _research_plan_markdown(
         package: ResearchPackage,
         plan: AnalysisPlan,
@@ -2299,6 +3948,83 @@ class WorkflowEngine:
             if run.executions
             else {}
         )
+        authorized_claim_text = "\n".join(
+            str(claim.get("final_text") or claim.get("claim_text") or "")
+            for claim in approved_claims
+        )
+
+        variable_labels = {
+            variable.name: variable.label
+            for variable in package.variables
+        }
+
+        def mentions_term(term: str, *, allow_label: bool = True) -> bool:
+            exact_match = bool(
+                re.search(
+                    rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])",
+                    authorized_claim_text,
+                    flags=re.IGNORECASE,
+                )
+            )
+            if exact_match or not allow_label:
+                return exact_match
+            base_term = term.split(":", 1)[-1]
+            label = variable_labels.get(base_term, "").strip()
+            return bool(label and label in authorized_claim_text)
+
+        marginal_terms = {
+            str(estimate.get("term", ""))
+            for execution in run.executions
+            for estimate in execution.estimates
+            if estimate.get("estimate_type") == "average_marginal_effect"
+        }
+        effect_markers = {
+            "direct": ("直接", "direct"),
+            "indirect": ("间接", "indirect", "溢出"),
+            "total": ("总效应", "总关联", "direct and indirect", "total"),
+        }
+
+        def estimate_is_authorized(estimate: dict[str, Any]) -> bool:
+            term = str(estimate.get("term", ""))
+            if not term:
+                return False
+            if term.casefold() == "rho":
+                return True
+            if estimate.get("estimate_type") == "average_marginal_effect":
+                effect_type = str(estimate.get("effect_type", ""))
+                return mentions_term(term) and any(
+                    marker.casefold() in authorized_claim_text.casefold()
+                    for marker in effect_markers.get(effect_type, (effect_type,))
+                    if marker
+                )
+            if term in marginal_terms:
+                return False
+            if term.startswith("W:"):
+                return mentions_term(term, allow_label=False)
+            return mentions_term(term)
+
+        execution_payloads: list[dict[str, Any]] = []
+        all_estimate_terms: set[str] = set()
+        authorized_estimate_terms: set[str] = set()
+        for execution in run.executions:
+            payload = execution.model_dump(mode="json")
+            estimates = payload.get("estimates", [])
+            all_estimate_terms.update(
+                str(estimate.get("term", ""))
+                for estimate in estimates
+                if estimate.get("term")
+            )
+            payload["estimates"] = [
+                estimate
+                for estimate in estimates
+                if estimate_is_authorized(estimate)
+            ]
+            authorized_estimate_terms.update(
+                str(estimate.get("term", ""))
+                for estimate in payload["estimates"]
+                if estimate.get("term")
+            )
+            execution_payloads.append(payload)
         entity_count = diagnostics.get("entity_count")
         time_count = diagnostics.get("time_period_count")
         rows_used = diagnostics.get("rows_used")
@@ -2319,7 +4045,21 @@ class WorkflowEngine:
                     "unit_of_analysis": package.unit_of_analysis,
                     "sample_period": package.sample_period,
                     "data_structure": package.data_structure_hint,
-                    "variables": [variable.model_dump(mode="json") for variable in package.variables],
+                    "variables": [
+                        variable.model_dump(mode="json")
+                        for variable in package.variables
+                        if variable.role != "unknown"
+                    ],
+                    "field_inventory": {
+                        "total_fields_registered": len(package.variables),
+                        "fields_sent_to_writer": len(
+                            [
+                                variable
+                                for variable in package.variables
+                                if variable.role != "unknown"
+                            ]
+                        ),
+                    },
                     "known_policy_facts": package.known_policy_facts,
                     "constraints": package.constraints,
                 },
@@ -2367,13 +4107,16 @@ class WorkflowEngine:
                     "execution_status": run.execution_status,
                     "scientific_status": run.scientific_status,
                     "executions": [
-                        execution.model_dump(mode="json") for execution in run.executions
+                        execution for execution in execution_payloads
                     ],
                     "deviations": run.deviations,
                     "failed_runs": run.failed_runs,
                     "warnings": remove_legacy_warning(run.warnings),
                     "evidence_assessment": evidence_assessment,
                     "scientific_audit": scientific_audit,
+                    "reproduction_audit": state.artifacts.get(
+                        "reproduction_audit", {}
+                    ).get("payload"),
                 },
                 "authorized_claims": approved_claims,
                 "writing_requirements": {
@@ -2384,6 +4127,12 @@ class WorkflowEngine:
                     "tables_provided": False,
                     "forbid_unverified_citations": True,
                     "forbid_unexecuted_results": True,
+                    "authorized_estimate_terms": sorted(
+                        authorized_estimate_terms
+                    ),
+                    "withheld_estimate_terms": sorted(
+                        all_estimate_terms - authorized_estimate_terms
+                    ),
                 },
             }
         }
@@ -2406,6 +4155,52 @@ class WorkflowEngine:
                 + ", ".join(mismatches)
             )
 
+    @staticmethod
+    def _research_run_differences(
+        primary: ResearchRun,
+        replication: ResearchRun,
+        *,
+        tolerance: float = 1e-8,
+    ) -> list[str]:
+        def comparable(run: ResearchRun) -> dict[str, Any]:
+            payload = run.model_dump(mode="json")
+            payload.pop("research_run_id", None)
+            for execution in payload.get("executions", []):
+                execution.pop("execution_id", None)
+            return payload
+
+        differences: list[str] = []
+
+        def compare(left: Any, right: Any, path: str) -> None:
+            if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+                if abs(float(left) - float(right)) > tolerance:
+                    differences.append(f"{path}: {left} != {right}")
+                return
+            if type(left) is not type(right):
+                differences.append(
+                    f"{path}: type {type(left).__name__} != {type(right).__name__}"
+                )
+                return
+            if isinstance(left, dict):
+                if set(left) != set(right):
+                    differences.append(f"{path}: keys differ")
+                    return
+                for key in sorted(left):
+                    compare(left[key], right[key], f"{path}.{key}")
+                return
+            if isinstance(left, list):
+                if len(left) != len(right):
+                    differences.append(f"{path}: length {len(left)} != {len(right)}")
+                    return
+                for index, (left_item, right_item) in enumerate(zip(left, right)):
+                    compare(left_item, right_item, f"{path}[{index}]")
+                return
+            if left != right:
+                differences.append(f"{path}: {left!r} != {right!r}")
+
+        compare(comparable(primary), comparable(replication), "research_run")
+        return differences
+
 
 def _names(package: ResearchPackage, role: str) -> list[str]:
     return [variable.name for variable in package.variables if variable.role == role]
@@ -2425,6 +4220,15 @@ def _read_profile_csv(path: Any, selected_columns: list[str]) -> tuple[pd.DataFr
         except UnicodeDecodeError as error:
             last_error = error
     raise ValueError("CSV 编码必须是 UTF-8 或 GB18030。") from last_error
+
+
+def _verify_dataset_hash(path: Path, expected_sha256: str) -> None:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != expected_sha256:
+        raise ValueError("数据资产 SHA256 与登记值不一致。")
 
 
 def _merge_critics(reports: list[CriticReport], round_number: int) -> CriticReport:

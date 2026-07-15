@@ -296,6 +296,25 @@ input::placeholder, textarea::placeholder { color: #9aa6b6; }
 .review-issue-list li strong { color: #91333d; font-size: 11px; text-transform: uppercase; }
 .review-issue-list li span { color: #222; font-size: 13px; }
 .review-issue-list li small { color: #666; line-height: 1.5; }
+.design-candidate-list { display: grid; gap: 10px; margin-top: 16px; }
+.design-candidate { display: grid; grid-template-columns: auto 1fr auto; gap: 8px 12px; padding: 14px; border: 1px solid #d8d8d3; border-radius: 7px; background: #fff; cursor: pointer; }
+.design-candidate.is-selected { border-color: #222; box-shadow: inset 0 0 0 1px #222; }
+.design-candidate.is-unavailable { opacity: .55; cursor: not-allowed; }
+.design-candidate > input { margin-top: 3px; }
+.design-candidate > span { display: grid; gap: 3px; }
+.design-candidate > span strong { color: #222; font-size: 13px; }
+.design-candidate > span small, .design-candidate > em { color: #777; font-size: 10px; font-style: normal; }
+.design-candidate > p, .design-candidate > code, .design-candidate > details { grid-column: 2 / -1; margin: 0; }
+.design-candidate > p { color: #555; font-size: 11px; line-height: 1.55; }
+.design-candidate > code { overflow-wrap: anywhere; color: #333; font-size: 10px; }
+.design-candidate details summary { color: #555; font-size: 10px; }
+.design-candidate details ul { margin: 8px 0 0; padding-left: 18px; color: #666; font-size: 10px; line-height: 1.55; }
+.design-arena-note { margin: 0; color: #6d5a34; font-size: 10px; line-height: 1.55; }
+.h4-manuscript-review { display: grid; gap: 8px; margin-top: 16px; }
+.h4-manuscript-review > p { margin: 0 0 4px; color: #333; font-size: 12px; }
+.h4-manuscript-review > details { border: 1px solid #d8d8d3; border-radius: 6px; background: #fff; }
+.h4-manuscript-review > details > summary { padding: 11px 13px; color: #333; font-size: 12px; cursor: pointer; }
+.h4-manuscript-review .manuscript-copy { padding: 0 14px 14px; }
 .revision-editor { margin-top: 16px; padding: 15px; border: 1px solid #d3bc88; border-radius: 7px; background: #fffdf8; }
 .revision-editor > header strong { color: #39495e; font-size: 13px; }
 .revision-editor > header p { margin: 5px 0 11px; color: var(--muted); font-size: 11px; line-height: 1.55; }

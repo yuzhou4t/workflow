@@ -15,7 +15,9 @@ from .models import (
     ClaimLedger,
     ClaimRecord,
     CriticReport,
+    CandidateReview,
     DataProfile,
+    DesignReviewerReport,
     EvidenceAssessment,
     ExecutionRecord,
     FormalResearchContract,
@@ -77,6 +79,7 @@ class FixtureModelGateway:
             "hypothesis_decomposition": self._decompose,
             "method_route": self._route,
             "analysis_design": self._design,
+            "design_reviewer": self._design_reviewer,
             "method_critic": self._critic,
             "plan_revision": self._revise,
             "evidence_assessment": self._assess,
@@ -141,8 +144,19 @@ class FixtureModelGateway:
             assumptions = ["事件窗口无其他重大混杂事件", "预期收益模型设定合理"]
         elif profile.data_structure == "spatial_panel" or any(word in text for word in ("空间溢出", "邻近地区")):
             route = "spatial"
-            goal = "causal"
-            assumptions = ["空间权重矩阵事先定义", "空间依赖结构可识别"]
+            goal = "associational"
+            assumptions = [
+                "空间权重矩阵在查看结果前定义并冻结",
+                "空间标识与权重矩阵行列一一对应",
+                "没有额外外生识别时只解释为空间关联",
+            ]
+        elif (
+            package.design_envelope is not None
+            and package.design_envelope.research_goal == "mechanism"
+        ):
+            route = "mechanism_boundary"
+            goal = "mechanism"
+            assumptions = ["机制变量时间顺序合理", "机制结论不超过识别设计"]
         elif any(word in text for word in ("政策", "试验区", "指引", "试点", "did")):
             route = "policy_causal"
             goal = "causal"
@@ -202,15 +216,23 @@ class FixtureModelGateway:
         controls = _variables(package, "control")
         entity = _variables(package, "id")
         time = _variables(package, "time")
+        strategy = str(payload.get("candidate_strategy", "direct_baseline"))
+        candidate_id = str(payload.get("candidate_id", strategy))
         estimator = {
             "policy_causal": "DID / staggered-adoption DID（按政策实施方式确定）",
             "panel_association": "双向固定效应面板模型",
             "mechanism_boundary": "固定效应主模型 + 预注册机制/边界检验",
             "market_event": "事件研究",
-            "spatial": "SAR/SEM/SDM 选择诊断",
+            "spatial": "空间杜宾面板模型（由直接、间接和总效应目标确定）",
             "measurement_efficiency": "熵值法或 Super-SBM（按指标目标确定）",
             "structural_macro": "结构模型设计（高级分支）",
         }[family]
+        if family == "spatial":
+            estimator = {
+                "direct_baseline": "空间杜宾面板模型（SDM）",
+                "identification_first": "空间滞后面板模型（SAR）",
+                "measurement_robustness": "空间误差面板模型（SEM）",
+            }.get(strategy, estimator)
         diagnostics = [_planned("diag_data", "数据完整性与主键诊断", "确认样本和唯一键可执行")]
         if family == "policy_causal":
             diagnostics.extend(
@@ -224,13 +246,56 @@ class FixtureModelGateway:
         formula = None
         if outcomes and exposures:
             formula = f"{outcomes[0]} ~ {' + '.join(exposures + controls)}"
+        weights_ref = next(
+            (
+                item
+                for item in package.dataset_refs
+                if item.role == "supplementary"
+                and item.filename.casefold() == "spatial_weights.csv"
+            ),
+            None,
+        )
+        spatial_keys = _variables(package, "spatial_id")
+        model_parameters: dict[str, Any] = {}
+        if family == "spatial" and weights_ref and spatial_keys:
+            spatial_model = {
+                "direct_baseline": "sdm",
+                "identification_first": "sar",
+                "measurement_robustness": "sem",
+            }.get(strategy, "sdm")
+            model_parameters = {
+                "spatial_model": spatial_model,
+                "spatial_weights_dataset_id": weights_ref.dataset_id,
+                "spatial_weights_sha256": weights_ref.sha256,
+                "spatial_id": spatial_keys[0],
+            }
+            if spatial_model == "sdm":
+                model_parameters.update(
+                    {
+                        "spatially_lagged_covariates": [*exposures, *controls],
+                        "effect_decomposition": ["direct", "indirect", "total"],
+                    }
+                )
+        estimands = [
+            _planned(
+                "estimand_main",
+                "核心估计对象",
+                "对应 H1 的预先定义效应或关联参数",
+            )
+        ]
+        if family == "spatial":
+            estimands = [
+                _planned("estimand_direct", "平均直接效应", "估计本地空间关联"),
+                _planned("estimand_indirect", "平均间接效应", "估计跨地区空间关联"),
+                _planned("estimand_total", "平均总效应", "汇总直接与间接空间关联"),
+            ]
         return AnalysisPlan(
-            plan_id=f"plan-{package.case_id}",
+            plan_id=f"plan-{package.case_id}-{candidate_id}",
             plan_version=1,
             method_family=family,
             base_method_family="panel_association" if family == "mechanism_boundary" else None,
             design_only=not bool(package.dataset_refs),
-            estimands=[_planned("estimand_main", "核心估计对象", "对应 H1 的预先定义效应或关联参数")],
+            estimands=estimands,
             sample_rules=[_planned("sample_main", "冻结样本边界", "禁止观察结果后调整样本", period=package.sample_period)],
             variable_construction=[_planned("vars_main", "冻结变量口径", "使用案例包定义并记录全部变换")],
             baseline_models=[
@@ -244,12 +309,43 @@ class FixtureModelGateway:
                     treatments_or_exposures=exposures,
                     controls=controls,
                     fixed_effects=entity + time,
-                    standard_error_strategy="按分析层级聚类；具体维度在 H2 前确认",
+                    standard_error_strategy=(
+                        "空间最大似然与 Delta 方法近似；边界解必须单独标记"
+                        if family == "spatial"
+                        else "按分析层级聚类；具体维度在 H2 前确认"
+                    ),
+                    parameters=model_parameters,
                 )
             ],
-            diagnostics=diagnostics,
-            robustness_tests=[_planned("robust_alt_measure", "替代变量口径", "检验结论对测量选择的敏感性")],
-            falsification_tests=[_planned("falsification_placebo", "安慰剂或伪处理", "排除机械相关和共同趋势")],
+            diagnostics=[
+                *diagnostics,
+                *(
+                    [_planned("diag_identification", "识别威胁诊断", "优先检查竞争解释和识别条件")]
+                    if strategy == "identification_first"
+                    else []
+                ),
+                *(
+                    [_planned("diag_measurement", "测量与缺失敏感性诊断", "优先检查变量口径和样本损失")]
+                    if strategy == "measurement_robustness"
+                    else []
+                ),
+            ],
+            robustness_tests=[
+                _planned("robust_alt_measure", "替代变量口径", "检验结论对测量选择的敏感性"),
+                *(
+                    [_planned("robust_missingness", "缺失样本敏感性", "检查样本筛选对结果的影响")]
+                    if strategy == "measurement_robustness"
+                    else []
+                ),
+            ],
+            falsification_tests=[
+                _planned("falsification_placebo", "安慰剂或伪处理", "排除机械相关和共同趋势"),
+                *(
+                    [_planned("falsification_competing", "竞争性解释检验", "优先排查替代识别解释")]
+                    if strategy == "identification_first"
+                    else []
+                ),
+            ],
             mechanism_tests=(
                 [_planned("mechanism_predefined", "预注册机制检验", "机制证据不得写成已证明因果链")]
                 if _variables(package, "mediator")
@@ -264,6 +360,34 @@ class FixtureModelGateway:
             unsupported_requested_analyses=(
                 ["当前未接入数据，所有统计分析均未执行"] if not package.dataset_refs else []
             ),
+        ).model_dump()
+
+    @staticmethod
+    def _design_reviewer(payload: dict[str, Any]) -> dict[str, Any]:
+        dimension = str(payload["dimension"])
+        candidate_reviews: list[CandidateReview] = []
+        for candidate in payload["candidates"]:
+            probe = candidate["probe_report"]
+            verdict = "reject" if probe["verdict"] == "fail" else "pass"
+            candidate_reviews.append(
+                CandidateReview(
+                    candidate_id=candidate["candidate_id"],
+                    verdict=verdict,
+                    strengths=[f"{dimension} Reviewer 已核对该候选的结构化计划与 Probe。"],
+                    issues=[],
+                    required_follow_ups=(
+                        ["先解决 Probe 中的硬失败再进入 H2。"]
+                        if verdict == "reject"
+                        else []
+                    ),
+                )
+            )
+        return DesignReviewerReport(
+            report_id=f"design-review-{dimension}",
+            dimension=dimension,
+            reviewer_policy="fixture-isolated-context",
+            candidate_reviews=candidate_reviews,
+            remaining_risks=[],
         ).model_dump()
 
     @staticmethod
@@ -436,9 +560,15 @@ class QwenModelGateway:
                 "Qwen API Key is required; configure runtime settings or DASHSCOPE_API_KEY"
             )
         self.model = model_override or config.qwen_model
+        self.http_client = httpx.AsyncClient(
+            trust_env=urlsplit(config.qwen_base_url).hostname
+            != "dashscope.aliyuncs.com"
+        )
         self.client = AsyncOpenAI(
             api_key=config.qwen_api_key,
             base_url=config.qwen_base_url,
+            http_client=self.http_client,
+            max_retries=0,
         )
 
     async def generate(
@@ -462,32 +592,47 @@ class QwenModelGateway:
                         ),
                     }
                 )
-            try:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    response_format={"type": "json_object"},
-                    extra_body={"enable_thinking": False},
-                    temperature=0,
-                    max_tokens=(
-                        3072
-                        if prompt_key == "scientific_writer_section"
-                        else 12288 if prompt_key == "scientific_writer" else 8192
-                    ),
-                    timeout=(
-                        180
-                        if prompt_key == "scientific_writer_section"
-                        else 360 if prompt_key == "scientific_writer" else 120
-                    ),
-                )
-            except (APIConnectionError, APITimeoutError) as error:
-                raise RuntimeError(
-                    "千问调用期间连接中断或超时。请检查网络/代理后重新启动本次研究；案例数据无需重新整理。"
-                ) from error
-            except APIStatusError as error:
-                raise RuntimeError(
-                    f"千问调用返回 HTTP {error.status_code}。请在配置页重新测试当前模型与 API 地址。"
-                ) from error
+            response = None
+            for network_attempt in range(2):
+                try:
+                    response = await self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        response_format={"type": "json_object"},
+                        extra_body={"enable_thinking": False},
+                        temperature=0,
+                        max_tokens=(
+                            3072
+                            if prompt_key == "scientific_writer_section"
+                            else 4096
+                            if prompt_key in {"analysis_design", "design_reviewer"}
+                            else 12288 if prompt_key == "scientific_writer" else 8192
+                        ),
+                        timeout=(
+                            180
+                            if prompt_key == "scientific_writer_section"
+                            else 360
+                            if prompt_key == "scientific_writer"
+                            else 240
+                            if prompt_key == "analysis_design"
+                            else 180
+                            if prompt_key == "design_reviewer"
+                            else 120
+                        ),
+                    )
+                    break
+                except (APIConnectionError, APITimeoutError) as error:
+                    if network_attempt == 0:
+                        continue
+                    raise RuntimeError(
+                        "千问调用期间连接中断或超时，且一次有界重试仍未恢复。"
+                        "请检查网络/代理后重新启动本次研究；案例数据无需重新整理。"
+                    ) from error
+                except APIStatusError as error:
+                    raise RuntimeError(
+                        f"千问调用返回 HTTP {error.status_code}。请在配置页重新测试当前模型与 API 地址。"
+                    ) from error
+            assert response is not None
             content = response.choices[0].message.content or "{}"
             try:
                 return output_model.model_validate_json(content)

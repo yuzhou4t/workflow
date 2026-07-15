@@ -134,6 +134,28 @@ export interface ManuscriptPackageView {
   auditResult: 'not_run' | 'pass_with_no_critical_issues' | 'revise'
 }
 
+export interface DesignCandidateView {
+  id: string
+  strategy: 'direct_baseline' | 'identification_first' | 'measurement_robustness'
+  rationale: string
+  methodFamily: string
+  estimator: string
+  formula?: string
+  probeVerdict: 'pass' | 'warn' | 'fail'
+  executorReady: boolean
+  probeChecks: Array<{ id: string; status: 'pass' | 'warn' | 'fail'; evidence: string }>
+  reviewIssueCount: number
+  reviewerRejected: boolean
+}
+
+export interface DesignArenaView {
+  id: string
+  candidates: DesignCandidateView[]
+  recommendedCandidateIds: string[]
+  provisionalCandidateId?: string
+  selectionRationale: string[]
+}
+
 export interface RunSnapshot {
   id: string
   version: number
@@ -144,7 +166,7 @@ export interface RunSnapshot {
   mode: 'fixture' | 'research'
   status: RunStatus
   currentNodeId?: string
-  currentGate?: 'H1' | 'H2' | 'H3'
+  currentGate?: 'H1' | 'H2' | 'H3' | 'H4'
   lastError?: string
   executionStatus: string
   scientificStatus: string
@@ -155,6 +177,7 @@ export interface RunSnapshot {
   events: RunEvent[]
   claims: ClaimRecord[]
   manuscript?: ManuscriptPackageView
+  designArena?: DesignArenaView
   allowedActions: string[]
 }
 
@@ -163,7 +186,7 @@ export interface RunSummary {
   caseName: string
   mode: 'fixture' | 'research'
   status: RunStatus
-  currentGate?: 'H1' | 'H2' | 'H3'
+  currentGate?: 'H1' | 'H2' | 'H3' | 'H4'
   updatedAt: string
 }
 
@@ -222,6 +245,14 @@ export interface CaseSubmissionInput {
   dataStructureHint: DataStructure
   variables: VariableInput[]
   datasetRefs: DatasetReferenceInput[]
+  designEnvelope?: {
+    benchmarkTrack: 'strict_blind' | 'reproduction_aligned'
+    researchGoal: 'causal' | 'associational' | 'mechanism' | 'prediction' | 'measurement' | 'structural' | 'mixed'
+    targetEstimands: string[]
+    designConstraints: string[]
+    requiredDiagnostics: string[]
+    allowedClaimStrength: 'causal' | 'associational' | 'descriptive' | 'not_prespecified'
+  }
   knownPolicyFacts: string[]
   constraints: string[]
 }
@@ -251,6 +282,7 @@ export interface GateDecisionInput {
   action: GateAction
   comment?: string
   claims?: Array<{ claimId: string; decision: ClaimDecision; finalText?: string; reason?: string }>
+  selectedCandidateId?: string
 }
 
 export type ConfigSource = 'environment' | 'file' | 'default' | 'missing'

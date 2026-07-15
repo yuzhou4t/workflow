@@ -171,6 +171,27 @@ class AgentLaboratoryRunner:
         if _sha256(target) != dataset_ref.sha256:
             raise CaseImportError("baseline input hash does not match the registered dataset")
 
+        supplementary_assets: list[dict[str, str]] = []
+        for asset_ref in (item for item in case.dataset_refs if item.role == "supplementary"):
+            source = self.registry.resolve(asset_ref)
+            asset_target = visible / Path(asset_ref.filename).name
+            try:
+                os.link(source, asset_target)
+            except OSError:
+                shutil.copyfile(source, asset_target)
+            os.chmod(asset_target, 0o600)
+            if _sha256(asset_target) != asset_ref.sha256:
+                raise CaseImportError(
+                    f"baseline supplementary input hash does not match: {asset_ref.filename}"
+                )
+            supplementary_assets.append(
+                {
+                    "filename": asset_target.name,
+                    "sha256": asset_ref.sha256,
+                    "role": asset_ref.role,
+                }
+            )
+
         profile = [
             f"# {case.title}",
             "",
@@ -184,6 +205,17 @@ class AgentLaboratoryRunner:
             "## 客观事实与约束",
             *[f"- {item}" for item in [*case.known_policy_facts, *case.constraints]],
         ]
+        if supplementary_assets:
+            profile.extend(
+                [
+                    "",
+                    "## 可见补充资产",
+                    *[
+                        f"- {item['filename']}（SHA256: {item['sha256']}）"
+                        for item in supplementary_assets
+                    ],
+                ]
+            )
         (visible / "case_profile.md").write_text("\n".join(profile) + "\n", encoding="utf-8")
         (visible / "data_description.md").write_text(
             "数据由同一 Benchmark 输入上传并按 SHA256 锁定。变量角色来自 H1 前的保守识别，正式解释需结合研究边界。\n",
@@ -203,6 +235,9 @@ class AgentLaboratoryRunner:
                 "files": {
                     "case_profile": "case_profile.md",
                     "main_data": "main_data.csv",
+                    "supplementary_assets": [
+                        item["filename"] for item in supplementary_assets
+                    ],
                     "data_dictionary": "data_dictionary.csv",
                     "data_description": "data_description.md",
                 },
@@ -216,7 +251,7 @@ class AgentLaboratoryRunner:
             "workflow": {
                 "output_dir": "output",
                 "execution_timeout_seconds": 180,
-                "max_code_repairs": 1,
+                "max_code_repairs": 2,
             },
         }
         (workspace / "runner_config.json").write_text(

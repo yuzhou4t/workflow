@@ -148,6 +148,31 @@ class LocalCaseImporterTests(unittest.TestCase):
         self.assertEqual(variables["GF"], "exposure")
         self.assertEqual(result.import_report.main_data_filename, "main_data.csv")
 
+    def test_import_registers_spatial_weights_as_supplementary_asset(self) -> None:
+        main_data = self.root / "main_data.csv"
+        self.csv_path.unlink()
+        main_data.write_text(
+            "id,year,province,SD,GF\n"
+            "1,2019,beijing,42.9,33.9\n"
+            "2,2019,tianjin,43.3,60.1\n",
+            encoding="utf-8",
+        )
+        weights = self.root / "spatial_weights.csv"
+        weights.write_text(
+            "spatial_id,beijing,tianjin\n"
+            "beijing,0,1\n"
+            "tianjin,1,0\n",
+            encoding="utf-8",
+        )
+
+        result = self.importer.import_folder(self.root)
+
+        self.assertEqual([item.role for item in result.case_submission.dataset_refs], ["main", "supplementary"])
+        self.assertEqual(result.case_submission.dataset_refs[1].filename, "spatial_weights.csv")
+        self.assertEqual(result.import_report.excluded_file_count, 1)
+        registry = json.loads(self.registry_path.read_text(encoding="utf-8"))
+        self.assertIn(result.case_submission.dataset_refs[1].dataset_id, registry)
+
 
 class LocalCaseImportApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -211,6 +236,30 @@ class LocalCaseImportApiTests(unittest.IsolatedAsyncioTestCase):
             "/api/v1/case-imports/upload",
             params={"filename": "paper.pdf"},
             content=b"not a csv",
+        )
+        self.assertEqual(rejected.status_code, 422)
+
+    async def test_spatial_weights_upload_is_registered_as_supplementary(self) -> None:
+        response = await self.client.post(
+            "/api/v1/case-imports/assets/upload",
+            params={"filename": "spatial_weights.csv"},
+            content=(
+                "spatial_id,beijing,tianjin\n"
+                "beijing,0,1\n"
+                "tianjin,1,0\n"
+            ).encode(),
+            headers={"content-type": "text/csv"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["role"], "supplementary")
+        self.assertEqual(payload["filename"], "spatial_weights.csv")
+
+        rejected = await self.client.post(
+            "/api/v1/case-imports/assets/upload",
+            params={"filename": "notes.csv"},
+            content=b"name,value\nx,1\n",
         )
         self.assertEqual(rejected.status_code, 422)
 

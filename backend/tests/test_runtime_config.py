@@ -318,6 +318,7 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
                 {"case": PRESET_CASES["green-finance-did"].model_dump(mode="json")},
                 ResearchPackage,
             )
+        self.assertEqual(create_completion.await_count, 2)
         self.assertEqual(
             create_completion.await_args.kwargs["extra_body"],
             {"enable_thinking": False},
@@ -338,10 +339,29 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
             gateway = QwenModelGateway(model_override="qwen3.7-max")
 
         self.assertEqual(gateway.model, "qwen3.7-max")
-        client_class.assert_called_once_with(
-            api_key="test-key",
-            base_url="https://qwen.example.test/v1",
+        self.assertEqual(client_class.call_args.kwargs["api_key"], "test-key")
+        self.assertEqual(
+            client_class.call_args.kwargs["base_url"],
+            "https://qwen.example.test/v1",
         )
+        self.assertIs(client_class.call_args.kwargs["http_client"], gateway.http_client)
+        self.assertEqual(client_class.call_args.kwargs["max_retries"], 0)
+
+    async def test_official_qwen_gateway_bypasses_environment_proxy(self) -> None:
+        effective = SimpleNamespace(
+            qwen_api_key="test-key",
+            qwen_model="qwen3.7-plus",
+            qwen_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+        with (
+            patch("hypoweaver.adapters.RuntimeConfigStore") as store_class,
+            patch("hypoweaver.adapters.AsyncOpenAI"),
+            patch("hypoweaver.adapters.httpx.AsyncClient") as http_client_class,
+        ):
+            store_class.return_value.resolve.return_value = effective
+            QwenModelGateway()
+
+        http_client_class.assert_called_once_with(trust_env=False)
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ from .benchmark_runner import (
 )
 from .definition import DEFINITION_VERSION, build_app_a_definition
 from .engine import WorkflowEngine, WorkflowTransitionError
-from .models import CreateRunRequest, GateDecisionRequest, RevisionRequest, RunState
+from .models import CreateRunRequest, DatasetRef, GateDecisionRequest, RevisionRequest, RunState
 from .repository import (
     RunNotFoundError,
     RunRepository,
@@ -149,6 +149,22 @@ async def upload_case_file(
 
 
 @app.post(
+    "/api/v1/case-imports/assets/upload",
+    response_model=DatasetRef,
+)
+async def upload_case_asset(
+    request: Request,
+    filename: str,
+    _actor: str = Depends(mutation_actor),
+) -> DatasetRef:
+    try:
+        uploaded = await case_upload_store.save(filename, request.stream())
+        return case_importer.register_supplementary_asset(uploaded)
+    except CaseImportError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post(
     "/api/v1/baselines/agent-laboratory/runs",
     response_model=BaselineRun,
     status_code=202,
@@ -240,6 +256,21 @@ async def retry_run_writing(
 ) -> RunState:
     try:
         return await engine.retry_writing(run_id)
+    except RunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="run not found") from error
+    except (VersionConflictError, TransitionInProgressError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except WorkflowTransitionError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/api/v1/runs/{run_id}/design/retry", response_model=RunState)
+async def retry_run_design(
+    run_id: str,
+    _actor: str = Depends(mutation_actor),
+) -> RunState:
+    try:
+        return await engine.retry_design(run_id)
     except RunNotFoundError as error:
         raise HTTPException(status_code=404, detail="run not found") from error
     except (VersionConflictError, TransitionInProgressError) as error:

@@ -2,6 +2,8 @@
 
 这是一套代码原生、可停止、可恢复的社会科学假设验证链路。Dify 导出文件只保留为设计参考；正式运行时由 Python 状态机、严格 JSON Schema、SQLite Run 快照和服务端人工闸门共同控制。
 
+新同学接手时，请先阅读 [`README_NEXT_STEPS.md`](README_NEXT_STEPS.md)。其中写明当前架构、真实案例暴露的不足、下一阶段任务拆分、代码入口与逐项验收标准。
+
 当前第一版优先验证一条可信的核心闭环：
 
 ```text
@@ -10,14 +12,17 @@
 → H1 研究边界确认
 → 假设拆解 + 数据画像（并行）
 → 方法路由
-→ 七类方法设计器（互斥）
-→ 四类 Critic（并行）与最多两轮修复
-→ H2 冻结 FormalResearchContract
+→ 三个不同目标的候选设计
+→ 每个候选的无结果 Probe
+→ 四类隔离 Reviewer（并行）
+→ H2 人工选择候选并冻结 FormalResearchContract
 → Fixture / Python Research Engine（互斥）
+→ 独立再次执行与数值复现审计
 → EvidenceAssessment + ScientificAudit
 → ClaimLedger
 → H3 逐条结论授权
-→ 受约束写作与确定性一致性审计
+→ 8 节受约束写作与确定性一致性审计
+→ H4 人工审稿与定点退回
 → 封存成果包
 ```
 
@@ -25,8 +30,10 @@
 
 - 代码维护的版本化工作流定义，前端不再解析 Dify YAML；
 - `CaseSubmission → ResearchPackage → AnalysisPlan → FormalResearchContract → ResearchRun → ClaimLedger → ManuscriptPackage` 的 Pydantic 严格 Schema；
-- 真正会暂停的 H1/H2/H3 服务端状态机；
+- 真正会暂停的 H1/H2/H3/H4 服务端状态机；
+- 三个候选研究设计、无结果 Probe、四类隔离 Reviewer 与人工候选选择；
 - H2 计划哈希冻结、乐观版本控制和幂等审批键；
+- 冻结合同的主执行、独立复算与数值容差复现审计；
 - SQLite 持久化 Run、Step Attempt、事件、决策和 Artifact，刷新页面可恢复；
 - 节点级 Prompt 模板/本次渲染、实际输入、实际输出和日志；
 - Fixture 与外部 Python 执行器接口；
@@ -34,7 +41,7 @@
 - Fixture 安全边界：不生成任何样本量、系数、p 值、显著性或诊断结果，只允许生成研究计划；
 - App A 输入 Schema 拒绝原论文结果和隐藏参考字段；
 - 独立 App B 盲测服务：独立数据库、封存哈希校验、六维诊断和代码计算总分；
-- 面向研究者的 React 任务控制台：详细研究输入、开始前预检、纵向执行过程、嵌入式 H1/H2/H3 和成果状态；
+- 面向研究者的 React 任务控制台：详细研究输入、开始前预检、纵向执行过程、嵌入式 H1/H2/H3/H4 和成果状态；
 - 案例文件夹一键导入：选择案例根目录后自动识别主 CSV、隔离论文与代码，再登记数据并直接启动到 H1；
 - 黑白极简 Research Bench：默认展示 HypoWeaver 纵向链路，可展开为与 Agent Laboratory 并排的双流程对照；
 - Agent Laboratory 独立基线启动器：复用同一 Dataset ID 与文件哈希，通过同级仓库的适配器异步运行并回传阶段状态；
@@ -74,7 +81,7 @@ http://127.0.0.1:5174/#settings  API Key、模型和执行器配置
 3. 前端会在文件夹中自动选择主分析 CSV，并只上传这一份数据。后端会计算 SHA256/行列数/年份范围、登记 Dataset ID，并直接创建 Run 到 H1。
 4. 在 H1 确认系统根据表头推断的研究问题、变量角色和样本边界后，再继续方法设计。
 
-案例规范化、H1 前校验和方法家族路由全部由确定性代码完成；因此短暂的模型网络异常不会阻止案例先进入 H1，路由也不会因模型给出自相矛盾的状态而失败。千问从 H1 批准后的假设拆解阶段开始调用，结构化 JSON 请求会显式关闭思考模式，连接中断或超时时会记录明确错误，不再返回无说明的 HTTP 500。方法方案生成后，测量、因果识别、统计推断和可复现性四类 Critic 会并行执行，再统一汇合到 H2 前审查。运行记录页支持删除单条历史 Run；删除不会移除已上传的案例数据文件。
+案例规范化、H1 前校验和方法家族路由全部由确定性代码完成；因此短暂的模型网络异常不会阻止案例先进入 H1，路由也不会因模型给出自相矛盾的状态而失败。千问从 H1 批准后的假设拆解阶段开始调用，结构化 JSON 请求会显式关闭思考模式，连接中断或超时时会记录明确错误，不再返回无说明的 HTTP 500。系统随后从直接基准、识别优先和测量优先三个目标生成候选设计；每个候选先接受不读取统计结果的 Probe，再由测量、因果识别、统计推断和可复现性四类隔离 Reviewer 并行审查，最后交给 H2 人工选择和冻结。运行记录页支持删除单条历史 Run；删除不会移除已上传的案例数据文件。
 
 需要做流程对照时，点击首页“展开基线”。HypoWeaver 与 Agent Laboratory 各有独立启动按钮；二者复用同一份已登记 CSV 和千问配置，但分别运行、分别记录状态。Agent Laboratory 会执行模型生成的 Python 代码，因此启动前页面会要求一次明确确认。其输出只作为外部基线，默认 `scientific_status=not_assessed`，不会自动继承 HypoWeaver 的 Critic、H2 冻结或 ClaimLedger。
 
@@ -161,13 +168,13 @@ Qwen 测试会发起一次 `max_tokens=1` 的最小模型调用；Research Engin
 
 外部执行器接收冻结的 `FormalResearchContract`，并必须返回符合 `ResearchRun` Schema 的 JSON。主 Web 进程不运行任意模型生成代码，计量执行被隔离在独立服务中。
 
-本仓库同时提供一个独立、受限的本地执行器。它不执行模型生成的任意代码，只按冻结合同运行已经实现的估计器；当前支持 `panel_association` 与 `mechanism_boundary` 的双向固定效应基准模型，其他方法会明确返回未支持：
+本仓库同时提供一个独立、受限的本地执行器。它不执行模型生成的任意代码，只按冻结合同运行已经实现的估计器；当前支持 `panel_association`、`mechanism_boundary` 的双向固定效应基准模型，以及具有固定权重资产、双向固定效应和直接/间接/总效应分解的空间杜宾基准模型。其他方法会明确返回未支持：
 
 ```bash
 PYTHONPATH=backend/src python3.11 -m uvicorn hypoweaver.research_api:app --port 9000
 ```
 
-执行器读取私有 Dataset Registry，通过 Dataset ID 解析已上传 CSV，并在估计前复核文件 SHA256。首版结果标记为 `scientific_status=limited`，因为稳健性、证伪、机制和异质性步骤尚未自动执行。
+执行器读取私有 Dataset Registry，通过 Dataset ID 解析已上传 CSV，并在估计前复核文件 SHA256。企业面板合同会按 H2 冻结参数逐项运行当前已支持的诊断、稳健性、证伪、机制和异质性步骤；不支持或预算内未完成的步骤会明确标记，不会静默替换模型。空间执行器当前只支持冻结的空间杜宾基准模型。`scientific_status` 由实际完成情况和识别边界决定，不能由代码运行成功自动升级。
 
 ## HTTP API
 
@@ -185,8 +192,9 @@ POST /api/v1/runs
 GET  /api/v1/runs
 GET  /api/v1/runs/{run_id}
 POST /api/v1/runs/{run_id}/advance
-POST /api/v1/runs/{run_id}/gates/{H1|H2|H3}
+POST /api/v1/runs/{run_id}/gates/{H1|H2|H3|H4}
 POST /api/v1/runs/{run_id}/revisions
+POST /api/v1/runs/{run_id}/writing/retry
 GET  /api/v1/runs/{run_id}/artifacts/{artifact_key}
 ```
 
@@ -241,3 +249,5 @@ public/workflows/      Dify 历史设计参考，不参与运行
 ```
 
 同级 `../Agent Laboratory` 是外部 Benchmark 基线，必须与本项目保持独立，不能向其中加入 HypoWeaver 的 Critic、冻结或 ClaimLedger 逻辑。
+
+Group 2 的职责边界、与《框架设计》的逐项映射、智能体竞争与 Reviewer 审计设计，以及下一轮 Benchmark 计划见 [`docs/GROUP2_WORKFLOW_ARCHITECTURE.md`](docs/GROUP2_WORKFLOW_ARCHITECTURE.md)。

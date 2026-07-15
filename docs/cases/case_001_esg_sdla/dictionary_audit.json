@@ -1,0 +1,20 @@
+{
+  "field_count": 132,
+  "evidence_counts": {
+    "A": 42,
+    "B": 23,
+    "C": 67
+  },
+  "exact_interactions_verified": [
+    "SDLAESG",
+    "ESGABSDA1",
+    "ESGABSDA2",
+    "ESG重述",
+    "LONGESG",
+    "SHORTESG",
+    "OVERESG",
+    "ZESG"
+  ],
+  "result_leakage_fields_included": [],
+  "unresolved_fields_are_blocked_from_automatic_modeling": true
+}

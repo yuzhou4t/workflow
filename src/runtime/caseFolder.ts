@@ -3,6 +3,7 @@ const HIDDEN_PATH_MARKERS = ['hidden', 'reference', 'references', 'gold', '原�
 
 export interface CaseFolderSelection {
   mainData: File
+  supplementaryData: File[]
   caseProfile?: File
   hiddenFileCount: number
   excludedFileCount: number
@@ -45,11 +46,13 @@ export function selectCaseFolder(files: Iterable<File>): CaseFolderSelection {
   const csvFiles = visibleFiles.filter((file) => suffix(relativePath(file)) === '.csv').sort(mainCsvOrder)
   if (!csvFiles.length) throw new Error('所选案例文件夹中没有可用的 CSV 主分析数据。')
   const caseProfile = visibleFiles.find((file) => /^(case_profile|case-profile)\.json$/i.test(file.name))
+  const supplementaryData = csvFiles.filter((file) => /^spatial_weights\.csv$/i.test(file.name))
 
   return {
     mainData: csvFiles[0],
+    supplementaryData,
     caseProfile,
     hiddenFileCount: hiddenFiles.length,
-    excludedFileCount: visibleFiles.length - 1 - (caseProfile ? 1 : 0),
+    excludedFileCount: visibleFiles.length - 1 - supplementaryData.length - (caseProfile ? 1 : 0),
   }
 }

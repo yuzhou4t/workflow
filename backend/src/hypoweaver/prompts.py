@@ -9,6 +9,7 @@ from .models import (
     AnalysisPlan,
     ClaimLedger,
     CriticReport,
+    DesignReviewerReport,
     EvidenceAssessment,
     ManuscriptPackage,
     ManuscriptSection,
@@ -98,11 +99,20 @@ PROMPTS: dict[str, PromptSpec] = {
     "analysis_design": PromptSpec(
         "analysis_design",
         "研究设计",
-        "1.1.0",
+        "1.6.0",
         COMMON_GUARDRAILS
-        + "\n生成 H2 冻结前的预分析计划。只使用 ResearchPackage 中已标注角色的字段；一个构念只能选择一种主口径，禁止把原始值与其处理版本同时作为核心解释变量。每个诊断、稳健性和证伪步骤必须说明理由与所需字段。dataset_refs 非空且 DataProfile 未 blocked 时 design_only=false。此阶段只写 planned 步骤，不得假装已经执行。",
+        + "\n生成 H2 冻结前的一个候选预分析计划。只使用 ResearchPackage 中已标注角色的字段；一个构念只能选择一种主口径，禁止把原始值与其处理版本同时作为核心解释变量。dataset_refs 非空且 DataProfile 未 blocked 时 design_only=false。此阶段只写 planned 步骤，不得假装已经执行。candidate_strategy 是本候选方案的设计取向，必须与其他候选形成可说明的差异，但不能为了预期显著性选择方法。baseline_models 的元素使用 ModelSpec，可以填写 estimator、formula、outcome、treatments_or_exposures、controls、fixed_effects 和 standard_error_strategy。面板固定效应模型须在 ModelSpec.parameters 明示 drop_singletons；按实体聚类时应使用可复现的有限样本校正，并把组内、模型、总体、含固定效应及调整后含固定效应 R² 视为不同统计量。estimands、sample_rules、variable_construction、diagnostics、robustness_tests、falsification_tests、mechanism_tests、heterogeneity_tests 的元素必须严格使用 PlannedStep，只能在顶层填写 step_id、name、priority、execution_status、rationale、required_data_fields、parameters；估计器、公式、变量、固定效应和标准误等具体设置必须放入 parameters，不得作为 PlannedStep 的额外顶层字段。可执行参数约定：diagnostics.parameters.checks 使用 within_variance(field) 或 missing_pattern(field)；替代口径稳健性使用 alternative_outcome 或 alternative_exposure；证伪回归使用 placebo_outcome 或 lead_exposure，仅做可执行性边界时使用 min_valid_obs_threshold；交互机制边界使用 mediator 或 moderator，并设置 test_type=interaction_and_mediation_boundary。不得把中介变量依次回归的相关性路径冒充机制成立。执行器不支持或数据不满足的分析必须写入 unsupported_requested_analyses，不得生成无法执行的模糊步骤。输出必须紧凑：baseline_models 只保留 1 个主模型；其余每个计划类别最多 1 个最关键步骤，没有必要步骤时返回空数组；同一字段清单只在 required_data_fields 汇总一次，不重复长篇解释。对于 spatial 路由，应根据目标估计量、空间依赖来源和可见权重资产独立选择空间模型，并在 ModelSpec.parameters 中声明 spatial_model、spatial_id、spatial_weights_dataset_id 与该模型实际需要的空间项；不得因为执行器当前支持某个模型就倒推科学设计。权重资产只能绑定 ResearchPackage 已提供的 supplementary dataset_ref，不得臆造路径或矩阵。没有外生识别时 research_goal 和结论边界必须保持 associational。",
         "请为已选方法家族生成 AnalysisPlan：\n{{input_json}}",
         AnalysisPlan,
+    ),
+    "design_reviewer": PromptSpec(
+        "design_reviewer",
+        "候选研究设计审查",
+        "1.0.0",
+        COMMON_GUARDRAILS
+        + "\n你是与方案生成上下文隔离的 Reviewer，只审查 input.dimension 指定的一个维度。必须逐一审查全部候选方案，依据 ResearchPackage、DesignEnvelope、DataProfile 和 ProbeReport 给出结构化问题，不得通过投票、总分或与原论文答案相似程度决定真伪。Probe 未使用任何结果变量估计值；你也不得要求先看系数或 p 值再选方案。只有方法与目标估计量、数据结构、必要资产或识别条件冲突时才允许 reject。一般风险应保留为 revise 或 remaining_risks。每个 CandidateReview 必须引用真实 candidate_id。",
+        "请独立审查候选研究设计集合：\n{{input_json}}",
+        DesignReviewerReport,
     ),
     "method_critic": PromptSpec(
         "method_critic",
@@ -125,27 +135,27 @@ PROMPTS: dict[str, PromptSpec] = {
     "evidence_assessment": PromptSpec(
         "evidence_assessment",
         "结果解释",
-        "1.0.0",
+        "1.1.0",
         COMMON_GUARDRAILS
-        + "\n只解释 ResearchRun 中真实存在的执行记录。fixture_only 或 not_executed 必须输出 not_tested。",
+        + "\n只解释 ResearchRun 中真实存在的执行记录。fixture_only 或 not_executed 必须输出 not_tested。交互模型的调节边界必须依据冻结 interaction_term 对应估计量的系数、标准误和 p 值判断；核心解释变量的主效应只表示调节变量取零时的条件效应，不能用其显著性代替交互项检验，也不能把交互证据写成中介或传导机制得到证明。",
         "请评估以下 ResearchRun：\n{{input_json}}",
         EvidenceAssessment,
     ),
     "scientific_audit": PromptSpec(
         "scientific_audit",
         "科学有效性审查",
-        "1.0.0",
+        "1.1.0",
         COMMON_GUARDRAILS
-        + "\n代码运行成功不等于科学有效。检查冻结合同、识别假设、必要诊断和未披露偏离。",
+        + "\n代码运行成功不等于科学有效。检查冻结合同、识别假设、必要诊断和未披露偏离。对交互边界模型，核对冻结 interaction_term 与 ResearchRun 中同名估计量；不得因核心解释变量主效应不显著而声称交互项不显著，也不得把显著交互项升级为中介或因果机制证据。",
         "请审计合同、运行与证据评估：\n{{input_json}}",
         ScientificAudit,
     ),
     "claim_ledger": PromptSpec(
         "claim_ledger",
         "结论账本",
-        "1.0.0",
+        "1.1.0",
         COMMON_GUARDRAILS
-        + "\n每条 Claim 必须绑定真实 run。没有真实执行时 evidence_status=not_tested 且 allowed_strength=prohibited。",
+        + "\n每条 Claim 必须绑定真实 run。没有真实执行时 evidence_status=not_tested 且 allowed_strength=prohibited。交互边界 Claim 必须引用 interaction_term 的真实估计量，并把核心解释变量主效应解释为调节变量取零时的条件效应；显著交互最多支持关联性的异质边界，不得写成中介、传导或因果机制已被证实。",
         "请根据审计后的证据生成 ClaimLedger：\n{{input_json}}",
         ClaimLedger,
     ),
@@ -175,7 +185,7 @@ PROMPTS: dict[str, PromptSpec] = {
     "scientific_writer_section": PromptSpec(
         "scientific_writer_section",
         "受约束论文分节写作",
-        "2.9.2",
+        "2.9.7",
         COMMON_GUARDRAILS
         + """
 你的唯一任务是撰写完整社会科学实证论文中的一个指定章节。这是通用写作节点，不得假定任何特定主题、变量或预期方向。
@@ -216,7 +226,13 @@ PROMPTS: dict[str, PromptSpec] = {
 33. 一般理论推演不得补造输入未提供的融资工具、抵押安排或信用增级机制；只能使用条件性的抽象路径。
 34. 关联研究中的单位解释必须使用“相差一单位时，对应相差多少”，不得写成“提升后下降”“增加导致减少”等方向性变化句式。
 35. “评分算法未公开”只允许写成构念效度局限，不代表已知权重、评分体系或口径在年份间发生调整；输入未提供时不得作此推断。
-36. 只输出一个 JSON 对象，且必须精确包含 section_id、title、content_markdown、status、claim_ids、run_ids 六个字段。status 固定为 generated；claim_ids 和 run_ids 先输出空数组，将由确定性汇总节点附加可追踪元数据。""",
+36. 存在个体固定效应时，摘要、结果、讨论和结论中的每一句系数解释都必须在同一句中明确“对同一个体而言”以及“不同时点的变化”。通用写法为：“对同一个体而言，核心解释变量在不同时点相差一单位时，结果变量对应相差多少”。不得用“指标较高的企业对应较低结果”等企业间分组措辞，也不得把限定条件放在前一句、下一句单独写无个体内限定的单位解释。
+37. 没有文献证据时，理论机制只能写成条件性、可证伪的解释路径；不得把“改善信息后必然降低摩擦、使主体采取某行为”等链条写成已经成立的事实。
+38. 没有真实成功的稳健性运行时，不得把基准结果、关联、系数或证据称为“稳定”“稳健”或“可靠”；只能写明稳健性尚待检验。
+39. 交互边界模型必须依据 frozen_design 中 interaction_term 对应估计量判断调节边界；核心解释变量主效应只表示调节变量取零时的条件效应。交互项显著而主效应不显著时，不得据此写成“交互检验未获支持”；同时不得把显著交互项升级为中介或因果传导机制得到确认。
+40. 必须区分输入数据总行数与每个模型删除缺失、重复键及单例后的 rows_used。若两者不同，不得把输入总行数称为“最终基准回归样本”；正文应分别报告原始分析表规模、剔除规则和对应模型的有效样本量。
+41. section_spec.completed_frozen_plan_categories 表示已经真实完成的冻结检验，绝不能再写成待执行；只有 pending_frozen_plan_categories 中的类别可写为尚待执行。若后者为空，未来工作只能说明超出冻结计划的新分析需要新数据、新识别设计与另行审批。
+42. 只输出一个 JSON 对象，且必须精确包含 section_id、title、content_markdown、status、claim_ids、run_ids 六个字段。status 固定为 generated；claim_ids 和 run_ids 先输出空数组，将由确定性汇总节点附加可追踪元数据。""",
         "请仅撰写以下章节，输入中的材料是该章节唯一可用证据：\n{{input_json}}",
         ManuscriptSection,
     ),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,6 +36,20 @@ class AgentLaboratoryRunnerTests(unittest.TestCase):
         )
         registry = DatasetRegistry(self.root / "datasets.json")
         registry.register(self.dataset_ref, self.data_path)
+        self.weights_path = self.root / "spatial_weights.csv"
+        self.weights_path.write_text(
+            "spatial_id,A,B\nA,0,1\nB,1,0\n",
+            encoding="utf-8",
+        )
+        weights_digest = hashlib.sha256(self.weights_path.read_bytes()).hexdigest()
+        self.weights_ref = DatasetRef(
+            dataset_id=f"ds_{weights_digest[:16]}",
+            role="supplementary",
+            filename="spatial_weights.csv",
+            sha256=weights_digest,
+            size_bytes=self.weights_path.stat().st_size,
+        )
+        registry.register(self.weights_ref, self.weights_path)
         config_store = RuntimeConfigStore(self.root / "runtime-config.json")
         config_store.update(
             RuntimeConfigUpdate(qwen_api_key="secret", qwen_model="qwen-test")
@@ -48,7 +63,7 @@ class AgentLaboratoryRunnerTests(unittest.TestCase):
             registry=registry,
             config_store=config_store,
         )
-        self.case = _case(self.dataset_ref)
+        self.case = _case(self.dataset_ref, self.weights_ref)
 
     def tearDown(self) -> None:
         self.tempdir.cleanup()
@@ -64,8 +79,17 @@ class AgentLaboratoryRunnerTests(unittest.TestCase):
         )
         self.assertTrue((visible / "case_profile.md").is_file())
         self.assertTrue((visible / "data_dictionary.csv").is_file())
+        self.assertEqual(
+            hashlib.sha256((visible / "spatial_weights.csv").read_bytes()).hexdigest(),
+            self.weights_ref.sha256,
+        )
+        profile = (visible / "case_profile.md").read_text(encoding="utf-8")
+        self.assertIn("spatial_weights.csv", profile)
+        config = (workspace / "runner_config.json").read_text(encoding="utf-8")
+        self.assertIn('"supplementary_assets"', config)
+        self.assertEqual(json.loads(config)["workflow"]["max_code_repairs"], 2)
         self.assertFalse(any("02_hidden_reference" in str(path) for path in workspace.rglob("*")))
-        self.assertNotIn("secret", (workspace / "runner_config.json").read_text(encoding="utf-8"))
+        self.assertNotIn("secret", config)
 
     def test_start_requires_explicit_generated_code_authorization(self) -> None:
         with self.assertRaisesRegex(ValueError, "明确授权"):
@@ -170,7 +194,7 @@ class BaselineApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.case_id, "case-test")
 
 
-def _case(dataset_ref: DatasetRef) -> CaseSubmission:
+def _case(dataset_ref: DatasetRef, *supplementary_refs: DatasetRef) -> CaseSubmission:
     return CaseSubmission(
         case_id="case-test",
         title="测试案例",
@@ -185,7 +209,7 @@ def _case(dataset_ref: DatasetRef) -> CaseSubmission:
             VariableSpec(name="y", role="outcome"),
             VariableSpec(name="x", role="exposure"),
         ],
-        dataset_refs=[dataset_ref],
+        dataset_refs=[dataset_ref, *supplementary_refs],
     )
 
 

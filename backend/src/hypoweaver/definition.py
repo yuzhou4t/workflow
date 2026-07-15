@@ -7,9 +7,12 @@ from pydantic import BaseModel
 from .models import (
     AnalysisPlan,
     CaseSubmission,
+    CandidateDesignSet,
     ClaimLedger,
     CriticReport,
     DataProfile,
+    DesignArena,
+    DesignReviewerReport,
     EvidenceAssessment,
     FormalResearchContract,
     GateDecisionRequest,
@@ -17,13 +20,14 @@ from .models import (
     MethodRoute,
     ResearchPackage,
     ResearchRun,
+    ReproductionAudit,
     ScientificAudit,
     TestableHypotheses,
 )
 from .prompts import get_prompt
 
 
-DEFINITION_VERSION = "1.1.0"
+DEFINITION_VERSION = "1.3.0"
 
 
 def _schema(model: type[BaseModel] | None) -> dict[str, Any] | None:
@@ -83,7 +87,7 @@ def build_app_a_definition() -> dict[str, Any]:
             "id": "design",
             "order": 3,
             "title": "方法设计",
-            "description": "七个方法家族互斥路由，仅命中的设计器执行，随后统一为 AnalysisPlan。",
+            "description": "七个方法家族互斥路由；命中的设计器在结果不可见时形成三种有边界的候选方案并执行 Probe。",
             "node_ids": [
                 "design_policy_causal",
                 "design_panel_association",
@@ -92,22 +96,25 @@ def build_app_a_definition() -> dict[str, Any]:
                 "design_spatial",
                 "design_measurement_efficiency",
                 "design_structural_macro",
-                "analysis_plan_merge",
+                "candidate_design_set",
+                "probe_run",
             ],
         },
         {
             "id": "review",
             "order": 4,
             "title": "独立审查与冻结",
-            "description": "四个 Critic 并行审查，最多两轮有限修复；H2 批准后冻结研究合同。",
+            "description": "四个隔离 Reviewer 并行审查全部候选，不投票决定真理；H2 从可行候选中选择并冻结。",
             "node_ids": [
                 "critic_measurement",
                 "critic_causal",
                 "critic_statistical",
                 "critic_reproducibility",
-                "critic_merge",
+                "design_arena_merge",
+                "analysis_plan_merge",
                 "plan_revision",
                 "h2_gate",
+                "design_selection",
                 "contract_freeze",
             ],
         },
@@ -115,8 +122,8 @@ def build_app_a_definition() -> dict[str, Any]:
             "id": "execution",
             "order": 5,
             "title": "执行边界",
-            "description": "Fixture 与外部 Python 执行器互斥；Fixture 永远不得伪造统计结果。",
-            "node_ids": ["execution_router", "fixture_executor", "external_executor", "research_run_merge"],
+            "description": "Fixture 与外部 Python 执行器互斥；真实执行后用同一冻结合同独立复跑并比较。",
+            "node_ids": ["execution_router", "fixture_executor", "external_executor", "research_run_merge", "replication_executor", "reproduction_audit"],
         },
         {
             "id": "audit",
@@ -129,8 +136,8 @@ def build_app_a_definition() -> dict[str, Any]:
             "id": "writing",
             "order": 7,
             "title": "受约束成果生成",
-            "description": "Writer 只能读取 H3 授权结论；真实写作失败时保持可重试状态，不用短模板伪装完成。",
-            "node_ids": ["scientific_writer", "consistency_audit", "complete"],
+            "description": "Writer 只读取 H3 授权结论；一致性审计通过后仍需 H4 人工批准才能封存。",
+            "node_ids": ["scientific_writer", "consistency_audit", "h4_gate", "complete"],
         },
     ]
 
@@ -170,26 +177,32 @@ def build_app_a_definition() -> dict[str, Any]:
         )
     nodes.extend(
         [
-            _node("analysis_plan_merge", "AnalysisPlan 汇合", "merge", "design", "将唯一命中的设计分支规范化为统一 AnalysisPlan。", 2080, 280, input_model=AnalysisPlan, output_model=AnalysisPlan),
-            _node("critic_measurement", "测量 Critic", "llm", "review", "独立检查变量定义、层级和测量误差。", 2360, 40, input_model=AnalysisPlan, output_model=CriticReport, prompt_key="method_critic"),
-            _node("critic_causal", "因果识别 Critic", "llm", "review", "独立检查识别假设、处理分配和竞争政策。", 2360, 160, input_model=AnalysisPlan, output_model=CriticReport, prompt_key="method_critic"),
-            _node("critic_statistical", "统计推断 Critic", "llm", "review", "独立检查估计器、标准误、诊断与多重检验。", 2360, 280, input_model=AnalysisPlan, output_model=CriticReport, prompt_key="method_critic"),
-            _node("critic_reproducibility", "复现 Critic", "llm", "review", "独立检查数据版本、样本规则、日志和可复现性。", 2360, 400, input_model=AnalysisPlan, output_model=CriticReport, prompt_key="method_critic"),
-            _node("critic_merge", "CriticReport 汇合", "merge", "review", "合并四类问题；critical 未解决时禁止进入 H2。", 2660, 220, input_model=CriticReport, output_model=CriticReport),
-            _node("plan_revision", "有限修复（最多 2 轮）", "llm", "review", "只修复 Critic 指定问题，并记录修订轮次和偏离。", 2940, 120, input_model=CriticReport, output_model=AnalysisPlan, prompt_key="plan_revision"),
-            _node("h2_gate", "H2 · 冻结分析计划", "gate", "review", "人工确认样本、变量、模型、诊断和停止条件。", 3220, 220, input_model=AnalysisPlan, output_model=GateDecisionRequest),
-            _node("contract_freeze", "FormalResearchContract", "code", "review", "对研究包和计划计算哈希并冻结，后续变更必须进入偏离记录。", 3500, 220, input_model=AnalysisPlan, output_model=FormalResearchContract),
+            _node("candidate_design_set", "候选研究设计集", "merge", "design", "在查看统计结果前形成三种有明确策略差异的候选 AnalysisPlan。", 2080, 280, input_model=AnalysisPlan, output_model=CandidateDesignSet),
+            _node("probe_run", "ProbeRun", "code", "design", "只检查字段、数据结构、资产、识别条件和执行器能力；禁止读取系数与 p 值。", 2320, 280, input_model=CandidateDesignSet, output_model=CandidateDesignSet),
+            _node("critic_measurement", "测量 Reviewer", "llm", "review", "在隔离上下文中检查全部候选的变量定义、层级和测量误差。", 2560, 40, input_model=CandidateDesignSet, output_model=DesignReviewerReport, prompt_key="design_reviewer"),
+            _node("critic_causal", "因果识别 Reviewer", "llm", "review", "在隔离上下文中检查全部候选的识别假设与竞争解释。", 2560, 160, input_model=CandidateDesignSet, output_model=DesignReviewerReport, prompt_key="design_reviewer"),
+            _node("critic_statistical", "统计推断 Reviewer", "llm", "review", "在隔离上下文中检查全部候选的估计器、标准误和诊断。", 2560, 280, input_model=CandidateDesignSet, output_model=DesignReviewerReport, prompt_key="design_reviewer"),
+            _node("critic_reproducibility", "复现 Reviewer", "llm", "review", "在隔离上下文中检查全部候选的数据版本、样本规则和可复现性。", 2560, 400, input_model=CandidateDesignSet, output_model=DesignReviewerReport, prompt_key="design_reviewer"),
+            _node("design_arena_merge", "Reviewer Arena 汇合", "merge", "review", "不计算总分或多数票；淘汰 Probe 硬失败、Reviewer reject 或 critical 未解候选。", 2840, 220, input_model=DesignReviewerReport, output_model=DesignArena),
+            _node("analysis_plan_merge", "H2 暂定方案", "merge", "review", "保留全部可行候选，并为 H2 标记一个可更改的暂定方案。", 3080, 220, input_model=DesignArena, output_model=AnalysisPlan),
+            _node("plan_revision", "人工修订与复审", "llm", "review", "H2 退回后只修订所选方案，并重新执行结构化审查。", 3320, 80, input_model=CriticReport, output_model=AnalysisPlan, prompt_key="plan_revision"),
+            _node("h2_gate", "H2 · 选择并冻结分析计划", "gate", "review", "人工从可行候选中明确选择一个，确认样本、变量、模型、诊断和停止条件。", 3320, 260, input_model=DesignArena, output_model=GateDecisionRequest),
+            _node("design_selection", "候选选择记录", "code", "review", "记录 H2 所选 candidate_id，并将对应方案及风险绑定到合同。", 3560, 260, input_model=DesignArena, output_model=AnalysisPlan),
+            _node("contract_freeze", "FormalResearchContract", "code", "review", "对研究包和所选计划计算哈希并冻结，后续变更必须进入偏离记录。", 3800, 260, input_model=AnalysisPlan, output_model=FormalResearchContract),
             _node("execution_router", "执行器路由", "router", "execution", "根据 Run 模式在 Fixture 与外部 Python 执行器之间互斥选择。", 3780, 220, input_model=FormalResearchContract),
             _node("fixture_executor", "Fixture Executor", "code", "execution", "只验证状态机和接口；输出 fixture_only/not_executed，绝不生成统计量。", 4060, 120, input_model=FormalResearchContract, output_model=ResearchRun),
             _node("external_executor", "Python Research Engine", "http", "execution", "把冻结合同交给独立计量执行服务，并校验返回的 ResearchRun。", 4060, 320, input_model=FormalResearchContract, output_model=ResearchRun),
             _node("research_run_merge", "ResearchRun 汇合", "merge", "execution", "统一两类执行器输出，同时保留 execution_status 与 scientific_status。", 4340, 220, input_model=ResearchRun, output_model=ResearchRun),
+            _node("replication_executor", "独立复现执行", "http", "execution", "使用同一冻结合同重新调用执行器，不复用主运行输出。", 4500, 320, input_model=FormalResearchContract, output_model=ResearchRun),
+            _node("reproduction_audit", "复现一致性审计", "code", "execution", "忽略运行 UUID，确定性比较估计、诊断、警告和偏离；不一致则阻塞。", 4620, 220, input_model=ResearchRun, output_model=ReproductionAudit),
             _node("evidence_assessment", "Evidence Assessment", "llm", "audit", "逐条解释真实执行记录；未执行则标记 not_tested。", 4620, 140, input_model=ResearchRun, output_model=EvidenceAssessment, prompt_key="evidence_assessment"),
             _node("scientific_audit", "Scientific Audit", "llm", "audit", "独立判断合同遵从与科学有效性，代码成功不能自动通过。", 4900, 140, input_model=EvidenceAssessment, output_model=ScientificAudit, prompt_key="scientific_audit"),
             _node("claim_ledger", "ClaimLedger", "llm", "audit", "将证据约束为可追溯、可降级、可拒绝的结论。", 5180, 140, input_model=ScientificAudit, output_model=ClaimLedger, prompt_key="claim_ledger"),
             _node("h3_gate", "H3 · 逐条结论授权", "gate", "audit", "人工逐条批准、降级、暂缓或拒绝 Claim；Fixture 只能拒绝或暂缓。", 5460, 140, input_model=ClaimLedger, output_model=GateDecisionRequest),
             _node("scientific_writer", "Scientific Writer", "llm", "writing", "将完整论文拆成 8 个通用分节写作任务；只读取冻结计划、真实运行和 H3 授权结论，失败后可在原 Run 重试。", 5740, 140, input_model=ClaimLedger, output_model=ManuscriptPackage, prompt_key="scientific_writer_section"),
             _node("consistency_audit", "写作一致性审计", "code", "writing", "确定性检查完整章节、未授权 Claim、虚构统计量、Run 引用与成果模式。", 6020, 140, input_model=ManuscriptPackage, output_model=ManuscriptPackage),
-            _node("complete", "封存成果包", "end", "writing", "计算封存哈希并结束主 Run；隐藏参考结果仍不可见。", 6300, 140, input_model=ManuscriptPackage),
+            _node("h4_gate", "H4 · 最终稿审核", "gate", "writing", "一致性审计通过后仍暂停，等待人工批准、退回重写或拒绝。", 6260, 140, input_model=ManuscriptPackage, output_model=GateDecisionRequest),
+            _node("complete", "封存成果包", "end", "writing", "H4 批准后计算封存哈希并结束主 Run；隐藏参考结果仍不可见。", 6500, 140, input_model=ManuscriptPackage),
         ]
     )
 
@@ -204,31 +217,36 @@ def build_app_a_definition() -> dict[str, Any]:
     ]
     for family, *_ in branches:
         edges.append(_edge("method_route", f"design_{family}", family))
-        edges.append(_edge(f"design_{family}", "analysis_plan_merge"))
+        edges.append(_edge(f"design_{family}", "candidate_design_set"))
+    edges.append(_edge("candidate_design_set", "probe_run"))
     for critic in ("critic_measurement", "critic_causal", "critic_statistical", "critic_reproducibility"):
-        edges.append(_edge("analysis_plan_merge", critic))
-        edges.append(_edge(critic, "critic_merge"))
+        edges.append(_edge("probe_run", critic))
+        edges.append(_edge(critic, "design_arena_merge"))
     edges.extend(
         [
-            _edge("critic_merge", "plan_revision", "需要修订"),
-            _edge("plan_revision", "critic_measurement", "下一轮"),
-            _edge("plan_revision", "critic_causal", "下一轮"),
-            _edge("plan_revision", "critic_statistical", "下一轮"),
-            _edge("plan_revision", "critic_reproducibility", "下一轮"),
-            _edge("critic_merge", "h2_gate", "通过"),
-            _edge("h2_gate", "contract_freeze", "批准"),
+            _edge("design_arena_merge", "analysis_plan_merge", "保留可行候选"),
+            _edge("analysis_plan_merge", "h2_gate"),
+            _edge("h2_gate", "plan_revision", "退回修订"),
+            _edge("plan_revision", "probe_run", "重新审查"),
+            _edge("h2_gate", "design_selection", "批准所选候选"),
+            _edge("design_selection", "contract_freeze"),
             _edge("contract_freeze", "execution_router"),
             _edge("execution_router", "fixture_executor", "fixture"),
             _edge("execution_router", "external_executor", "external"),
             _edge("fixture_executor", "research_run_merge"),
             _edge("external_executor", "research_run_merge"),
-            _edge("research_run_merge", "evidence_assessment"),
+            _edge("research_run_merge", "replication_executor", "真实研究"),
+            _edge("replication_executor", "reproduction_audit"),
+            _edge("research_run_merge", "reproduction_audit", "Fixture"),
+            _edge("reproduction_audit", "evidence_assessment", "通过"),
             _edge("evidence_assessment", "scientific_audit"),
             _edge("scientific_audit", "claim_ledger"),
             _edge("claim_ledger", "h3_gate"),
             _edge("h3_gate", "scientific_writer", "授权后"),
             _edge("scientific_writer", "consistency_audit"),
-            _edge("consistency_audit", "complete"),
+            _edge("consistency_audit", "h4_gate"),
+            _edge("h4_gate", "complete", "批准"),
+            _edge("h4_gate", "scientific_writer", "退回重写"),
         ]
     )
 

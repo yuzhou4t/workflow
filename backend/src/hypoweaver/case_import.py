@@ -16,6 +16,7 @@ import pandas as pd
 from pydantic import Field
 
 from .models import CaseSubmission, DatasetRef, Hypothesis, StrictModel, VariableSpec
+from .spatial import is_spatial_weights_filename
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -213,6 +214,11 @@ class LocalCaseImporter:
             size_bytes=inspection.size_bytes,
         )
         self.registry.register(dataset_ref, main_data)
+        supplementary_refs = [
+            self.register_supplementary_asset(path)
+            for path in sorted(csv_files, key=lambda item: item.name.casefold())
+            if path != main_data and is_spatial_weights_filename(path.name)
+        ]
 
         case_title, research_question, statement = _research_text(
             main_data.stem, outcome, exposure
@@ -248,11 +254,19 @@ class LocalCaseImporter:
             sample_period=sample_period,
             data_structure_hint="panel" if has_id and has_time else "unknown",
             variables=variables,
-            dataset_refs=[dataset_ref],
+            dataset_refs=[dataset_ref, *supplementary_refs],
             constraints=["变量角色仅依据数据表头保守推断，进入分析前须在 H1 人工确认。"],
         )
 
-        excluded_files = [path for path in visible_files if path != main_data]
+        registered_paths = {
+            main_data,
+            *[
+                path
+                for path in csv_files
+                if is_spatial_weights_filename(path.name)
+            ],
+        }
+        excluded_files = [path for path in visible_files if path not in registered_paths]
         review_items = [
             "请在 H1 确认研究问题、假设与变量角色。",
             "请确认样本筛选、缺失值和异常值处理规则。",
@@ -264,6 +278,8 @@ class LocalCaseImporter:
             review_items.append("请补充或确认面板数据的实体与时间主键。")
         if exposure is None:
             review_items.append("请补充或确认核心解释变量。")
+        if supplementary_refs:
+            review_items.append("已登记空间权重矩阵；H2 将冻结其哈希、行列标签和空间标识字段。")
 
         return LocalCaseImportResponse(
             case_submission=case,
@@ -279,6 +295,21 @@ class LocalCaseImporter:
                 human_review_items=review_items,
             ),
         )
+
+    def register_supplementary_asset(self, path: Path) -> DatasetRef:
+        if not path.is_file() or not is_spatial_weights_filename(path.name):
+            raise CaseImportError("only spatial_weights.csv can be registered as a supplementary CSV asset")
+        sha256, size_bytes = _file_digest(path)
+        dataset_ref = DatasetRef(
+            dataset_id=f"ds_{sha256[:16]}",
+            role="supplementary",
+            filename=path.name,
+            mime_type="text/csv",
+            sha256=sha256,
+            size_bytes=size_bytes,
+        )
+        self.registry.register(dataset_ref, path)
+        return dataset_ref
 
 
 def _is_hidden_reference(path: Path, root: Path) -> bool:
@@ -300,6 +331,16 @@ def _main_csv_sort_key(path: Path) -> tuple[int, int, int, str]:
         -path.stat().st_size,
         path.name.casefold(),
     )
+
+
+def _file_digest(path: Path) -> tuple[str, int]:
+    hasher = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            size += len(chunk)
+            hasher.update(chunk)
+    return hasher.hexdigest(), size
 
 
 def _inspect_csv(path: Path) -> _CsvInspection:
