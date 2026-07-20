@@ -178,6 +178,26 @@ class CaseBenchmarkCliTests(unittest.TestCase):
         self.assertEqual(cost["logical_call_ceiling"], 20)
         self.assertEqual(cost["group_counting_unit"], "logical_call")
 
+    def test_v3_budget_flag_is_explicit_and_audited_in_output(self) -> None:
+        args = build_parser().parse_args(["--v3-model-budget"])
+        self.assertTrue(args.v3_model_budget)
+        case = CaseSubmission.model_validate_json(
+            (self.input_root / "case_profile.json").read_text(encoding="utf-8")
+        )
+        output = _summary_output(
+            None,
+            case=case,
+            run_id="v3-test",
+            manifest={"model_budget_mode": "v3"},
+            elapsed_seconds=0.0,
+            error="pre-model failure",
+        )
+        cost = output["execution_cost"]
+        self.assertEqual(cost["budget_mode"], "v3")
+        self.assertEqual(cost["provider_attempt_ceiling"], 80)
+        self.assertEqual(cost["logical_call_ceiling"], 20)
+        self.assertEqual(cost["group_counting_unit"], "logical_call")
+
 
 class CaseBenchmarkWriterRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:

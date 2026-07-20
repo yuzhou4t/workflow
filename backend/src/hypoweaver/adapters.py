@@ -51,7 +51,9 @@ OutputModel = TypeVar("OutputModel", bound=BaseModel)
 DEFAULT_MODEL_CALL_BUDGET = 20
 V2_PROVIDER_ATTEMPT_BUDGET = 40
 V2_LOGICAL_CALL_BUDGET = 20
-ModelCallBudgetMode = Literal["legacy", "v2"]
+V3_PROVIDER_ATTEMPT_BUDGET = 80
+V3_LOGICAL_CALL_BUDGET = 20
+ModelCallBudgetMode = Literal["legacy", "v2", "v3"]
 MODEL_CALL_GROUP_LIMITS = {
     "h1_h2": 10,
     "h3": 4,
@@ -323,11 +325,15 @@ class ModelCallBudget:
     )
 
     def __post_init__(self) -> None:
-        if self.budget_mode == "v2":
-            # v2 is a frozen comparison envelope. ``max_calls`` remains a
+        if self.budget_mode in {"v2", "v3"}:
+            # Frozen comparison envelopes. ``max_calls`` remains a
             # constructor field for backward-compatible restoration, but its
             # provider-attempt ceiling is not caller-tunable in this mode.
-            self.max_calls = V2_PROVIDER_ATTEMPT_BUDGET
+            self.max_calls = (
+                V2_PROVIDER_ATTEMPT_BUDGET
+                if self.budget_mode == "v2"
+                else V3_PROVIDER_ATTEMPT_BUDGET
+            )
         self._group_usage = {key: 0 for key in MODEL_CALL_GROUP_LIMITS}
         self._logical_attempts = {}
         self._logical_groups = {}
@@ -343,7 +349,7 @@ class ModelCallBudget:
                 )
                 if group in self._group_usage:
                     self._logical_groups[logical_call_id] = group
-                    if self.budget_mode == "v2":
+                    if self.budget_mode in {"v2", "v3"}:
                         if is_new_logical_call:
                             self._group_usage[group] += 1
                     else:
@@ -452,7 +458,7 @@ class ModelCallBudget:
             is_new_logical_call = existing_group is None
             logical_calls = len(self._logical_groups)
             if (
-                self.budget_mode == "v2"
+                self.budget_mode in {"v2", "v3"}
                 and is_new_logical_call
                 and logical_calls >= V2_LOGICAL_CALL_BUDGET
             ):
@@ -493,9 +499,13 @@ class ModelCallBudget:
                     "模型调用重试被拒绝：必须为全部尚未启动的必做首轮调用"
                     f"保留配额（全局保留 {globally_reserved_for_unstarted}）。"
                 )
-            if self.budget_mode == "v2":
+            if self.budget_mode in {"v2", "v3"}:
                 logical_remaining_after = (
-                    V2_LOGICAL_CALL_BUDGET
+                    (
+                        V2_LOGICAL_CALL_BUDGET
+                        if self.budget_mode == "v2"
+                        else V3_LOGICAL_CALL_BUDGET
+                    )
                     - logical_calls
                     - int(is_new_logical_call)
                 )
@@ -664,13 +674,17 @@ class ModelCallBudget:
             )
             logical_calls = len(self._logical_groups)
             logical_call_ceiling = (
-                V2_LOGICAL_CALL_BUDGET
-                if self.budget_mode == "v2"
+                (
+                    V2_LOGICAL_CALL_BUDGET
+                    if self.budget_mode == "v2"
+                    else V3_LOGICAL_CALL_BUDGET
+                )
+                if self.budget_mode in {"v2", "v3"}
                 else None
             )
             group_counting_unit = (
                 "logical_call"
-                if self.budget_mode == "v2"
+                if self.budget_mode in {"v2", "v3"}
                 else "provider_attempt"
             )
             retry_attempts_used = sum(
@@ -716,7 +730,7 @@ class ModelCallBudget:
                     "shared_retry_used": max(
                         (
                             retry_attempts_used
-                            if self.budget_mode == "v2"
+                            if self.budget_mode in {"v2", "v3"}
                             else self.llm_calls - started_required_first_calls
                         ),
                         0,

@@ -21,6 +21,8 @@ from .adapters import (
     ModelCallBudgetMode,
     V2_LOGICAL_CALL_BUDGET,
     V2_PROVIDER_ATTEMPT_BUDGET,
+    V3_LOGICAL_CALL_BUDGET,
+    V3_PROVIDER_ATTEMPT_BUDGET,
     ModelGateway,
     QwenModelGateway,
     ResearchExecutor,
@@ -1255,10 +1257,12 @@ class WorkflowEngine:
     ) -> None:
         if not 1 <= model_call_limit <= 20:
             raise ValueError("model_call_limit must be between one and twenty")
-        if model_call_budget_mode not in {"legacy", "v2"}:
-            raise ValueError("model_call_budget_mode must be legacy or v2")
-        if model_call_budget_mode == "v2" and model_call_limit != 20:
-            raise ValueError("v2 model call budget uses the frozen 40/20 envelope")
+        if model_call_budget_mode not in {"legacy", "v2", "v3"}:
+            raise ValueError("model_call_budget_mode must be legacy, v2, or v3")
+        if model_call_budget_mode in {"v2", "v3"} and model_call_limit != 20:
+            raise ValueError(
+                f"{model_call_budget_mode} model call budget uses a frozen envelope"
+            )
         self.repository = repository
         self.dataset_registry = dataset_registry or DatasetRegistry()
         self.runtime_config_store = runtime_config_store
@@ -1267,12 +1271,20 @@ class WorkflowEngine:
         self.model_call_provider_attempt_limit = (
             V2_PROVIDER_ATTEMPT_BUDGET
             if model_call_budget_mode == "v2"
-            else model_call_limit
+            else (
+                V3_PROVIDER_ATTEMPT_BUDGET
+                if model_call_budget_mode == "v3"
+                else model_call_limit
+            )
         )
         self.model_call_logical_limit = (
             V2_LOGICAL_CALL_BUDGET
             if model_call_budget_mode == "v2"
-            else None
+            else (
+                V3_LOGICAL_CALL_BUDGET
+                if model_call_budget_mode == "v3"
+                else None
+            )
         )
         self._model_budgets: dict[str, ModelCallBudget] = {}
 

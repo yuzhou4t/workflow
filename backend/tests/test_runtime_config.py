@@ -27,7 +27,7 @@ from hypoweaver.runtime_config import (
     RuntimeConfigStore,
     RuntimeConfigUpdate,
     RuntimeConnectionTestRequest,
-    test_runtime_connection,
+    test_runtime_connection as run_runtime_connection_test,
 )
 
 
@@ -352,7 +352,7 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(json.loads(request.content)["enable_thinking"])
             return httpx.Response(200, json={"choices": []})
 
-        result = await test_runtime_connection(
+        result = await run_runtime_connection_test(
             RuntimeConnectionTestRequest(target="qwen"),
             self.store,
             transport=httpx.MockTransport(handler),
@@ -362,7 +362,7 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("test-key", result.model_dump_json())
 
     async def test_qwen_404_explains_model_id_case_sensitivity(self) -> None:
-        result = await test_runtime_connection(
+        result = await run_runtime_connection_test(
             RuntimeConnectionTestRequest(target="qwen"),
             self.store,
             transport=httpx.MockTransport(lambda _request: httpx.Response(404)),
@@ -379,7 +379,7 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.headers["Authorization"], "Bearer engine-token")
             return httpx.Response(200, json={"status": "ok"})
 
-        result = await test_runtime_connection(
+        result = await run_runtime_connection_test(
             RuntimeConnectionTestRequest(target="research_engine"),
             self.store,
             transport=httpx.MockTransport(handler),

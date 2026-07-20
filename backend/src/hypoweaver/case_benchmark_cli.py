@@ -14,6 +14,8 @@ from .adapters import (
     FixtureModelGateway,
     V2_LOGICAL_CALL_BUDGET,
     V2_PROVIDER_ATTEMPT_BUDGET,
+    V3_LOGICAL_CALL_BUDGET,
+    V3_PROVIDER_ATTEMPT_BUDGET,
 )
 from .case_import import DatasetRegistry
 from .claim_gate import apply_claim_gate, code_owned_claims_for_registry
@@ -228,16 +230,16 @@ def _summary_output(
             if isinstance(payload, dict):
                 method_family = payload.get("method_family")
     expected_budget_mode = str(manifest.get("model_budget_mode", "legacy"))
-    expected_provider_ceiling = (
-        V2_PROVIDER_ATTEMPT_BUDGET
-        if expected_budget_mode == "v2"
-        else 20
-    )
-    expected_logical_ceiling = (
-        V2_LOGICAL_CALL_BUDGET
-        if expected_budget_mode == "v2"
-        else None
-    )
+    expected_provider_ceiling = {
+        "legacy": 20,
+        "v2": V2_PROVIDER_ATTEMPT_BUDGET,
+        "v3": V3_PROVIDER_ATTEMPT_BUDGET,
+    }.get(expected_budget_mode, 20)
+    expected_logical_ceiling = {
+        "legacy": None,
+        "v2": V2_LOGICAL_CALL_BUDGET,
+        "v3": V3_LOGICAL_CALL_BUDGET,
+    }.get(expected_budget_mode)
     return {
         "schema_version": "case-benchmark-output-v1",
         "system_id": "hypoweaver_code_first",
@@ -298,7 +300,7 @@ def _summary_output(
                     "group_counting_unit",
                     (
                         "logical_call"
-                        if expected_budget_mode == "v2"
+                        if expected_budget_mode in {"v2", "v3"}
                         else "provider_attempt"
                     ),
                 )
@@ -343,14 +345,18 @@ async def run_case(
     registry_path: Path,
     run_id: str,
     v2_model_budget: bool = False,
+    v3_model_budget: bool = False,
 ) -> tuple[Path, dict[str, Any]]:
     case, registry, manifest = prepare_case(
         case_root,
         registry_path=registry_path,
     )
-    manifest["model_budget_mode"] = (
-        "v2" if v2_model_budget else "legacy"
+    if v2_model_budget and v3_model_budget:
+        raise ValueError("v2 and v3 model budget modes are mutually exclusive")
+    budget_mode = (
+        "v3" if v3_model_budget else ("v2" if v2_model_budget else "legacy")
     )
+    manifest["model_budget_mode"] = budget_mode
     run_dir = (output_root / case.case_id / run_id).resolve()
     run_dir.mkdir(parents=True, exist_ok=False)
     _write_json(run_dir / "input_manifest.json", manifest)
@@ -360,7 +366,7 @@ async def run_case(
         repository,
         dataset_registry=registry,
         runtime_config_store=RuntimeConfigStore(),
-        model_call_budget_mode="v2" if v2_model_budget else "legacy",
+        model_call_budget_mode=budget_mode,
     )
     request = CreateRunRequest(
         mode="research",
@@ -861,6 +867,14 @@ def build_parser() -> argparse.ArgumentParser:
             "and logical-call stage caps"
         ),
     )
+    parser.add_argument(
+        "--v3-model-budget",
+        action="store_true",
+        help=(
+            "use the frozen benchmark-v3 envelope: 80 provider attempts, "
+            "20 logical calls, and at most three attempts per logical call"
+        ),
+    )
     parser.add_argument("--resume-h3-run-dir", type=Path, default=None)
     parser.add_argument("--resume-writer-run-dir", type=Path, default=None)
     return parser
@@ -913,6 +927,7 @@ def main(argv: list[str] | None = None) -> int:
             registry_path=args.registry_path,
             run_id=run_id,
             v2_model_budget=args.v2_model_budget,
+            v3_model_budget=args.v3_model_budget,
         )
     )
     print(run_dir / "benchmark_output.json")

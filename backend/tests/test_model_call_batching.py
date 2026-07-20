@@ -16,6 +16,8 @@ from hypoweaver.adapters import (
     MODEL_CALL_GROUP_LIMITS,
     V2_LOGICAL_CALL_BUDGET,
     V2_PROVIDER_ATTEMPT_BUDGET,
+    V3_LOGICAL_CALL_BUDGET,
+    V3_PROVIDER_ATTEMPT_BUDGET,
     ModelCallBudget,
     QwenModelGateway,
 )
@@ -405,6 +407,28 @@ class ModelCallBudgetTests(unittest.TestCase):
             {"h1_h2": 5, "h3": 2, "h4": 2},
         )
         self.assertEqual(snapshot["logical_call_attempts"][contexts[0].logical_call_id], 3)
+
+    def test_v3_uses_the_eighty_attempt_outer_envelope(self) -> None:
+        budget = ModelCallBudget(budget_mode="v3")
+        contexts = [
+            ModelCallContext(
+                logical_call_id=f"v3-{group}-{index}",
+                call_group=group,
+                prompt_key="legacy",
+            )
+            for group, count in (("h1_h2", 10), ("h3", 4), ("h4", 6))
+            for index in range(count)
+        ]
+        for context in contexts:
+            for attempt in (1, 2, 3):
+                budget.reserve(context, attempt_index=attempt)
+
+        snapshot = budget.snapshot()
+        self.assertEqual(snapshot["budget_mode"], "v3")
+        self.assertEqual(snapshot["provider_attempt_ceiling"], V3_PROVIDER_ATTEMPT_BUDGET)
+        self.assertEqual(snapshot["logical_call_ceiling"], V3_LOGICAL_CALL_BUDGET)
+        self.assertEqual(snapshot["provider_attempts"], 60)
+        self.assertEqual(snapshot["logical_calls"], 20)
 
     def test_group_limit_blocks_further_attempts(self) -> None:
         budget = ModelCallBudget()
