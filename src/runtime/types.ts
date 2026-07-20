@@ -29,7 +29,12 @@ export type StepStatus =
   | 'blocked'
   | 'skipped'
 
-export type GateAction = 'approve' | 'revise' | 'reject' | 'generate_plan_only'
+export type GateAction =
+  | 'approve'
+  | 'revise'
+  | 'reject'
+  | 'generate_plan_only'
+  | 'generate_identification_failure_report'
 export type ClaimDecision = 'approve' | 'downgrade' | 'reject' | 'hold'
 
 export interface PromptContent {
@@ -107,9 +112,14 @@ export interface ClaimRecord {
   id: string
   text: string
   finalText?: string
+  claimType?: string
   allowedStrength?: string
+  maxAllowedStrength?: string
+  admissionStatus?: 'unassessed' | 'admitted' | 'downgrade_required' | 'prohibited' | 'rejected'
   evidenceStatus?: string
   robustnessStatus?: string
+  requiredCheckIds: string[]
+  gateReasons: string[]
   supportingRuns: string[]
   decision?: ClaimDecision
 }
@@ -121,11 +131,25 @@ export interface ManuscriptSectionView {
   status: 'generated' | 'not_generated'
   claimIds: string[]
   runIds: string[]
+  statements: ManuscriptStatementSourceView[]
+}
+
+export interface ManuscriptStatementSourceView {
+  id: string
+  kind: 'authorized_claim' | 'estimate_fact' | 'sample_fact' | 'diagnostic_fact' | 'citation'
+  claimIds: string[]
+  executionIds: string[]
+  sources: Array<{
+    kind: 'claim' | 'execution' | 'passage'
+    id: string
+    path: string
+  }>
 }
 
 export interface ManuscriptPackageView {
   version: number
-  mode: 'research_plan_only' | 'full_manuscript'
+  irVersion: number
+  mode: 'research_plan_only' | 'full_manuscript' | 'identification_failure_report'
   status: 'draft' | 'needs_revision' | 'ready_for_human_review' | 'not_generated'
   researchPlan: string
   sections: ManuscriptSectionView[]
@@ -156,6 +180,21 @@ export interface DesignArenaView {
   selectionRationale: string[]
 }
 
+export type ModelCallGroup = 'h1_h2' | 'h3' | 'h4'
+
+export interface ModelUsageView {
+  maxCalls: number
+  llmCalls: number
+  logicalCalls: number
+  providerAttempts: number
+  requiredLogicalCalls: number
+  retryPolicy?: string
+  retryMode?: string
+  sharedRetrySlots: number
+  sharedRetryRemaining: number
+  groupUsage: Record<ModelCallGroup, number>
+}
+
 export interface RunSnapshot {
   id: string
   version: number
@@ -178,6 +217,7 @@ export interface RunSnapshot {
   claims: ClaimRecord[]
   manuscript?: ManuscriptPackageView
   designArena?: DesignArenaView
+  modelUsage?: ModelUsageView
   allowedActions: string[]
 }
 
@@ -209,6 +249,8 @@ export type VariableRole =
   | 'time'
   | 'spatial_id'
   | 'event_date'
+  | 'fixed_effect'
+  | 'cluster'
   | 'unknown'
 
 export interface HypothesisInput {
@@ -252,6 +294,26 @@ export interface CaseSubmissionInput {
     designConstraints: string[]
     requiredDiagnostics: string[]
     allowedClaimStrength: 'causal' | 'associational' | 'descriptive' | 'not_prespecified'
+  }
+  policyDesign?: {
+    policyDate: string
+    groupField: string
+    timeField: string
+    policyStartWeight?: number
+    postStartWeight: number
+    exposureName: string
+    fixedEffects: string[]
+    clusterFields: string[]
+    clusterComposition: 'interaction'
+    eventReferenceYear?: number
+    eventYears: number[]
+    eventRemotePreYears: number[]
+    eventTermScaling: 'binary_group_year_contrast'
+    placeboStartYear?: number
+    placeboRepetitions?: number
+    permutationScheme: 'assignment_unit_label' | 'rowwise_exposure'
+    permutationUnitField?: string
+    randomSeed?: number
   }
   knownPolicyFacts: string[]
   constraints: string[]
@@ -324,7 +386,7 @@ export interface BaselinePhase {
 
 export interface BaselineRun {
   id: string
-  systemId: 'agent_laboratory_social_science_adapted'
+  systemId: 'agent_laboratory_social_science_adapted' | 'agent_laboratory_upstream_original'
   caseId: string
   caseName: string
   status: 'queued' | 'running' | 'completed' | 'failed'

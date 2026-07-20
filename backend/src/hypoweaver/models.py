@@ -59,6 +59,201 @@ MethodFamily = Literal[
     "measurement_efficiency",
     "structural_macro",
 ]
+ClaimStrength = Literal[
+    "causal_strong",
+    "causal_cautious",
+    "associational",
+    "preliminary",
+    "mixed",
+    "insufficient",
+    "prohibited",
+]
+ClaimType = Literal[
+    "causal",
+    "associational",
+    "descriptive",
+    "mechanism",
+    "heterogeneity",
+    "unspecified",
+]
+AdmissionStatus = Literal[
+    "unassessed",
+    "admitted",
+    "downgrade_required",
+    "prohibited",
+    "rejected",
+]
+TestRole = Literal[
+    "diagnostic",
+    "robustness",
+    "falsification",
+    "replication",
+    "exploratory",
+]
+ModelCallGroup = Literal["h1_h2", "h3", "h4"]
+ModelCallOutcome = Literal[
+    "succeeded",
+    "schema_failure",
+    "transport_failure",
+    "provider_failure",
+]
+ModelCallAttemptType = Literal[
+    "primary",
+    "transport_retry",
+    "schema_repair",
+    "content_repair",
+]
+ModelCallErrorCategory = Literal[
+    "dns",
+    "tls",
+    "connect_timeout",
+    "read_timeout",
+    "proxy",
+    "connection_reset",
+    "cancelled",
+    "http_status",
+    "schema",
+    "unknown_transport",
+    "unknown_provider",
+]
+
+
+class ModelCallContext(StrictModel):
+    """Code-owned identity and retry ceiling for one logical model call."""
+
+    logical_call_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1)
+    call_group: ModelCallGroup = "h1_h2"
+    prompt_key: str = Field(default="legacy", min_length=1)
+    max_attempts: int = Field(default=3, ge=1, le=3)
+    attempt_type: ModelCallAttemptType = "primary"
+
+
+class SchemaValidationIssue(StrictModel):
+    """Redacted location and stable error type for one Schema failure."""
+
+    loc: tuple[str, ...] = Field(default_factory=tuple, max_length=12)
+    type: str = Field(
+        default="invalid",
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9_]*$",
+    )
+
+    @model_validator(mode="after")
+    def validate_safe_location(self) -> "SchemaValidationIssue":
+        allowed = frozenset(
+            "abcdefghijklmnopqrstuvwxyz"
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "0123456789_-"
+        )
+        if any(
+            not item
+            or len(item) > 64
+            or any(character not in allowed for character in item)
+            for item in self.loc
+        ):
+            raise ValueError("schema error locations must be redacted identifiers")
+        return self
+
+
+class ModelCallReceipt(StrictModel):
+    """Redacted provenance for one actual provider attempt."""
+
+    receipt_version: Literal[1] = 1
+    call_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1)
+    logical_call_id: str = Field(
+        default_factory=lambda: f"legacy-{uuid4()}",
+        min_length=1,
+    )
+    call_group: ModelCallGroup = "h1_h2"
+    prompt_key: str = Field(default="legacy", min_length=1)
+    prompt_version: str = Field(default="legacy", min_length=1)
+    attempt_index: int = Field(default=1, ge=1, le=3)
+    max_attempts: int = Field(default=3, ge=1, le=3)
+    attempt_type: Literal[
+        "primary",
+        "transport_retry",
+        "schema_repair",
+        "content_repair",
+        "legacy",
+    ] = "legacy"
+    outcome: ModelCallOutcome = "succeeded"
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    started_at: str
+    completed_at: str
+    response_sha256: str = Field(min_length=64, max_length=64)
+    input_sha256: str = Field(default="0" * 64, min_length=64, max_length=64)
+    output_schema_sha256: str = Field(
+        default="0" * 64,
+        min_length=64,
+        max_length=64,
+    )
+    provider_response_id_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+    )
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    error_type: str | None = None
+    error_category: ModelCallErrorCategory | None = None
+    schema_error_summary: list[SchemaValidationIssue] = Field(
+        default_factory=list,
+        max_length=20,
+        exclude_if=lambda value: not value,
+    )
+    schema_error_count: int = Field(
+        default=0,
+        ge=0,
+        exclude_if=lambda value: value == 0,
+    )
+
+    @model_validator(mode="after")
+    def validate_receipt(self) -> "ModelCallReceipt":
+        if self.attempt_index > self.max_attempts:
+            raise ValueError("attempt_index cannot exceed max_attempts")
+        for name, value in (
+            ("response_sha256", self.response_sha256),
+            ("input_sha256", self.input_sha256),
+            ("output_schema_sha256", self.output_schema_sha256),
+            ("provider_response_id_sha256", self.provider_response_id_sha256),
+        ):
+            if value is not None and any(
+                character not in "0123456789abcdef" for character in value
+            ):
+                raise ValueError(f"{name} must be a lowercase hexadecimal value")
+        try:
+            started = datetime.fromisoformat(self.started_at)
+            completed = datetime.fromisoformat(self.completed_at)
+        except ValueError as error:
+            raise ValueError("model call receipt timestamps must be ISO-8601") from error
+        if (
+            started.tzinfo is None
+            or started.utcoffset() is None
+            or completed.tzinfo is None
+            or completed.utcoffset() is None
+        ):
+            raise ValueError("model call receipt timestamps must include a timezone")
+        if completed < started:
+            raise ValueError("completed_at cannot precede started_at")
+        if self.outcome == "succeeded" and self.error_type is not None:
+            raise ValueError("a succeeded model call cannot include error_type")
+        if self.outcome == "succeeded" and self.error_category is not None:
+            raise ValueError("a succeeded model call cannot include error_category")
+        if self.outcome != "succeeded" and not self.error_type:
+            raise ValueError("a failed model call must include error_type")
+        if self.schema_error_count < len(self.schema_error_summary):
+            raise ValueError(
+                "schema_error_count cannot be smaller than the persisted summary"
+            )
+        if self.outcome != "schema_failure" and (
+            self.schema_error_summary or self.schema_error_count
+        ):
+            raise ValueError(
+                "only a schema_failure receipt can include a schema error summary"
+            )
+        return self
 
 
 class Hypothesis(StrictModel):
@@ -84,6 +279,8 @@ class VariableSpec(StrictModel):
         "time",
         "spatial_id",
         "event_date",
+        "fixed_effect",
+        "cluster",
         "unknown",
     ] = "unknown"
     definition: str | None = None
@@ -118,6 +315,81 @@ class DesignEnvelope(StrictModel):
     ] = "not_prespecified"
 
 
+class PolicyDesignSpec(StrictModel):
+    """Code-owned policy timing and optional reproduction-aligned specification.
+
+    ``policy_date``, ``group_field`` and ``time_field`` are observable case facts.
+    The remaining fields are optional so a strict discovery view does not have to
+    reveal the reference study's estimator choices.  Before execution the policy
+    plan normalizer must resolve them into a complete frozen ModelSpec contract.
+    """
+
+    policy_date: str = Field(pattern=r"^\d{4}-\d{2}$")
+    group_field: str = Field(min_length=1)
+    time_field: str = Field(min_length=1)
+    policy_start_weight: float | None = Field(default=None, ge=0, le=1)
+    post_start_weight: float = Field(default=1.0, ge=0, le=1)
+    exposure_name: str = Field(default="policy_exposure", min_length=1)
+    fixed_effects: list[str] = Field(default_factory=list)
+    cluster_fields: list[str] = Field(default_factory=list)
+    cluster_composition: Literal["interaction"] = "interaction"
+    event_reference_year: int | None = None
+    event_years: list[int] = Field(default_factory=list)
+    event_remote_pre_years: list[int] = Field(default_factory=list)
+    event_term_scaling: Literal["binary_group_year_contrast"] = (
+        "binary_group_year_contrast"
+    )
+    placebo_start_year: int | None = None
+    placebo_repetitions: int | None = Field(default=None, ge=1, le=500)
+    permutation_scheme: Literal[
+        "assignment_unit_label",
+        "rowwise_exposure",
+    ] = "assignment_unit_label"
+    permutation_unit_field: str | None = None
+    random_seed: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_policy_design(self) -> "PolicyDesignSpec":
+        policy_year, policy_month = (int(value) for value in self.policy_date.split("-"))
+        if not 1 <= policy_month <= 12:
+            raise ValueError("policy_date month must be between 01 and 12")
+        if len(self.fixed_effects) != len(set(self.fixed_effects)):
+            raise ValueError("policy fixed_effects must be unique")
+        if len(self.cluster_fields) != len(set(self.cluster_fields)):
+            raise ValueError("policy cluster_fields must be unique")
+        if len(self.event_years) != len(set(self.event_years)):
+            raise ValueError("policy event_years must be unique")
+        if self.event_years != sorted(self.event_years):
+            raise ValueError("policy event_years must be sorted")
+        if len(self.event_remote_pre_years) != len(
+            set(self.event_remote_pre_years)
+        ):
+            raise ValueError("policy event_remote_pre_years must be unique")
+        if self.event_remote_pre_years != sorted(self.event_remote_pre_years):
+            raise ValueError("policy event_remote_pre_years must be sorted")
+        if self.event_reference_year in set(self.event_years):
+            raise ValueError("event_reference_year cannot also be an estimated event year")
+        if self.event_reference_year in set(self.event_remote_pre_years):
+            raise ValueError("event_reference_year cannot be inside the remote-pre bin")
+        if self.event_reference_year is not None and self.event_reference_year >= policy_year:
+            raise ValueError("event_reference_year must precede the policy year")
+        if any(year >= policy_year for year in self.event_remote_pre_years):
+            raise ValueError("event_remote_pre_years must all precede the policy year")
+        if (
+            self.event_remote_pre_years
+            and self.event_years
+            and max(self.event_remote_pre_years) >= min(self.event_years)
+        ):
+            raise ValueError(
+                "event_remote_pre_years must precede every explicit event year"
+            )
+        if (self.placebo_repetitions is None) != (self.random_seed is None):
+            raise ValueError(
+                "placebo_repetitions and random_seed must be supplied together"
+            )
+        return self
+
+
 class CaseSubmission(StrictModel):
     case_id: str
     title: str
@@ -131,6 +403,7 @@ class CaseSubmission(StrictModel):
     variables: list[VariableSpec]
     dataset_refs: list[DatasetRef] = Field(default_factory=list)
     design_envelope: DesignEnvelope | None = None
+    policy_design: PolicyDesignSpec | None = None
     known_policy_facts: list[str] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
 
@@ -232,6 +505,12 @@ class PlannedStep(StrictModel):
     rationale: str
     required_data_fields: list[str] = Field(default_factory=list)
     parameters: dict[str, Any] = Field(default_factory=dict)
+    threat_id: str | None = None
+    target_claim_ids: list[str] = Field(default_factory=list)
+    test_role: TestRole | None = None
+    required_for_admission: bool = False
+    source_issue_ids: list[str] = Field(default_factory=list)
+    not_executable_reason: str | None = None
 
 
 class ModelSpec(PlannedStep):
@@ -273,6 +552,25 @@ class AnalysisPlan(StrictModel):
     unsupported_requested_analyses: list[str]
     revision_round: int = Field(default=0, ge=0, le=2)
     deviation_log: list[DeviationLog] = Field(default_factory=list)
+    check_registry_version: str | None = None
+
+
+class CandidatePlanDraft(StrictModel):
+    strategy: Literal[
+        "direct_baseline", "identification_first", "measurement_robustness"
+    ]
+    plan: AnalysisPlan
+
+
+class CandidatePlanBatch(StrictModel):
+    plans: list[CandidatePlanDraft] = Field(min_length=1, max_length=2)
+
+    @model_validator(mode="after")
+    def validate_unique_strategies(self) -> "CandidatePlanBatch":
+        strategies = [item.strategy for item in self.plans]
+        if len(strategies) != len(set(strategies)):
+            raise ValueError("candidate plan batch contains duplicate strategies")
+        return self
 
 
 class CriticIssue(StrictModel):
@@ -285,6 +583,7 @@ class CriticIssue(StrictModel):
     return_stage: Literal["intake", "data_profile", "method_route", "analysis_plan", "human"]
     repair_type: Literal["technical", "scientific", "human_required"]
     status: Literal["open", "resolved", "accepted_risk"] = "open"
+    threat_id: str | None = None
 
 
 class CriticReport(StrictModel):
@@ -350,6 +649,25 @@ class DesignReviewerReport(StrictModel):
     remaining_risks: list[str] = Field(default_factory=list)
 
 
+class ReviewerReportBatch(StrictModel):
+    reports: list[DesignReviewerReport] = Field(min_length=1, max_length=2)
+
+    @model_validator(mode="after")
+    def validate_independent_dimensions(self) -> "ReviewerReportBatch":
+        dimensions = [item.dimension for item in self.reports]
+        if len(dimensions) != len(set(dimensions)):
+            raise ValueError("reviewer batch contains duplicate dimensions")
+        candidate_sets = [
+            {review.candidate_id for review in report.candidate_reviews}
+            for report in self.reports
+        ]
+        if not candidate_sets[0] or any(
+            candidate_ids != candidate_sets[0] for candidate_ids in candidate_sets[1:]
+        ):
+            raise ValueError("every reviewer must cover the same non-empty candidate set")
+        return self
+
+
 class DesignArena(StrictModel):
     arena_id: str
     candidates: list[DesignCandidate]
@@ -378,9 +696,36 @@ class DesignArena(StrictModel):
 
 
 class ContractBudget(StrictModel):
-    max_executions: int = Field(default=12, ge=1)
-    max_llm_calls: int = Field(default=20, ge=1)
-    max_wall_time_seconds: int = Field(default=1800, ge=60)
+    max_executions: int = Field(
+        default=12,
+        ge=1,
+        description=(
+            "Frozen DAG step slots per statistical implementation. The primary "
+            "executor and independent reproducer report their work separately."
+        ),
+    )
+    max_wall_time_seconds: int = Field(
+        default=1800,
+        ge=60,
+        description="Wall-time ceiling for each statistical implementation phase.",
+    )
+    max_end_to_end_wall_time_seconds: int = Field(
+        default=2700,
+        ge=60,
+        description=(
+            "End-to-end system-cell ceiling enforced by the benchmark orchestrator."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_llm_call_budget(cls, value: Any) -> Any:
+        """Read old contracts without restoring an unenforced budget source."""
+
+        if isinstance(value, dict) and "max_llm_calls" in value:
+            value = dict(value)
+            value.pop("max_llm_calls")
+        return value
 
 
 class FormalResearchContract(StrictModel):
@@ -401,6 +746,15 @@ class FormalResearchContract(StrictModel):
     budget: ContractBudget = Field(default_factory=ContractBudget)
 
 
+class ExecutionProvenance(StrictModel):
+    implementation_id: str
+    implementation_version: str
+    code_sha256: str
+    environment_sha256: str
+    contract_sha256: str
+    data_sha256: list[str] = Field(default_factory=list)
+
+
 class ExecutionRecord(StrictModel):
     execution_id: str
     run_type: Literal[
@@ -412,6 +766,15 @@ class ExecutionRecord(StrictModel):
     diagnostic_results: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     error: str | None = None
+    check_id: str | None = None
+    not_executed_reason_code: Literal[
+        "budget_exhausted",
+        "not_executable",
+        "dependency_failed",
+        "external_replication_pending",
+        "fixture_only",
+    ] | None = None
+    provenance: ExecutionProvenance | None = None
 
 
 class ResearchRun(StrictModel):
@@ -448,6 +811,56 @@ class ReproductionAudit(StrictModel):
     compared_fields: list[str] = Field(default_factory=list)
     differences: list[str] = Field(default_factory=list)
     numeric_tolerance: float = Field(default=1e-8, gt=0)
+    relative_tolerance: float = Field(default=1e-6, gt=0)
+    mode: Literal[
+        "independent_implementation", "same_implementation_rerun"
+    ] = "same_implementation_rerun"
+    independence_scope: Literal[
+        "unspecified",
+        "estimator_only",
+        "data_preparation_and_estimator",
+        "end_to_end",
+    ] = "unspecified"
+    shared_components: list[str] = Field(default_factory=list)
+    covered_plan_step_ids: list[str] = Field(default_factory=list)
+    primary_implementation_id: str | None = None
+    replication_implementation_id: str | None = None
+    metric_differences: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class EvidenceObject(StrictModel):
+    evidence_id: str
+    claim_id: str
+    check_id: str
+    execution_id: str | None = None
+    source_kind: Literal[
+        "execution", "reproduction", "scientific_audit", "contract"
+    ]
+    status: Literal["supporting", "opposing", "incomplete", "invalid"]
+    reason: str
+
+
+class EvidenceRegistry(StrictModel):
+    registry_version: str = "enterprise-panel-v1"
+    case_id: str
+    research_run_id: str
+    required_check_ids: list[str] = Field(default_factory=list)
+    evidence: list[EvidenceObject] = Field(default_factory=list)
+
+
+class ClaimGateResult(StrictModel):
+    claim_id: str
+    admission_status: AdmissionStatus
+    max_allowed_strength: ClaimStrength
+    reasons: list[str] = Field(default_factory=list)
+
+
+class ClaimGateReport(StrictModel):
+    gate_id: str
+    case_id: str
+    research_run_id: str
+    registry_version: str
+    results: list[ClaimGateResult] = Field(default_factory=list)
 
 
 class EvidenceAssessment(StrictModel):
@@ -472,15 +885,7 @@ class ClaimRecord(StrictModel):
     claim_text: str
     final_text: str | None = None
     evidence_status: Literal["supported", "contradicted", "mixed", "inconclusive", "not_tested"]
-    allowed_strength: Literal[
-        "causal_strong",
-        "causal_cautious",
-        "associational",
-        "preliminary",
-        "mixed",
-        "insufficient",
-        "prohibited",
-    ]
+    allowed_strength: ClaimStrength
     supporting_runs: list[str]
     opposing_runs: list[str]
     scope: str
@@ -490,6 +895,11 @@ class ClaimRecord(StrictModel):
         "pending", "approved", "downgraded", "revise", "hold", "rejected"
     ] = "pending"
     human_decision_reason: str | None = None
+    claim_type: ClaimType = "unspecified"
+    required_check_ids: list[str] = Field(default_factory=list)
+    admission_status: AdmissionStatus = "unassessed"
+    max_allowed_strength: ClaimStrength | None = None
+    gate_reasons: list[str] = Field(default_factory=list)
 
 
 class ClaimLedger(StrictModel):
@@ -501,6 +911,80 @@ class ClaimLedger(StrictModel):
     unresolved_issues: list[str]
 
 
+class EvidenceClaimBundle(StrictModel):
+    evidence_assessment: EvidenceAssessment
+    candidate_claim_ledger: ClaimLedger
+
+    @model_validator(mode="after")
+    def validate_unique_claims(self) -> "EvidenceClaimBundle":
+        claim_ids = [
+            claim.claim_id for claim in self.candidate_claim_ledger.claims
+        ]
+        if len(claim_ids) != len(set(claim_ids)):
+            raise ValueError("candidate claim ledger contains duplicate claim ids")
+        return self
+
+
+class ProtectedValue(StrictModel):
+    value_id: str
+    value_kind: Literal[
+        "claim_text",
+        "count",
+        "coefficient",
+        "standard_error",
+        "interval_bound",
+        "p_value",
+        "fit_statistic",
+        "year",
+        "passage_quote",
+    ]
+    source_kind: Literal["claim", "execution", "passage"]
+    source_id: str
+    source_path: str
+    raw_value: Any
+    rendered_value: str
+
+
+class ManuscriptStatement(StrictModel):
+    statement_id: str
+    statement_kind: Literal[
+        "authorized_claim",
+        "estimate_fact",
+        "sample_fact",
+        "diagnostic_fact",
+        "citation",
+    ]
+    text_template: str
+    protected_values: list[ProtectedValue] = Field(default_factory=list)
+    claim_ids: list[str] = Field(default_factory=list)
+    execution_ids: list[str] = Field(default_factory=list)
+    citation_passage_ids: list[str] = Field(default_factory=list)
+
+
+class ManuscriptSectionDraft(StrictModel):
+    section_id: str
+    content_template: str
+
+
+class ManuscriptSectionDraftBatch(StrictModel):
+    sections: list[ManuscriptSectionDraft] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def validate_unique_sections(self) -> "ManuscriptSectionDraftBatch":
+        section_ids = [section.section_id for section in self.sections]
+        if len(section_ids) != len(set(section_ids)):
+            raise ValueError("manuscript draft batch contains duplicate section ids")
+        return self
+
+
+class VerifiedPassageRef(StrictModel):
+    passage_id: str
+    source_id: str
+    locator: str
+    text_sha256: str
+    citation_render: str
+
+
 class ManuscriptSection(StrictModel):
     section_id: str
     title: str
@@ -508,6 +992,8 @@ class ManuscriptSection(StrictModel):
     status: Literal["generated", "not_generated"]
     claim_ids: list[str] = Field(default_factory=list)
     run_ids: list[str] = Field(default_factory=list)
+    content_template: str | None = None
+    statements: list[ManuscriptStatement] = Field(default_factory=list)
 
 
 FULL_MANUSCRIPT_SECTION_IDS = (
@@ -533,19 +1019,51 @@ class ManuscriptPackage(StrictModel):
     package_id: str
     case_id: str
     version: int = 1
-    mode: Literal["research_plan_only", "full_manuscript"]
+    mode: Literal[
+        "research_plan_only",
+        "full_manuscript",
+        "identification_failure_report",
+    ]
     status: Literal["draft", "needs_revision", "ready_for_human_review", "not_generated"]
     research_plan_markdown: str
     manuscript_sections: list[ManuscriptSection]
-    empirical_findings_status: Literal["included", "not_executed", "prohibited_fixture"]
+    empirical_findings_status: Literal[
+        "included",
+        "not_executed",
+        "prohibited_fixture",
+        "executed_not_admissible",
+    ]
     disclosures: list[str]
     unresolved_issues: list[str]
+    audit_scope: Literal["manuscript_claim_consistency_only"] = (
+        "manuscript_claim_consistency_only"
+    )
     audit_result: Literal["not_run", "pass_with_no_critical_issues", "revise"] = "not_run"
+    ir_version: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def validate_plan_only_boundary(self) -> "ManuscriptPackage":
         if self.mode == "research_plan_only" and self.empirical_findings_status == "included":
             raise ValueError("research_plan_only cannot include empirical findings")
+        if self.mode == "identification_failure_report":
+            if self.empirical_findings_status != "executed_not_admissible":
+                raise ValueError(
+                    "identification_failure_report requires "
+                    "empirical_findings_status=executed_not_admissible"
+                )
+            if self.status == "not_generated":
+                raise ValueError(
+                    "identification_failure_report cannot have status=not_generated"
+                )
+            if any(
+                section.claim_ids
+                for section in self.manuscript_sections
+                if section.status == "generated"
+            ):
+                raise ValueError(
+                    "identification_failure_report cannot contain admitted claim ids"
+                )
+            return self
         if self.mode != "full_manuscript":
             return self
         if self.status == "not_generated":
@@ -691,7 +1209,13 @@ class ClaimDecisionInput(StrictModel):
 
 
 class GateDecisionRequest(StrictModel):
-    action: Literal["approve", "revise", "reject", "generate_plan_only"]
+    action: Literal[
+        "approve",
+        "revise",
+        "reject",
+        "generate_plan_only",
+        "generate_identification_failure_report",
+    ]
     comment: str = ""
     actor: str = "local_researcher"
     expected_run_version: int | None = None

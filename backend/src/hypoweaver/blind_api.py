@@ -10,14 +10,22 @@ from .blind_engine import BlindEngine, SealValidationError
 from .blind_models import BlindEvaluationRequest, BlindEvaluationView
 from .blind_prompts import build_app_b_definition
 from .blind_repository import BlindEvaluationNotFoundError, BlindRepository
+from .benchmark_models import PairedEvaluationRequest, PairedEvaluationView
+from .paired_blind import PairedBlindEngine, build_paired_definition
+from .paired_blind_repository import (
+    PairedBlindRepository,
+    PairedEvaluationNotFoundError,
+)
 
 
 repository = BlindRepository()
 engine = BlindEngine(repository)
+paired_repository = PairedBlindRepository()
+paired_engine = PairedBlindEngine(paired_repository)
 app = FastAPI(
     title="HypoWeaver-Qwen Blind Evaluation API",
-    version="1.0.0",
-    description="Independent App B; it cannot mutate App A.",
+    version="2.0.0",
+    description="Independent App B v1/v2; neither endpoint can mutate App A.",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -56,12 +64,17 @@ def require_blind_auth(
 
 @app.get("/api/v1/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "runtime": "blind-isolated", "definition": "app-b@1.0.0"}
+    return {"status": "ok", "runtime": "blind-isolated", "definition": "app-b@2.0.0"}
 
 
 @app.get("/api/v1/definitions/app-b")
 def definition() -> dict:
     return build_app_b_definition()
+
+
+@app.get("/api/v2/definitions/app-b-paired")
+def paired_definition() -> dict:
+    return build_paired_definition()
 
 
 @app.get("/api/v1/evaluations", response_model=list[BlindEvaluationView])
@@ -90,3 +103,36 @@ def get_evaluation(evaluation_id: str) -> BlindEvaluationView:
         return engine.get(evaluation_id)
     except BlindEvaluationNotFoundError as error:
         raise HTTPException(status_code=404, detail="evaluation not found") from error
+
+
+@app.get("/api/v2/paired-evaluations", response_model=list[PairedEvaluationView])
+def list_paired_evaluations() -> list[PairedEvaluationView]:
+    return paired_engine.list()
+
+
+@app.post(
+    "/api/v2/paired-evaluations",
+    response_model=PairedEvaluationView,
+    status_code=201,
+)
+async def create_paired_evaluation(
+    request: PairedEvaluationRequest,
+    _authorized: None = Depends(require_blind_auth),
+) -> PairedEvaluationView:
+    try:
+        return await paired_engine.evaluate(request)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get(
+    "/api/v2/paired-evaluations/{evaluation_id}",
+    response_model=PairedEvaluationView,
+)
+def get_paired_evaluation(evaluation_id: str) -> PairedEvaluationView:
+    try:
+        return paired_engine.get(evaluation_id)
+    except PairedEvaluationNotFoundError as error:
+        raise HTTPException(status_code=404, detail="paired evaluation not found") from error

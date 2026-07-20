@@ -1,6 +1,6 @@
 import { Check, CheckCircle2, ChevronDown, Circle, CircleAlert, Clock3, FileText, LoaderCircle, RotateCcw, Settings2, ShieldCheck, Trash2, XCircle } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import type { BaselineRun, ClaimDecision, GateDecisionInput, RunSnapshot, RunSummary, StepAttempt, WorkflowDefinition, WorkflowStage } from '../runtime/types'
+import type { BaselineRun, ClaimDecision, ClaimRecord, GateDecisionInput, ManuscriptStatementSourceView, ModelCallGroup, ModelUsageView, RunSnapshot, RunSummary, StepAttempt, WorkflowDefinition, WorkflowStage } from '../runtime/types'
 
 interface ExecutionWorkspaceProps {
   definition: WorkflowDefinition
@@ -23,6 +23,60 @@ interface ExecutionWorkspaceProps {
   onRetryWriting: () => Promise<void>
 }
 
+export const MODEL_CALL_PROTOCOL = {
+  humanGateCount: 4,
+  logicalCallCount: 9,
+  maxProviderAttempts: 20,
+} as const
+
+const modelCallGroups: ModelCallGroup[] = ['h1_h2', 'h3', 'h4']
+const modelCallStageLabels: Record<ModelCallGroup, string> = {
+  h1_h2: '设计与审查阶段',
+  h3: '证据与结论审计阶段',
+  h4: '论文写作与复核阶段',
+}
+
+export function modelCallStageUsage(modelUsage: ModelUsageView) {
+  return modelCallGroups.map((group) => ({
+    label: modelCallStageLabels[group],
+    attempts: modelUsage.groupUsage[group],
+  }))
+}
+
+function usesSharedRetryPool(modelUsage: ModelUsageView): boolean {
+  return modelUsage.retryPolicy === 'shared_bounded'
+    || modelUsage.retryPolicy === 'shared-retry-v1'
+    || modelUsage.retryMode === 'global_shared_retry_pool'
+}
+
+export function ModelCallContract({ modelUsage }: { modelUsage?: ModelUsageView }) {
+  return (
+    <section className="model-call-contract" aria-label="人工确认与模型调用结构">
+      <header>
+        <div><strong>确认与模型调用结构</strong><small>人工 Gate、逻辑任务和真实请求分别计数</small></div>
+        {modelUsage && <span>当前 {modelUsage.logicalCalls}/{modelUsage.requiredLogicalCalls} 个逻辑调用 · {modelUsage.providerAttempts}/{modelUsage.maxCalls} 次 Provider Attempt</span>}
+      </header>
+      <div className="model-call-contract__totals">
+        <article><strong>{MODEL_CALL_PROTOCOL.humanGateCount}</strong><span>个人工 Gate</span><small>H1–H4 决策点</small></article>
+        <article><strong>{MODEL_CALL_PROTOCOL.logicalCallCount}</strong><span>个逻辑模型调用</span><small>完整首轮调用图</small></article>
+        <article><strong>{MODEL_CALL_PROTOCOL.maxProviderAttempts}</strong><span>次 Provider Attempt 上限</span><small>包含首轮、网络重试与格式修复</small></article>
+      </div>
+      {modelUsage && (
+        <div className="model-call-contract__usage">
+          <p>{usesSharedRetryPool(modelUsage)
+            ? <>共享重试池剩余 <strong>{modelUsage.sharedRetryRemaining}</strong> / {modelUsage.sharedRetrySlots} 次</>
+            : '阶段调用用量'}</p>
+          <ul aria-label="模型调用阶段用量">
+            {modelCallStageUsage(modelUsage).map((stage) => (
+              <li key={stage.label}><span>{stage.label}</span><strong>{stage.attempts} 次 attempt</strong></li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  )
+}
+
 const requiredManuscriptSections = [
   'abstract',
   'introduction',
@@ -39,12 +93,33 @@ export function manuscriptQuality(run: RunSnapshot): { complete: boolean; charac
   const sectionIds = new Set(generated.map((section) => section.id))
   const characterCount = generated.reduce((total, section) => total + section.content.trim().length, 0)
   return {
-    complete: run.manuscript?.mode === 'full_manuscript'
-      && run.manuscript.auditResult === 'pass_with_no_critical_issues'
-      && requiredManuscriptSections.every((sectionId) => sectionIds.has(sectionId))
-      && characterCount >= 3200,
+    complete: run.manuscript?.auditResult === 'pass_with_no_critical_issues'
+      && (run.manuscript.mode === 'identification_failure_report'
+        || (run.manuscript.mode === 'full_manuscript'
+          && requiredManuscriptSections.every((sectionId) => sectionIds.has(sectionId))
+          && characterCount >= 3200)),
     characterCount,
   }
+}
+
+const statementKindText: Record<ManuscriptStatementSourceView['kind'], string> = {
+  authorized_claim: '获批结论',
+  estimate_fact: '估计事实',
+  sample_fact: '样本事实',
+  diagnostic_fact: '诊断事实',
+  citation: '核验引文',
+}
+
+function StatementProvenance({ statements }: { statements: ManuscriptStatementSourceView[] }) {
+  if (!statements.length) return null
+  return <details className="statement-provenance">
+    <summary>语句来源 · {statements.length} 条</summary>
+    <ul>{statements.map((statement) => <li key={statement.id}>
+      <strong>{statementKindText[statement.kind] ?? statement.kind}</strong>
+      <span>{statement.id}</span>
+      {statement.sources.length > 0 && <small>{statement.sources.map((source) => `${source.kind} · ${source.id} · ${source.path}`).join('；')}</small>}
+    </li>)}</ul>
+  </details>
 }
 
 const statusText = {
@@ -57,6 +132,29 @@ const claimDecisionText: Record<ClaimDecision, string> = {
   downgrade: 'H3 已降级授权',
   reject: 'H3 已拒绝',
   hold: 'H3 已暂缓',
+}
+
+const allClaimDecisions: ClaimDecision[] = ['approve', 'downgrade', 'reject', 'hold']
+const claimAdmissionText: Record<string, string> = {
+  unassessed: '旧版未评估',
+  admitted: '已准入',
+  downgrade_required: '必须降级',
+  prohibited: '禁止使用',
+  rejected: '已拒绝准入',
+}
+
+export function permittedClaimDecisions(claim: ClaimRecord, fixture: boolean): ClaimDecision[] {
+  if (fixture) return ['reject', 'hold']
+  if (claim.admissionStatus === 'admitted' && !['insufficient', 'prohibited'].includes(claim.allowedStrength ?? '')) {
+    return ['approve', 'downgrade', 'reject', 'hold']
+  }
+  if (claim.admissionStatus === 'downgrade_required' && !['insufficient', 'prohibited'].includes(claim.allowedStrength ?? '')) {
+    return ['downgrade', 'reject', 'hold']
+  }
+  if (claim.admissionStatus === 'prohibited' || claim.admissionStatus === 'rejected' || claim.allowedStrength === 'prohibited') {
+    return ['reject', 'hold']
+  }
+  return ['approve', 'downgrade', 'reject', 'hold']
 }
 
 const designStrategyLabels = {
@@ -168,22 +266,35 @@ function HumanReview({ run, busy, onDecision, onSubmitRevision }: {
   const fixtureH3 = gate === 'H3' && (run.mode === 'fixture' || run.planOnly)
   const allClaimsReady = gate !== 'H3' || (Boolean(run.claims.length) && run.claims.every((claim) => {
     const decision = decisions[claim.id] ?? claim.decision
-    return Boolean(decision) && (decision !== 'downgrade' || Boolean(finalTexts[claim.id]?.trim()))
+    return Boolean(decision)
+      && permittedClaimDecisions(claim, fixtureH3).includes(decision!)
+      && (decision !== 'downgrade' || Boolean(finalTexts[claim.id]?.trim()))
+      && (!(decision === 'approve' && /\d/.test(claim.text)) || Boolean(finalTexts[claim.id]?.trim()))
   }))
   const selectedCandidateReady = gate !== 'H2'
     || !run.designArena
     || run.designArena.recommendedCandidateIds.includes(selectedCandidateId)
+  const willGenerateFailureReport = gate === 'H3' && !fixtureH3 && !run.claims.some((claim) => {
+    const decision = decisions[claim.id] ?? claim.decision ?? 'reject'
+    return decision === 'approve' || decision === 'downgrade'
+  })
 
   async function submitH3() {
+    const claimDecisions = run.claims.map((claim) => ({
+      claimId: claim.id,
+      decision: decisions[claim.id] ?? claim.decision ?? (fixtureH3 ? 'hold' : 'reject'),
+      finalText: finalTexts[claim.id]?.trim() || undefined,
+      reason: comment,
+    }))
+    const hasAdmittedClaim = claimDecisions.some(({ decision }) => decision === 'approve' || decision === 'downgrade')
     await onDecision('H3', {
-      action: fixtureH3 ? 'generate_plan_only' : 'approve',
+      action: fixtureH3
+        ? 'generate_plan_only'
+        : hasAdmittedClaim
+          ? 'approve'
+          : 'generate_identification_failure_report',
       comment,
-      claims: run.claims.map((claim) => ({
-        claimId: claim.id,
-        decision: decisions[claim.id] ?? claim.decision ?? (fixtureH3 ? 'hold' : 'reject'),
-        finalText: finalTexts[claim.id]?.trim() || undefined,
-        reason: comment,
-      })),
+      claims: claimDecisions,
     })
   }
 
@@ -227,12 +338,27 @@ function HumanReview({ run, busy, onDecision, onSubmitRevision }: {
         })}
         <p className="design-arena-note">不按总分或多数票自动选“赢家”；不可执行、目标错配或存在 critical 问题的候选不能冻结。</p>
       </section>}
-      {gate === 'H3' && <div className="claim-review-list">{run.claims.map((claim) => <article key={claim.id}><p>{claim.text}</p><small>允许强度：{claim.allowedStrength ?? '未指定'}</small><div>{(fixtureH3 ? ['reject', 'hold'] : ['approve', 'downgrade', 'reject', 'hold']).map((decision) => <button type="button" key={decision} aria-pressed={(decisions[claim.id] ?? claim.decision) === decision} className={(decisions[claim.id] ?? claim.decision) === decision ? 'is-selected' : ''} onClick={() => setDecisions((current) => ({ ...current, [claim.id]: decision as ClaimDecision }))}>{{ approve: '批准', downgrade: '降级', reject: '拒绝', hold: '暂缓' }[decision]}</button>)}</div>{(decisions[claim.id] ?? claim.decision) === 'downgrade' && <textarea value={finalTexts[claim.id] ?? ''} onChange={(event) => setFinalTexts((current) => ({ ...current, [claim.id]: event.target.value }))} placeholder="填写降级后的审慎表述" />}</article>)}</div>}
-      {gate === 'H4' && run.manuscript && <section className="h4-manuscript-review"><p><strong>论文初稿 v{run.manuscript.version}</strong> · {run.manuscript.sections.length} 节 · {run.manuscript.auditResult === 'pass_with_no_critical_issues' ? '一致性审计通过' : '需要修订'}</p>{run.manuscript.sections.map((section) => <details key={section.id}><summary>{section.title}</summary><div className="manuscript-copy">{section.content}</div></details>)}</section>}
+      {gate === 'H3' && <div className="claim-review-list">{run.claims.map((claim) => {
+        const permitted = permittedClaimDecisions(claim, fixtureH3)
+        const selected = decisions[claim.id] ?? claim.decision
+        return <article key={claim.id}>
+          <p>{claim.text}</p>
+          <div className="claim-gate-summary">
+            <small>Gate：{claimAdmissionText[claim.admissionStatus ?? 'unassessed'] ?? claim.admissionStatus}</small>
+            <small>代码上限：{claim.maxAllowedStrength ?? claim.allowedStrength ?? '未指定'}</small>
+            <small>候选强度：{claim.allowedStrength ?? '未指定'}</small>
+          </div>
+          {claim.requiredCheckIds.length > 0 && <details><summary>必做检查 · {claim.requiredCheckIds.length}</summary><ul>{claim.requiredCheckIds.map((checkId) => <li key={checkId}>{checkId}</li>)}</ul></details>}
+          {claim.gateReasons.length > 0 && <details open><summary>Gate 理由 · {claim.gateReasons.length}</summary><ul>{claim.gateReasons.map((reason, index) => <li key={`${claim.id}-reason-${index}`}>{reason}</li>)}</ul></details>}
+          <div>{allClaimDecisions.map((decision) => <button type="button" key={decision} disabled={!permitted.includes(decision)} aria-pressed={selected === decision} className={selected === decision ? 'is-selected' : ''} onClick={() => setDecisions((current) => ({ ...current, [claim.id]: decision }))}>{{ approve: '批准', downgrade: '降级', reject: '拒绝', hold: '暂缓' }[decision]}</button>)}</div>
+          {(selected === 'approve' || selected === 'downgrade') && <textarea value={finalTexts[claim.id] ?? ''} onChange={(event) => setFinalTexts((current) => ({ ...current, [claim.id]: event.target.value }))} placeholder={selected === 'downgrade' ? '填写降级后的审慎表述' : /\d/.test(claim.text) ? '候选含裸数字，必须填写不含数字的安全表述' : '可选：填写最终授权表述'} />}
+        </article>
+      })}</div>}
+      {gate === 'H4' && run.manuscript && <section className="h4-manuscript-review"><p><strong>{run.manuscript.mode === 'identification_failure_report' ? '识别失败报告' : '论文初稿'} v{run.manuscript.version}</strong> · IR {run.manuscript.irVersion} · {run.manuscript.sections.length} 节 · {run.manuscript.auditResult === 'pass_with_no_critical_issues' ? '一致性审计通过' : '需要修订'}</p>{run.manuscript.sections.map((section) => <details key={section.id}><summary>{section.title}</summary><div className="manuscript-copy">{section.content}</div><StatementProvenance statements={section.statements} /></details>)}</section>}
       {fixtureH3 && <p className="fixture-warning">本次没有真实实证结果，每条 Claim 只能拒绝或暂缓；提交后仅生成研究计划。</p>}
       {!returnedForRevision && <label>审核说明<textarea rows={3} value={comment} onChange={(event) => setComment(event.target.value)} placeholder={gate === 'H4' ? '退回重写时，请写明需要修改的章节和具体问题' : '记录批准或拒绝理由（选填）'} /></label>}
       {showRevision && (gate === 'H1' || gate === 'H2') && <section className="revision-editor"><header><div><strong>{gate} 结构化修订</strong><p>{gate === 'H1' ? '修改 CaseSubmission 后，系统会重新执行 Intake 与输入校验，再回到 H1。' : '修改 AnalysisPlan 后，系统会重新执行四类 Critic；plan_version 已自动加一。'}</p></div></header><textarea aria-label={`${gate} 结构化修订 JSON`} rows={18} spellCheck={false} value={revisionText} onChange={(event) => setRevisionText(event.target.value)} />{revisionError && <p className="revision-error" role="alert">{revisionError}</p>}<footer>{!returnedForRevision && <button type="button" className="secondary-button" disabled={busy} onClick={() => setShowRevision(false)}>取消修订</button>}<button type="button" className="primary-button" disabled={busy} onClick={submitRevision}>提交修订并重新校验</button></footer></section>}
-      {!returnedForRevision && <footer><button type="button" className="danger-button" disabled={busy} onClick={() => onDecision(gate, { action: 'reject', comment })}>拒绝并终止</button>{gate !== 'H3' && <button type="button" className="secondary-button" disabled={busy || (gate === 'H4' && !comment.trim())} onClick={() => gate === 'H4' ? onDecision('H4', { action: 'revise', comment }) : openRevision()}>{gate === 'H4' ? '退回重写' : '退回并编辑'}</button>}{gate === 'H3' ? <button type="button" className="primary-button" disabled={busy || !allClaimsReady} onClick={submitH3}>{fixtureH3 ? '生成 plan-only 成果' : '提交结论授权'}</button> : <button type="button" className="primary-button" disabled={busy || !selectedCandidateReady} onClick={() => onDecision(gate, { action: 'approve', comment, ...(gate === 'H2' && selectedCandidateId ? { selectedCandidateId } : {}) })}>{gate === 'H4' ? '批准并封存' : '批准并继续'}</button>}</footer>}
+      {!returnedForRevision && <footer><button type="button" className="danger-button" disabled={busy} onClick={() => onDecision(gate, { action: 'reject', comment })}>拒绝并终止</button>{gate !== 'H3' && <button type="button" className="secondary-button" disabled={busy || (gate === 'H4' && !comment.trim())} onClick={() => gate === 'H4' ? onDecision('H4', { action: 'revise', comment }) : openRevision()}>{gate === 'H4' ? '退回重写' : '退回并编辑'}</button>}{gate === 'H3' ? <button type="button" className="primary-button" disabled={busy || !allClaimsReady} onClick={submitH3}>{fixtureH3 ? '生成 plan-only 成果' : willGenerateFailureReport ? '生成识别失败报告' : '提交结论授权'}</button> : <button type="button" className="primary-button" disabled={busy || !selectedCandidateReady} onClick={() => onDecision(gate, { action: 'approve', comment, ...(gate === 'H2' && selectedCandidateId ? { selectedCandidateId } : {}) })}>{gate === 'H4' ? '批准并封存' : '批准并继续'}</button>}</footer>}
     </section>
   )
 }
@@ -332,6 +458,7 @@ export function ExecutionWorkspace({
   const currentNode = definition.nodes.find((node) => node.id === run?.currentNodeId)
   const completedStages = run ? definition.stages.filter((stage) => stageState(stage, definition, run) === 'complete').length : 0
   const manuscriptState = run ? manuscriptQuality(run) : { complete: false, characterCount: 0 }
+  const identificationFailure = run?.manuscript?.mode === 'identification_failure_report'
   const writingFailed = run?.status === 'failed' && run.currentNodeId === 'scientific_writer'
   const preservedDraft = Boolean(writingFailed && run?.manuscript)
 
@@ -374,6 +501,7 @@ export function ExecutionWorkspace({
           {!run && <button type="button" className="primary-button lane-start" disabled={busy || !caseReady} onClick={() => void onStartHypoweaver()}>{caseReady ? '启动 HypoWeaver' : '请重新选择案例'}</button>}
           {run?.mode === 'fixture' && <p className="fixture-banner"><CircleAlert size={16} />流程演示不会生成实证结论。</p>}
           {run?.status === 'failed' && run.lastError && <div className="run-error-summary"><CircleAlert size={16} /><span><strong>失败原因</strong>{run.lastError}</span>{writingFailed && <button type="button" className="secondary-button" disabled={busy} onClick={() => void onRetryWriting()}><RotateCcw size={14} />调整后重试论文写作</button>}</div>}
+          <ModelCallContract modelUsage={run?.modelUsage} />
 
           <div className="stage-flow stage-flow--compact">
             {definition.stages.map((stage) => {
@@ -398,7 +526,7 @@ export function ExecutionWorkspace({
           </div>
 
           {run && (run.status === 'completed' || preservedDraft) && <section className="result-summary">
-            <div className="result-summary__heading">{preservedDraft ? <CircleAlert size={20} /> : <Check size={20} />}<div><h2>{preservedDraft ? '本次重生成失败，上一版已保留' : run.planOnly ? '研究计划已生成' : manuscriptState.complete ? '完整论文初稿已生成' : '论文初稿不完整'}</h2><p>{preservedDraft ? `仍显示论文初稿 v${run.manuscript?.version ?? '—'}；失败原因与本次尝试记录保留在上方。` : run.planOnly ? '本次没有统计结论。' : manuscriptState.complete ? `共 ${run.manuscript?.sections.length ?? 0} 节、${manuscriptState.characterCount.toLocaleString()} 字；实证表述受 H3 授权结论约束。` : '当前成果没有达到完整论文门槛，不将其冒充为已完成。'}</p></div>{!run.planOnly && <button type="button" className={manuscriptState.complete ? 'quiet-button' : 'primary-button'} disabled={busy} onClick={() => void onRetryWriting()}><RotateCcw size={14} />{preservedDraft ? '调整后重试论文写作' : manuscriptState.complete ? '重新生成论文' : '生成完整论文'}</button>}</div>
+            <div className="result-summary__heading">{preservedDraft ? <CircleAlert size={20} /> : <Check size={20} />}<div><h2>{preservedDraft ? '本次重生成失败，上一版已保留' : run.planOnly ? '研究计划已生成' : identificationFailure ? '识别失败报告已生成' : manuscriptState.complete ? '完整论文初稿已生成' : '论文初稿不完整'}</h2><p>{preservedDraft ? `仍显示论文初稿 v${run.manuscript?.version ?? '—'}；失败原因与本次尝试记录保留在上方。` : run.planOnly ? '本次没有统计结论。' : identificationFailure ? '分析已经执行，但没有研究主张通过 Claim Gate；这不是技术失败。' : manuscriptState.complete ? `共 ${run.manuscript?.sections.length ?? 0} 节、${manuscriptState.characterCount.toLocaleString()} 字；实证表述受 H3 授权结论约束。` : '当前成果没有达到完整论文门槛，不将其冒充为已完成。'}</p></div>{!run.planOnly && !identificationFailure && <button type="button" className={manuscriptState.complete ? 'quiet-button' : 'primary-button'} disabled={busy} onClick={() => void onRetryWriting()}><RotateCcw size={14} />{preservedDraft ? '调整后重试论文写作' : manuscriptState.complete ? '重新生成论文' : '生成完整论文'}</button>}</div>
             {!run.planOnly && <>
               <div className="result-summary__meta"><span>执行状态 · {run.executionStatus}</span><span>科学状态 · {run.scientificStatus}</span></div>
               <div className="result-summary__claims">
@@ -410,12 +538,13 @@ export function ExecutionWorkspace({
                 {!run.claims.some((claim) => claim.decision === 'approve' || claim.decision === 'downgrade') && <p>本次没有获得 H3 授权的实证结论。</p>}
               </div>
               {run.manuscript && <article className="manuscript-draft">
-                <header><FileText size={18} /><div><strong>论文初稿 · v{run.manuscript.version}</strong><small>{run.manuscript.auditResult === 'pass_with_no_critical_issues' ? '一致性审计通过' : '尚未通过一致性审计'}</small></div></header>
+                <header><FileText size={18} /><div><strong>{identificationFailure ? '识别失败报告' : '论文初稿'} · v{run.manuscript.version}</strong><small>{run.manuscript.auditResult === 'pass_with_no_critical_issues' ? '一致性审计通过' : '尚未通过一致性审计'}</small></div></header>
                 <div className="manuscript-sections">
                   {run.manuscript.sections.filter((section) => section.status === 'generated').map((section, index) => <section key={section.id} id={`manuscript-${section.id}`}>
                     <p className="manuscript-section-index">{String(index + 1).padStart(2, '0')} · {section.id}</p>
                     <h3>{section.title}</h3>
                     <div className="manuscript-copy">{section.content}</div>
+                    <StatementProvenance statements={section.statements} />
                     {(section.claimIds.length > 0 || section.runIds.length > 0) && <footer>Claim {section.claimIds.join('、') || '—'} · Run {section.runIds.join('、') || '—'}</footer>}
                   </section>)}
                 </div>

@@ -7,14 +7,19 @@ from pydantic import BaseModel
 
 from .models import (
     AnalysisPlan,
+    CandidatePlanBatch,
     ClaimLedger,
     CriticReport,
     DesignReviewerReport,
     EvidenceAssessment,
+    EvidenceClaimBundle,
+    ManuscriptSectionDraftBatch,
     ManuscriptPackage,
     ManuscriptSection,
     MethodRoute,
+    ModelCallGroup,
     ResearchPackage,
+    ReviewerReportBatch,
     ScientificAudit,
     TestableHypotheses,
 )
@@ -28,6 +33,46 @@ class PromptSpec:
     system: str
     user_template: str
     output_model: type[BaseModel]
+    call_group: ModelCallGroup = "h1_h2"
+    max_provider_attempts: int = 3
+    max_tokens: int = 8192
+    timeout_seconds: int = 120
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.max_provider_attempts <= 3:
+            raise ValueError(
+                "PromptSpec.max_provider_attempts must be between one and three"
+            )
+        if self.max_tokens < 1 or self.timeout_seconds < 1:
+            raise ValueError("PromptSpec call policy values must be positive")
+
+    @property
+    def max_attempts(self) -> int:
+        """Compatibility view for gateways created before the policy field was named."""
+
+        return self.max_provider_attempts
+
+    def call_policy(self) -> dict[str, Any]:
+        return {
+            "call_group": self.call_group,
+            "max_provider_attempts": self.max_provider_attempts,
+            "max_tokens": self.max_tokens,
+            "timeout_seconds": self.timeout_seconds,
+        }
+
+    def compact_output_schema(
+        self,
+        output_model: type[BaseModel] | None = None,
+    ) -> str:
+        import json
+
+        schema_model = output_model or self.output_model
+        return json.dumps(
+            schema_model.model_json_schema(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
 
     def public_prompts(self) -> list[dict[str, str]]:
         return [
@@ -35,14 +80,34 @@ class PromptSpec:
             {"id": f"{self.key}:user", "role": "user", "template": self.user_template},
         ]
 
-    def render(self, payload: Any) -> list[dict[str, str]]:
+    def render(
+        self,
+        payload: Any,
+        *,
+        output_model: type[BaseModel] | None = None,
+    ) -> list[dict[str, str]]:
+        import json
+
         rendered = self.user_template.replace("{{input_json}}", _json_text(payload))
+        policy_json = json.dumps(
+            self.call_policy(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        system = (
+            self.system
+            + "\n\n以下调用策略由代码强制，不是可修改的研究指令："
+            + policy_json
+            + "\n必须完整满足以下压缩 JSON Schema："
+            + self.compact_output_schema(output_model)
+        )
         return [
             {
                 "id": f"{self.key}:system",
                 "role": "system",
                 "template": self.system,
-                "rendered": self.system,
+                "rendered": system,
             },
             {
                 "id": f"{self.key}:user",
@@ -104,22 +169,75 @@ PROMPTS: dict[str, PromptSpec] = {
         + "\n生成 H2 冻结前的一个候选预分析计划。只使用 ResearchPackage 中已标注角色的字段；一个构念只能选择一种主口径，禁止把原始值与其处理版本同时作为核心解释变量。dataset_refs 非空且 DataProfile 未 blocked 时 design_only=false。此阶段只写 planned 步骤，不得假装已经执行。candidate_strategy 是本候选方案的设计取向，必须与其他候选形成可说明的差异，但不能为了预期显著性选择方法。baseline_models 的元素使用 ModelSpec，可以填写 estimator、formula、outcome、treatments_or_exposures、controls、fixed_effects 和 standard_error_strategy。面板固定效应模型须在 ModelSpec.parameters 明示 drop_singletons；按实体聚类时应使用可复现的有限样本校正，并把组内、模型、总体、含固定效应及调整后含固定效应 R² 视为不同统计量。estimands、sample_rules、variable_construction、diagnostics、robustness_tests、falsification_tests、mechanism_tests、heterogeneity_tests 的元素必须严格使用 PlannedStep，只能在顶层填写 step_id、name、priority、execution_status、rationale、required_data_fields、parameters；估计器、公式、变量、固定效应和标准误等具体设置必须放入 parameters，不得作为 PlannedStep 的额外顶层字段。可执行参数约定：diagnostics.parameters.checks 使用 within_variance(field) 或 missing_pattern(field)；替代口径稳健性使用 alternative_outcome 或 alternative_exposure；证伪回归使用 placebo_outcome 或 lead_exposure，仅做可执行性边界时使用 min_valid_obs_threshold；交互机制边界使用 mediator 或 moderator，并设置 test_type=interaction_and_mediation_boundary。不得把中介变量依次回归的相关性路径冒充机制成立。执行器不支持或数据不满足的分析必须写入 unsupported_requested_analyses，不得生成无法执行的模糊步骤。输出必须紧凑：baseline_models 只保留 1 个主模型；其余每个计划类别最多 1 个最关键步骤，没有必要步骤时返回空数组；同一字段清单只在 required_data_fields 汇总一次，不重复长篇解释。对于 spatial 路由，应根据目标估计量、空间依赖来源和可见权重资产独立选择空间模型，并在 ModelSpec.parameters 中声明 spatial_model、spatial_id、spatial_weights_dataset_id 与该模型实际需要的空间项；不得因为执行器当前支持某个模型就倒推科学设计。权重资产只能绑定 ResearchPackage 已提供的 supplementary dataset_ref，不得臆造路径或矩阵。没有外生识别时 research_goal 和结论边界必须保持 associational。",
         "请为已选方法家族生成 AnalysisPlan：\n{{input_json}}",
         AnalysisPlan,
+        max_tokens=4096,
+        timeout_seconds=240,
+    ),
+    "candidate_plan_batch": PromptSpec(
+        "candidate_plan_batch",
+        "批量研究设计",
+        "1.0.0",
+        COMMON_GUARDRAILS
+        + "\n一次仅生成 input.candidate_strategies 指定的 1–2 个候选计划。"
+        "每个 strategy 必须与请求逐字一致且不重复；不得生成 candidate_id、Probe 或执行结果。"
+        "三类候选的全集、计划 ID、可执行 Probe 和差异指纹均由代码合并后核验。"
+        "AnalysisPlan 的字段规则与 analysis_design 一致：只写冻结前计划，"
+        "具体执行参数放入 parameters，不得按预期显著性选方案。",
+        "请严格按 candidate_strategies 批量生成候选 AnalysisPlan：\n{{input_json}}",
+        CandidatePlanBatch,
+        max_tokens=12288,
+        timeout_seconds=360,
     ),
     "design_reviewer": PromptSpec(
         "design_reviewer",
         "候选研究设计审查",
-        "1.0.0",
+        "1.1.0",
         COMMON_GUARDRAILS
-        + "\n你是与方案生成上下文隔离的 Reviewer，只审查 input.dimension 指定的一个维度。必须逐一审查全部候选方案，依据 ResearchPackage、DesignEnvelope、DataProfile 和 ProbeReport 给出结构化问题，不得通过投票、总分或与原论文答案相似程度决定真伪。Probe 未使用任何结果变量估计值；你也不得要求先看系数或 p 值再选方案。只有方法与目标估计量、数据结构、必要资产或识别条件冲突时才允许 reject。一般风险应保留为 revise 或 remaining_risks。每个 CandidateReview 必须引用真实 candidate_id。",
+        + "\n你是与方案生成上下文隔离的 Reviewer，只审查 input.dimension 指定的一个维度。必须逐一审查全部候选方案，依据 ResearchPackage、DesignEnvelope、DataProfile 和 ProbeReport 给出结构化问题，不得通过投票、总分或与原论文答案相似程度决定真伪。Probe 未使用任何结果变量估计值；你也不得要求先看系数或 p 值再选方案。只有方法与目标估计量、数据结构、必要资产或识别条件冲突时才允许 reject。一般风险应保留为 revise 或 remaining_risks。每个 CandidateReview 必须引用真实 candidate_id。对 panel_association 或 mechanism_boundary，每个 open CriticIssue 必须填写下列 enterprise-panel-v1 threat_id 之一：panel.key_sample_flow、panel.missingness_within_variance、panel.fe_cluster_feasibility、panel.alternative_measurement、panel.lead_placebo、panel.sample_outlier_sensitivity、panel.mechanism_interaction_boundary、panel.independent_replication。不得把执行参数隐藏在 required_fix；后续代码只读 threat_id，不解析 required_fix 猜测参数。无法归入注册表的一般局限放入 remaining_risks，不生成无映射的 open issue。",
         "请独立审查候选研究设计集合：\n{{input_json}}",
         DesignReviewerReport,
+        max_tokens=4096,
+        timeout_seconds=180,
+    ),
+    "reviewer_report_batch": PromptSpec(
+        "reviewer_report_batch",
+        "批量候选设计审查",
+        "1.1.2",
+        COMMON_GUARDRAILS
+        + "\n仅审查 input.dimensions 指定的 1–2 个维度，每个维度输出一份独立 DesignReviewerReport。"
+        "不得用一个总分或多数票替代分维审查，不得读取其他批次 Reviewer 结果。"
+        "每份报告必须审查输入中全部候选方案。对 panel_association 或 mechanism_boundary，"
+        "每个 open CriticIssue 的 threat_id 必须且只能是：panel.key_sample_flow、"
+        "panel.missingness_within_variance、panel.fe_cluster_feasibility、"
+        "panel.alternative_measurement、panel.lead_placebo、"
+        "panel.sample_outlier_sensitivity、panel.mechanism_interaction_boundary、"
+        "panel.independent_replication。无法归入 enterprise-panel-v1 的一般局限必须放入"
+        " remaining_risks，不得另造 threat_id。代码只映射 threat_id，不解析 required_fix"
+        " 猜测参数。对 policy_causal，open CriticIssue 的 threat_id 必须且只能是："
+        "policy.group_time_support、policy.event_study_pretrends、policy.placebo_timing、"
+        "policy.group_fixed_last_pre、policy.group_stable_entities_only、"
+        "policy.entity_cluster_sensitivity、policy.permutation_placebo、"
+        "policy.alternative_outcome、policy.independent_replication。能由冻结 Test DAG 或"
+        " Claim Gate 承接的技术或科学风险，即使 severity=critical，也必须保持"
+        " repair_type=technical/scientific 且 verdict=revise；只有不可修复的核心输入或"
+        "识别缺失才允许 human_required 或 reject。Probe 已报告企业内分组切换时，"
+        "如果执行计划明确保留该观测状态且 Claim Gate 会禁止永久处理组解释，应把它作为"
+        "remaining_risks 或 revise 边界；只有目标估计量不可识别或计划仍声称永久处理组时才 reject。"
+        "当输入明确说明主表是已整理的 analysis-ready 数据且本任务范围从该主表开始时，"
+        "缺少更上游的原始数据清洗或 ETL 日志只能列为来源披露边界，不得据此把"
+        "policy.independent_replication 标成 human_required 或 reject；独立复算应从冻结主表"
+        "重新估计。只有冻结主表本身缺失、不可读或无法绑定哈希时才属于输入阻断，且应与 Probe 证据一致。"
+        "代码将在两个批次合并后校验四维全集和 candidate 覆盖。",
+        "请分维审查以下候选方案：\n{{input_json}}",
+        ReviewerReportBatch,
+        max_tokens=8192,
+        timeout_seconds=240,
     ),
     "method_critic": PromptSpec(
         "method_critic",
         "独立方法审查",
-        "1.1.0",
+        "1.2.0",
         COMMON_GUARDRAILS
-        + "\n这是 H2 前的预分析计划审查，不是执行后审计。只审查输入 dimension 指定的一个维度，并只提出可定位的问题。不得因为回归、VIF、稳健性或诊断尚未执行而报错；此阶段只检查 AnalysisPlan 是否已计划这些步骤。DataProfile 标记 succeeded 时，必须使用其中真实样本量、缺失率和重复键，不能声称数据尚未读取。变量来源或构造细节仍待确认时，可列为 remaining_risks 或 accepted_risk；只有核心构念无法解释、主键/核心字段缺失、方法与数据不匹配或计划自相矛盾时，才允许 critical + human_required。没有开放问题时 verdict=pass；不能用 open issue 表达一般性局限。",
+        + "\n这是 H2 前的预分析计划审查，不是执行后审计。只审查输入 dimension 指定的一个维度，并只提出可定位的问题。不得因为回归、VIF、稳健性或诊断尚未执行而报错；此阶段只检查 AnalysisPlan 是否已计划这些步骤。DataProfile 标记 succeeded 时，必须使用其中真实样本量、缺失率和重复键，不能声称数据尚未读取。变量来源或构造细节仍待确认时，可列为 remaining_risks 或 accepted_risk；只有核心构念无法解释、主键/核心字段缺失、方法与数据不匹配或计划自相矛盾时，才允许 critical + human_required。没有开放问题时 verdict=pass；不能用 open issue 表达一般性局限。对 panel_association 或 mechanism_boundary，每个 open CriticIssue 必须填写下列 enterprise-panel-v1 threat_id 之一：panel.key_sample_flow、panel.missingness_within_variance、panel.fe_cluster_feasibility、panel.alternative_measurement、panel.lead_placebo、panel.sample_outlier_sensitivity、panel.mechanism_interaction_boundary、panel.independent_replication。后续代码只读 threat_id，绝不解析 required_fix 猜测变量、阈值或模型参数。无法归入注册表的一般局限放入 remaining_risks。",
         "请审查以下研究计划：\n{{input_json}}",
         CriticReport,
     ),
@@ -140,6 +258,7 @@ PROMPTS: dict[str, PromptSpec] = {
         + "\n只解释 ResearchRun 中真实存在的执行记录。fixture_only 或 not_executed 必须输出 not_tested。交互模型的调节边界必须依据冻结 interaction_term 对应估计量的系数、标准误和 p 值判断；核心解释变量的主效应只表示调节变量取零时的条件效应，不能用其显著性代替交互项检验，也不能把交互证据写成中介或传导机制得到证明。",
         "请评估以下 ResearchRun：\n{{input_json}}",
         EvidenceAssessment,
+        call_group="h3",
     ),
     "scientific_audit": PromptSpec(
         "scientific_audit",
@@ -149,15 +268,33 @@ PROMPTS: dict[str, PromptSpec] = {
         + "\n代码运行成功不等于科学有效。检查冻结合同、识别假设、必要诊断和未披露偏离。对交互边界模型，核对冻结 interaction_term 与 ResearchRun 中同名估计量；不得因核心解释变量主效应不显著而声称交互项不显著，也不得把显著交互项升级为中介或因果机制证据。",
         "请审计合同、运行与证据评估：\n{{input_json}}",
         ScientificAudit,
+        call_group="h3",
     ),
     "claim_ledger": PromptSpec(
         "claim_ledger",
         "结论账本",
-        "1.1.0",
+        "1.2.0",
         COMMON_GUARDRAILS
-        + "\n每条 Claim 必须绑定真实 run。没有真实执行时 evidence_status=not_tested 且 allowed_strength=prohibited。交互边界 Claim 必须引用 interaction_term 的真实估计量，并把核心解释变量主效应解释为调节变量取零时的条件效应；显著交互最多支持关联性的异质边界，不得写成中介、传导或因果机制已被证实。",
+        + "\n每条 Claim 必须绑定真实 run。input.allowed_claim_specs 是代码冻结的完整 Claim 清单：必须为其中每项恰好输出一条 Claim，claim_id、hypothesis_id、claim_type 必须逐字一致，禁止省略、重复或新造 ID。claim_text 只能写定性科学表述，不得手抄任何阿拉伯数字、系数、标准误、p 值、区间或样本量；所有统计数字只能在 Manuscript IR 阶段由代码从 Execution 注入。没有真实执行时 evidence_status=not_tested 且 allowed_strength=prohibited。交互边界 Claim 必须引用 interaction_term 的真实估计量，并把核心解释变量主效应解释为调节变量取零时的条件效应；显著交互最多支持关联性的异质边界，不得写成中介、传导或因果机制已被证实。",
         "请根据审计后的证据生成 ClaimLedger：\n{{input_json}}",
         ClaimLedger,
+        call_group="h3",
+    ),
+    "evidence_claim_bundle": PromptSpec(
+        "evidence_claim_bundle",
+        "证据与候选结论编译",
+        "1.0.1",
+        COMMON_GUARDRAILS
+        + "\n同一输出中分别生成 EvidenceAssessment 与未准入的 candidate ClaimLedger。"
+        "candidate_claim_ledger.case_id 和 research_run_id 必须从输入 research_run 逐字复制，禁止缩写、改写或猜测。"
+        "input.allowed_claim_specs 是完整且唯一的 Claim 清单；必须恰好覆盖、不得新造 ID。"
+        "candidate_claim_ledger 只允许定性表述，不得手抄统计数字，且不得伪装成已通过 Claim Gate。"
+        "后续独立 Scientific Audit 和纯代码 Gate 只能收紧该候选结论。",
+        "请根据冻结合同与真实运行生成证据与候选 Claim 束：\n{{input_json}}",
+        EvidenceClaimBundle,
+        call_group="h3",
+        max_tokens=8192,
+        timeout_seconds=180,
     ),
     "scientific_writer": PromptSpec(
         "scientific_writer",
@@ -181,6 +318,9 @@ PROMPTS: dict[str, PromptSpec] = {
 输出必须是符合 ManuscriptPackage Schema 的单一 JSON 对象。""",
         "请根据以下通用写作证据包生成完整论文初稿：\n{{input_json}}",
         ManuscriptPackage,
+        call_group="h4",
+        max_tokens=12288,
+        timeout_seconds=360,
     ),
     "scientific_writer_section": PromptSpec(
         "scientific_writer_section",
@@ -232,9 +372,36 @@ PROMPTS: dict[str, PromptSpec] = {
 39. 交互边界模型必须依据 frozen_design 中 interaction_term 对应估计量判断调节边界；核心解释变量主效应只表示调节变量取零时的条件效应。交互项显著而主效应不显著时，不得据此写成“交互检验未获支持”；同时不得把显著交互项升级为中介或因果传导机制得到确认。
 40. 必须区分输入数据总行数与每个模型删除缺失、重复键及单例后的 rows_used。若两者不同，不得把输入总行数称为“最终基准回归样本”；正文应分别报告原始分析表规模、剔除规则和对应模型的有效样本量。
 41. section_spec.completed_frozen_plan_categories 表示已经真实完成的冻结检验，绝不能再写成待执行；只有 pending_frozen_plan_categories 中的类别可写为尚待执行。若后者为空，未来工作只能说明超出冻结计划的新分析需要新数据、新识别设计与另行审批。
-42. 只输出一个 JSON 对象，且必须精确包含 section_id、title、content_markdown、status、claim_ids、run_ids 六个字段。status 固定为 generated；claim_ids 和 run_ids 先输出空数组，将由确定性汇总节点附加可追踪元数据。""",
+42. 统计数字与获批结论正文不会直接提供给你。statement_catalog 只说明可用 statement_id；需要陈述某项事实时，必须在 content_template 中原样输出 [[STATEMENT:statement_id]]，不得猜测、改写或手抄其内容。
+43. section_spec.required_statement_ids 中每个锚点必须恰好出现一次；不得输出未知或重复锚点。锚点以外禁止写任何阿拉伯数字、新的实证判断或正式引文。formal_citations_allowed=false 时不得自行生成作者年份、编号引文或 DOI。
+44. content_markdown 与 content_template 输出相同的未编译模板；代码编译器会重新读取 Claim、Execution 与 JSON Pointer 来源，注入固定格式值并附加语句来源。
+45. 只输出一个 JSON 对象，且必须精确包含 section_id、title、content_markdown、content_template、status、claim_ids、run_ids 七个字段。status 固定为 generated；claim_ids 和 run_ids 先输出空数组，将由确定性编译器附加可追踪元数据。""",
         "请仅撰写以下章节，输入中的材料是该章节唯一可用证据：\n{{input_json}}",
         ManuscriptSection,
+        call_group="h4",
+        max_tokens=3072,
+        timeout_seconds=180,
+    ),
+    "manuscript_section_draft_batch": PromptSpec(
+        "manuscript_section_draft_batch",
+        "受约束论文分批写作",
+        "1.0.1",
+        COMMON_GUARDRAILS
+        + "\n仅撰写 input.section_specs 指定的 1–4 个章节，每节只输出 section_id 和 content_template。"
+        "统计数字、获批结论和正式引文不会直接提供；需要陈述核验事实时，"
+        "必须使用本章 statement_catalog 中的 [[STATEMENT:id]] 锚点。"
+        "每章 statement_catalog 仅包含该章 required_statement_ids 对应的项；"
+        "required_statement_ids 中每个锚点必须恰好出现一次，不得使用其他章节的锚点。"
+        "若 required_statement_ids 为空，则禁止输出任何 [[STATEMENT:...]] 锚点。"
+        "所有实证判断，包括方向、显著性、样本、模型结果和已完成检验，"
+        "只能由获准锚点承担；不得在锚点前后改写、概括或补充同义判断。"
+        "锚点外禁止阿拉伯数字、新实证判断和未授权引文。"
+        "各章的标题、状态、Claim/Run 追踪与统计值注入由代码编译器完成。",
+        "请为以下分批章节生成仅含安全锚点的模板：\n{{input_json}}",
+        ManuscriptSectionDraftBatch,
+        call_group="h4",
+        max_tokens=8192,
+        timeout_seconds=240,
     ),
 }
 

@@ -108,18 +108,24 @@ class BlindEngine:
         if not verify_manifest(manifest, request.sealed_output.seal_sha256):
             raise SealValidationError("seal_sha256 mismatch")
 
-        research_run_hash = canonical_sha256(request.research_run.model_dump(mode="json"))
+        research_run_hash = canonical_sha256(
+            request.research_run.model_dump(mode="json", exclude_unset=True)
+        )
         if not hmac.compare_digest(
             research_run_hash, request.sealed_output.research_run_sha256
         ):
             raise SealValidationError("research_run_sha256 mismatch")
 
-        ledger_hash = canonical_sha256(request.claim_ledger.model_dump(mode="json"))
+        ledger_hash = canonical_sha256(
+            request.claim_ledger.model_dump(mode="json", exclude_unset=True)
+        )
         if not hmac.compare_digest(ledger_hash, request.sealed_output.claim_ledger_sha256):
             raise SealValidationError("claim_ledger_sha256 mismatch")
 
         if request.sealed_output.analysis_plan_sha256:
-            plan_hash = canonical_sha256(request.analysis_plan.model_dump(mode="json"))
+            plan_hash = canonical_sha256(
+                request.analysis_plan.model_dump(mode="json", exclude_unset=True)
+            )
             if not hmac.compare_digest(
                 plan_hash, request.sealed_output.analysis_plan_sha256
             ):

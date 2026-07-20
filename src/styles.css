@@ -315,6 +315,28 @@ input::placeholder, textarea::placeholder { color: #9aa6b6; }
 .h4-manuscript-review > details { border: 1px solid #d8d8d3; border-radius: 6px; background: #fff; }
 .h4-manuscript-review > details > summary { padding: 11px 13px; color: #333; font-size: 12px; cursor: pointer; }
 .h4-manuscript-review .manuscript-copy { padding: 0 14px 14px; }
+.statement-provenance { margin: 10px 14px 14px; border-top: 1px solid #ecece8; }
+.manuscript-sections .statement-provenance { margin: 18px 0 0; }
+.statement-provenance > summary { padding: 9px 0 0; color: #777; font-size: 10px; cursor: pointer; }
+.statement-provenance ul { display: grid; gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
+.statement-provenance li { display: grid; gap: 2px; color: #777; font-size: 9px; word-break: break-all; }
+.statement-provenance li strong { color: #444; font-size: 10px; }
+.statement-provenance li small { color: #999; font-size: 9px; }
+.model-call-contract { margin: 14px 0; padding: 14px; border: 1px solid #dce3eb; border-radius: 7px; background: #f8fafc; }
+.model-call-contract > header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.model-call-contract > header div { display: grid; gap: 3px; }
+.model-call-contract > header strong { color: #33465e; font-size: 12px; }
+.model-call-contract > header small, .model-call-contract > header span { color: var(--muted); font-size: 10px; }
+.model-call-contract__totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 11px; }
+.model-call-contract__totals article { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 5px; padding: 10px; border: 1px solid #e3e8ee; border-radius: 6px; background: #fff; }
+.model-call-contract__totals article > strong { color: #263b55; font-size: 19px; }
+.model-call-contract__totals article > span { color: #43556b; font-size: 10px; font-weight: 700; }
+.model-call-contract__totals article > small { grid-column: 1 / -1; margin-top: 3px; color: var(--muted); font-size: 9px; }
+.model-call-contract__usage { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 14px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #e2e7ec; }
+.model-call-contract__usage p { margin: 0; color: #52647a; font-size: 10px; }
+.model-call-contract__usage ul { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.model-call-contract__usage li { display: flex; gap: 5px; padding: 5px 7px; border-radius: 4px; background: #eef2f6; color: #56677b; font-size: 9px; }
+.model-call-contract__usage li strong { color: #34485f; }
 .revision-editor { margin-top: 16px; padding: 15px; border: 1px solid #d3bc88; border-radius: 7px; background: #fffdf8; }
 .revision-editor > header strong { color: #39495e; font-size: 13px; }
 .revision-editor > header p { margin: 5px 0 11px; color: var(--muted); font-size: 11px; line-height: 1.55; }
@@ -828,6 +850,9 @@ input::placeholder, textarea::placeholder { color: #9aa6b6; }
   .shared-input-strip > div:nth-child(2) { border-right: 0; }
   .shared-input-strip > div:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
   .bench-lane { padding: 16px; }
+  .model-call-contract > header { align-items: flex-start; flex-direction: column; }
+  .model-call-contract__totals, .model-call-contract__usage { grid-template-columns: 1fr; }
+  .model-call-contract__usage ul { justify-content: flex-start; }
   .launcher-footer,
   .comparison-panel > header { align-items: flex-start; flex-direction: column; }
 }

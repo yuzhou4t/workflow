@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { normalizeBaselineRun, normalizeDefinition, normalizeLocalCaseImport, normalizeRun, normalizeRunList, workflowApi } from '../src/runtime/api'
+import { normalizeBaselineRun, normalizeCaseSubmission, normalizeDefinition, normalizeLocalCaseImport, normalizeRun, normalizeRunList, workflowApi } from '../src/runtime/api'
 
 const definitionPayload = {
   id: 'app-a',
@@ -138,9 +138,55 @@ const actualBackendRunPayload = {
     logs: ['H3 已暂停'],
   }],
   events: [{ seq: 1, type: 'gate.waiting', message: 'H3 等待人工决定。', timestamp: '2026-07-14T10:01:00Z', node_id: 'h3_gate', status: 'waiting_human' }],
-  claims: [{ claim_id: 'claim-H1', claim_text: '尚未检验', final_text: 'H3 最终文本', allowed_strength: 'prohibited', supporting_runs: [], opposing_runs: [], evidence_status: 'not_tested', scope: '', robustness_status: 'not_executed', unresolved_risks: [], approval_status: 'downgraded' }],
+  claims: [{ claim_id: 'claim-H1', claim_text: '尚未检验', final_text: 'H3 最终文本', claim_type: 'associational', allowed_strength: 'prohibited', max_allowed_strength: 'prohibited', admission_status: 'prohibited', required_check_ids: ['check-baseline'], gate_reasons: ['Fixture 禁止实证准入'], supporting_runs: [], opposing_runs: [], evidence_status: 'not_tested', scope: '', robustness_status: 'not_executed', unresolved_risks: [], approval_status: 'downgraded' }],
   artifacts: {
     claim_ledger: { artifact_id: 'run:claim_ledger', kind: 'claim_ledger', sha256: 'abc', payload: { claims: [] } },
+    model_usage: {
+      artifact_id: 'run:model_usage',
+      kind: 'model_usage',
+      sha256: 'def',
+      payload: {
+        max_calls: 20,
+        llm_calls: 7,
+        required_logical_calls: 9,
+        retry_policy: 'shared_bounded',
+        shared_retry_slots: 11,
+        group_limits: { h1_h2: 10, h3: 4, h4: 6 },
+        group_usage: { h1_h2: 7, h3: 0, h4: 0 },
+        logical_call_attempts: { hypothesis: 1, candidate_a: 1, candidate_b: 3, reviewer_a: 2 },
+      },
+    },
+  },
+}
+
+const modelCallBudgetSnapshotPayload = {
+  max_calls: 20,
+  llm_calls: 7,
+  input_tokens: 23418,
+  output_tokens: 13540,
+  wall_time_seconds: 454.574874,
+  technical_failures: ['APIConnectionError'],
+  call_receipts: [],
+  group_limits: { h1_h2: 10, h3: 4, h4: 6 },
+  group_usage: { h1_h2: 7, h3: 0, h4: 0 },
+  logical_call_attempts: { hypothesis: 1, candidate_a: 1, candidate_b: 3, reviewer_a: 2 },
+  logical_call_groups: {
+    hypothesis: 'h1_h2',
+    candidate_a: 'h1_h2',
+    candidate_b: 'h1_h2',
+    reviewer_a: 'h1_h2',
+  },
+  shared_retry_policy: {
+    version: 'shared-retry-v1',
+    mode: 'global_shared_retry_pool',
+    legacy_group_limits_enforced: false,
+    required_first_calls: 9,
+    required_first_calls_by_group: { h1_h2: 5, h3: 2, h4: 2 },
+    reserved_for_unstarted_required_first_calls: 5,
+    reserved_for_unstarted_by_group: { h1_h2: 1, h3: 2, h4: 2 },
+    shared_retry_capacity: 11,
+    shared_retry_used: 3,
+    shared_retry_remaining: 8,
   },
 }
 
@@ -191,16 +237,78 @@ describe('runtime API adapter', () => {
     expect(run.claims[0]).toMatchObject({
       id: 'claim-H1',
       finalText: 'H3 最终文本',
+      claimType: 'associational',
       allowedStrength: 'prohibited',
+      maxAllowedStrength: 'prohibited',
+      admissionStatus: 'prohibited',
+      requiredCheckIds: ['check-baseline'],
+      gateReasons: ['Fixture 禁止实证准入'],
       evidenceStatus: 'not_tested',
       robustnessStatus: 'not_executed',
       decision: 'downgrade',
+    })
+    expect(run.modelUsage).toEqual({
+      maxCalls: 20,
+      llmCalls: 7,
+      logicalCalls: 4,
+      providerAttempts: 7,
+      requiredLogicalCalls: 9,
+      retryPolicy: 'shared_bounded',
+      retryMode: undefined,
+      sharedRetrySlots: 11,
+      sharedRetryRemaining: 8,
+      groupUsage: { h1_h2: 7, h3: 0, h4: 0 },
+    })
+  })
+
+  it('normalizes the nested shared retry policy emitted by ModelCallBudget.snapshot', () => {
+    const run = normalizeRun({
+      id: 'run-model-budget-snapshot',
+      artifacts: {
+        model_usage: {
+          kind: 'model_usage',
+          payload: modelCallBudgetSnapshotPayload,
+        },
+      },
+    })
+
+    expect(run.modelUsage).toEqual({
+      maxCalls: 20,
+      llmCalls: 7,
+      logicalCalls: 4,
+      providerAttempts: 7,
+      requiredLogicalCalls: 9,
+      retryPolicy: 'shared-retry-v1',
+      retryMode: 'global_shared_retry_pool',
+      sharedRetrySlots: 11,
+      sharedRetryRemaining: 8,
+      groupUsage: { h1_h2: 7, h3: 0, h4: 0 },
     })
   })
 
   it('normalizes a manuscript stored in the code-native artifact dictionary', () => {
     const sections = ['abstract', 'introduction', 'theory_hypotheses', 'data_variables', 'research_design', 'empirical_results', 'discussion_limitations', 'conclusion']
-      .map((sectionId) => ({ section_id: sectionId, title: sectionId, content_markdown: '正文'.repeat(240), status: 'generated', claim_ids: [], run_ids: [] }))
+      .map((sectionId) => ({
+        section_id: sectionId,
+        title: sectionId,
+        content_markdown: '正文'.repeat(240),
+        status: 'generated',
+        claim_ids: [],
+        run_ids: [],
+        statements: sectionId === 'abstract' ? [{
+          statement_id: 'statement-claim-1',
+          statement_kind: 'authorized_claim',
+          claim_ids: ['claim-H1'],
+          execution_ids: [],
+          text_template: 'internal-template-must-not-leak',
+          protected_values: [{
+            source_kind: 'claim',
+            source_id: 'claim-H1',
+            source_path: '/claims/0/final_text',
+            raw_value: 'internal-value-must-not-leak',
+          }],
+        }] : [],
+      }))
     const run = normalizeRun({
       ...actualBackendRunPayload,
       mode: 'research',
@@ -211,6 +319,7 @@ describe('runtime API adapter', () => {
           kind: 'manuscript_package',
           payload: {
             version: 2,
+            ir_version: 1,
             mode: 'full_manuscript',
             status: 'ready_for_human_review',
             research_plan_markdown: '后续计划',
@@ -225,10 +334,21 @@ describe('runtime API adapter', () => {
 
     expect(run.manuscript).toMatchObject({
       version: 2,
+      irVersion: 1,
       mode: 'full_manuscript',
       auditResult: 'pass_with_no_critical_issues',
     })
     expect(run.manuscript?.sections).toHaveLength(8)
+    expect(run.manuscript?.sections[0].statements).toEqual([{
+      id: 'statement-claim-1',
+      kind: 'authorized_claim',
+      claimIds: ['claim-H1'],
+      executionIds: [],
+      sources: [{ kind: 'claim', id: 'claim-H1', path: '/claims/0/final_text' }],
+    }])
+    expect(run.manuscript).not.toHaveProperty('contentTemplate')
+    expect(JSON.stringify(run.manuscript)).not.toContain('internal-template-must-not-leak')
+    expect(JSON.stringify(run.manuscript)).not.toContain('internal-value-must-not-leak')
   })
 
   it('normalizes the H2 design arena and keeps only viable candidates selectable', () => {
@@ -300,6 +420,7 @@ describe('runtime API adapter', () => {
 
     expect(baseline).toMatchObject({
       id: 'baseline-1',
+      systemId: 'agent_laboratory_social_science_adapted',
       status: 'completed',
       executionStatus: 'success',
       scientificStatus: 'not_assessed',
@@ -350,6 +471,62 @@ describe('runtime API adapter', () => {
     await workflowApi.importLocalCase('/tmp/case-1')
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/case-imports/local', expect.objectContaining({ method: 'POST' }))
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ path: '/tmp/case-1' })
+  })
+
+  it('round-trips the frozen remote-pre years and event-term scaling', async () => {
+    const wireCase = {
+      case_id: 'case-policy-remote-pre',
+      title: '政策事件研究',
+      research_question: '政策是否影响污染强度？',
+      hypotheses: [{ hypothesis_id: 'H1', statement: '政策前后存在差异变化。' }],
+      data_structure_hint: 'panel',
+      variables: [{ name: 'polint1', role: 'outcome' }],
+      dataset_refs: [],
+      policy_design: {
+        policy_date: '2007-07',
+        group_field: 'high_polluting_industry_current_year',
+        time_field: 'year',
+        policy_start_weight: 0.42,
+        post_start_weight: 1,
+        exposure_name: 'policy_exposure',
+        fixed_effects: ['idcode', 'year', 'indcode2', 'areacode2'],
+        cluster_fields: ['indcode', 'areacode2', 'year'],
+        cluster_composition: 'interaction',
+        event_reference_year: 2006,
+        event_years: [2002, 2003, 2004, 2005, 2007],
+        event_remote_pre_years: [1998, 1999, 2000, 2001],
+        event_term_scaling: 'binary_group_year_contrast',
+        placebo_start_year: 2004,
+        placebo_repetitions: 199,
+        permutation_scheme: 'assignment_unit_label',
+        permutation_unit_field: 'idcode',
+        random_seed: 12345,
+      },
+      known_policy_facts: [],
+      constraints: [],
+    }
+    const normalized = normalizeCaseSubmission(wireCase)
+    expect(normalized.policyDesign?.eventRemotePreYears).toEqual([
+      1998, 1999, 2000, 2001,
+    ])
+    expect(normalized.policyDesign?.eventTermScaling).toBe(
+      'binary_group_year_contrast',
+    )
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => runPayload,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await workflowApi.createRun({ mode: 'research', case: normalized })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.case.policy_design.event_remote_pre_years).toEqual([
+      1998, 1999, 2000, 2001,
+    ])
+    expect(body.case.policy_design.event_term_scaling).toBe(
+      'binary_group_year_contrast',
+    )
   })
 
   it('uploads one user-selected CSV instead of requiring a filesystem path', async () => {
@@ -465,6 +642,7 @@ describe('runtime API adapter', () => {
     const runs = await workflowApi.listAgentLaboratoryRuns('case with spaces')
 
     expect(runs[0].id).toBe('baseline-latest')
+    expect(runs[0].systemId).toBe('agent_laboratory_upstream_original')
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/baselines/agent-laboratory/runs?case_id=case%20with%20spaces', expect.any(Object))
   })
 

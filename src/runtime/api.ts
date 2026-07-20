@@ -2,6 +2,7 @@ import type {
   BaselineRun,
   CaseSubmissionInput,
   ClaimDecision,
+  ClaimRecord,
   ConnectionTestResult,
   CreateRunInput,
   DatasetReferenceInput,
@@ -9,6 +10,9 @@ import type {
   LocalCaseImportResult,
   DesignArenaView,
   ManuscriptPackageView,
+  ManuscriptStatementSourceView,
+  ModelCallGroup,
+  ModelUsageView,
   NodeKind,
   PromptContent,
   RunEvent,
@@ -284,7 +288,7 @@ function normalizeEvent(value: unknown, index: number): RunEvent {
   }
 }
 
-function normalizeClaim(value: unknown, index: number) {
+function normalizeClaim(value: unknown, index: number): ClaimRecord {
   const claim = asRecord(value)
   const decision = asString(first(claim, 'decision', 'approval_status')) as ClaimDecision
   const decisionAliases: Record<string, ClaimDecision> = {
@@ -297,9 +301,14 @@ function normalizeClaim(value: unknown, index: number) {
     id: asString(first(claim, 'id', 'claim_id'), `claim-${index + 1}`),
     text: asString(first(claim, 'text', 'claim_text')),
     finalText: asString(first(claim, 'final_text', 'finalText'), '') || undefined,
+    claimType: asString(first(claim, 'claim_type', 'claimType'), '') || undefined,
     allowedStrength: asString(first(claim, 'allowed_strength', 'allowedStrength'), '') || undefined,
+    maxAllowedStrength: asString(first(claim, 'max_allowed_strength', 'maxAllowedStrength'), '') || undefined,
+    admissionStatus: asString(first(claim, 'admission_status', 'admissionStatus'), '') as ClaimRecord['admissionStatus'] || undefined,
     evidenceStatus: asString(first(claim, 'evidence_status', 'evidenceStatus'), '') || undefined,
     robustnessStatus: asString(first(claim, 'robustness_status', 'robustnessStatus'), '') || undefined,
+    requiredCheckIds: asArray(first(claim, 'required_check_ids', 'requiredCheckIds')).map(String),
+    gateReasons: asArray(first(claim, 'gate_reasons', 'gateReasons')).map(String),
     supportingRuns: asArray(first(claim, 'supporting_runs', 'supportingRuns')).map(String),
     decision: ['approve', 'downgrade', 'reject', 'hold'].includes(normalizedDecision)
       ? normalizedDecision
@@ -312,6 +321,7 @@ function normalizeManuscript(value: unknown): ManuscriptPackageView | undefined 
   if (!Object.keys(manuscript).length) return undefined
   return {
     version: Number(manuscript.version ?? 1),
+    irVersion: Number(first(manuscript, 'ir_version', 'irVersion') ?? 0),
     mode: asString(manuscript.mode, 'research_plan_only') as ManuscriptPackageView['mode'],
     status: asString(manuscript.status, 'not_generated') as ManuscriptPackageView['status'],
     researchPlan: asString(first(manuscript, 'research_plan_markdown', 'researchPlan')),
@@ -324,6 +334,23 @@ function normalizeManuscript(value: unknown): ManuscriptPackageView | undefined 
         status: asString(section.status, 'not_generated') as 'generated' | 'not_generated',
         claimIds: asArray(first(section, 'claim_ids', 'claimIds')).map(String),
         runIds: asArray(first(section, 'run_ids', 'runIds')).map(String),
+        statements: asArray(section.statements).map((value, statementIndex) => {
+          const statement = asRecord(value)
+          return {
+            id: asString(first(statement, 'statement_id', 'id'), `statement-${statementIndex + 1}`),
+            kind: asString(first(statement, 'statement_kind', 'kind'), 'authorized_claim') as ManuscriptStatementSourceView['kind'],
+            claimIds: asArray(first(statement, 'claim_ids', 'claimIds')).map(String),
+            executionIds: asArray(first(statement, 'execution_ids', 'executionIds')).map(String),
+            sources: asArray(first(statement, 'protected_values', 'sources')).map((sourceValue) => {
+              const source = asRecord(sourceValue)
+              return {
+                kind: asString(first(source, 'source_kind', 'kind'), 'claim') as ManuscriptStatementSourceView['sources'][number]['kind'],
+                id: asString(first(source, 'source_id', 'id')),
+                path: asString(first(source, 'source_path', 'path')),
+              }
+            }),
+          }
+        }),
       }
     }),
     disclosures: asArray(manuscript.disclosures).map(String),
@@ -384,6 +411,63 @@ function normalizeArtifacts(value: unknown): UnknownRecord[] {
   }))
 }
 
+const modelCallGroups: ModelCallGroup[] = ['h1_h2', 'h3', 'h4']
+
+function normalizeModelUsage(value: unknown): ModelUsageView | undefined {
+  const usage = asRecord(value)
+  if (!Object.keys(usage).length) return undefined
+  const sharedRetryPolicy = asRecord(first(usage, 'shared_retry_policy', 'sharedRetryPolicy'))
+  const maxCalls = Number(first(usage, 'max_calls', 'maxCalls') ?? 20)
+  const llmCalls = Number(first(usage, 'llm_calls', 'llmCalls') ?? 0)
+  const requiredLogicalCalls = Number(
+    first(sharedRetryPolicy, 'required_first_calls', 'requiredFirstCalls')
+      ?? first(usage, 'required_logical_calls', 'requiredLogicalCalls')
+      ?? 9,
+  )
+  const sharedRetrySlots = Number(
+    first(sharedRetryPolicy, 'shared_retry_capacity', 'sharedRetryCapacity')
+      ?? first(usage, 'shared_retry_slots', 'sharedRetrySlots')
+      ?? Math.max(maxCalls - requiredLogicalCalls, 0),
+  )
+  const logicalCallAttempts = asRecord(first(usage, 'logical_call_attempts', 'logicalCallAttempts'))
+  const logicalCalls = Number(
+    first(usage, 'logical_calls', 'logicalCalls')
+      ?? Object.keys(logicalCallAttempts).length,
+  )
+  const providerAttempts = Number(
+    first(usage, 'provider_attempts', 'providerAttempts') ?? llmCalls,
+  )
+  const retryAttemptsUsed = Object.values(logicalCallAttempts).reduce<number>(
+    (total, attempts) => total + Math.max(Number(attempts) - 1, 0),
+    0,
+  )
+  const rawGroupUsage = asRecord(first(usage, 'group_usage', 'groupUsage'))
+  const groupUsage = Object.fromEntries(
+    modelCallGroups.map((group) => [group, Number(rawGroupUsage[group] ?? 0)]),
+  ) as Record<ModelCallGroup, number>
+
+  return {
+    maxCalls,
+    llmCalls,
+    logicalCalls,
+    providerAttempts,
+    requiredLogicalCalls,
+    retryPolicy: asString(
+      first(sharedRetryPolicy, 'version')
+        ?? first(usage, 'retry_policy', 'retryPolicy'),
+      '',
+    ) || undefined,
+    retryMode: asString(first(sharedRetryPolicy, 'mode'), '') || undefined,
+    sharedRetrySlots,
+    sharedRetryRemaining: Number(
+      first(sharedRetryPolicy, 'shared_retry_remaining', 'sharedRetryRemaining')
+        ?? first(usage, 'shared_retry_remaining', 'sharedRetryRemaining')
+        ?? Math.max(sharedRetrySlots - retryAttemptsUsed, 0),
+    ),
+    groupUsage,
+  }
+}
+
 const artifactKindByStep: Record<string, string[]> = {
   intake: ['research_package'],
   decompose: ['testable_hypotheses'],
@@ -414,6 +498,8 @@ export function normalizeRun(payload: unknown): RunSnapshot {
   const manuscriptPayload = asRecord(manuscriptArtifact?.payload)
   const designArenaArtifact = artifacts.find((artifact) => asString(artifact.kind) === 'design_arena')
   const designArenaPayload = asRecord(designArenaArtifact?.payload)
+  const modelUsageArtifact = artifacts.find((artifact) => asString(artifact.kind) === 'model_usage')
+  const modelUsagePayload = first(run, 'model_usage', 'modelUsage') ?? modelUsageArtifact?.payload
   const modeValue = asString(first(run, 'mode', 'run_mode', 'execution_mode') ?? casePayload.execution_mode, 'fixture').toLowerCase()
   const currentStep = asString(first(run, 'current_step', 'current_node_id', 'currentNodeId', 'current_step_key'))
   const explicitGate = asString(first(run, 'current_gate', 'currentGate')).toUpperCase()
@@ -473,6 +559,7 @@ export function normalizeRun(payload: unknown): RunSnapshot {
     claims: asArray(first(run, 'claims', 'claim_ledger') ?? claimPayload.claims).map(normalizeClaim),
     manuscript: normalizeManuscript(manuscriptPayload),
     designArena: normalizeDesignArena(designArenaPayload),
+    modelUsage: normalizeModelUsage(modelUsagePayload),
     allowedActions: asArray(first(run, 'allowed_actions', 'allowedActions')).map(String),
   }
 }
@@ -556,6 +643,28 @@ function serializeCase(input: NonNullable<CreateRunInput['case']>) {
         allowed_claim_strength: input.designEnvelope.allowedClaimStrength,
       },
     } : {}),
+    ...(input.policyDesign ? {
+      policy_design: {
+        policy_date: input.policyDesign.policyDate,
+        group_field: input.policyDesign.groupField,
+        time_field: input.policyDesign.timeField,
+        policy_start_weight: input.policyDesign.policyStartWeight ?? null,
+        post_start_weight: input.policyDesign.postStartWeight,
+        exposure_name: input.policyDesign.exposureName,
+        fixed_effects: input.policyDesign.fixedEffects,
+        cluster_fields: input.policyDesign.clusterFields,
+        cluster_composition: input.policyDesign.clusterComposition,
+        event_reference_year: input.policyDesign.eventReferenceYear ?? null,
+        event_years: input.policyDesign.eventYears,
+        event_remote_pre_years: input.policyDesign.eventRemotePreYears,
+        event_term_scaling: input.policyDesign.eventTermScaling,
+        placebo_start_year: input.policyDesign.placeboStartYear ?? null,
+        placebo_repetitions: input.policyDesign.placeboRepetitions ?? null,
+        permutation_scheme: input.policyDesign.permutationScheme,
+        permutation_unit_field: input.policyDesign.permutationUnitField ?? null,
+        random_seed: input.policyDesign.randomSeed ?? null,
+      },
+    } : {}),
     known_policy_facts: input.knownPolicyFacts.map((item) => item.trim()).filter(Boolean),
     constraints: input.constraints.map((item) => item.trim()).filter(Boolean),
   }
@@ -637,6 +746,47 @@ export function normalizeCaseSubmission(payload: unknown): CaseSubmissionInput {
         allowedClaimStrength: asString(first(envelope, 'allowed_claim_strength', 'allowedClaimStrength'), 'not_prespecified') as NonNullable<CaseSubmissionInput['designEnvelope']>['allowedClaimStrength'],
       }
     })(),
+    policyDesign: (() => {
+      const policy = asRecord(first(value, 'policy_design', 'policyDesign'))
+      if (!Object.keys(policy).length) return undefined
+      const optionalNumber = (...keys: string[]) => {
+        const raw = first(policy, ...keys)
+        return raw === null || raw === undefined ? undefined : Number(raw)
+      }
+      return {
+        policyDate: asString(first(policy, 'policy_date', 'policyDate')),
+        groupField: asString(first(policy, 'group_field', 'groupField')),
+        timeField: asString(first(policy, 'time_field', 'timeField')),
+        policyStartWeight: optionalNumber('policy_start_weight', 'policyStartWeight'),
+        postStartWeight: Number(first(policy, 'post_start_weight', 'postStartWeight') ?? 1),
+        exposureName: asString(first(policy, 'exposure_name', 'exposureName'), 'policy_exposure'),
+        fixedEffects: asArray(first(policy, 'fixed_effects', 'fixedEffects')).map(String),
+        clusterFields: asArray(first(policy, 'cluster_fields', 'clusterFields')).map(String),
+        clusterComposition: 'interaction' as const,
+        eventReferenceYear: optionalNumber('event_reference_year', 'eventReferenceYear'),
+        eventYears: asArray(first(policy, 'event_years', 'eventYears')).map(Number),
+        eventRemotePreYears: asArray(first(
+          policy,
+          'event_remote_pre_years',
+          'eventRemotePreYears',
+        )).map(Number),
+        eventTermScaling: asString(
+          first(policy, 'event_term_scaling', 'eventTermScaling'),
+          'binary_group_year_contrast',
+        ) as NonNullable<CaseSubmissionInput['policyDesign']>['eventTermScaling'],
+        placeboStartYear: optionalNumber('placebo_start_year', 'placeboStartYear'),
+        placeboRepetitions: optionalNumber('placebo_repetitions', 'placeboRepetitions'),
+        permutationScheme: asString(
+          first(policy, 'permutation_scheme', 'permutationScheme'),
+          'assignment_unit_label',
+        ) as NonNullable<CaseSubmissionInput['policyDesign']>['permutationScheme'],
+        permutationUnitField: asString(
+          first(policy, 'permutation_unit_field', 'permutationUnitField'),
+          '',
+        ) || undefined,
+        randomSeed: optionalNumber('random_seed', 'randomSeed'),
+      }
+    })(),
     knownPolicyFacts: asArray(first(value, 'known_policy_facts', 'knownPolicyFacts')).map(String),
     constraints: asArray(value.constraints).map(String),
   }
@@ -676,9 +826,14 @@ export function normalizeLocalCaseImport(payload: unknown): LocalCaseImportResul
 
 export function normalizeBaselineRun(payload: unknown): BaselineRun {
   const value = asRecord(payload)
+  const systemId = asString(first(value, 'system_id', 'systemId'))
   return {
     id: asString(value.id),
-    systemId: 'agent_laboratory_social_science_adapted',
+    systemId: (
+      systemId === 'agent_laboratory_social_science_adapted'
+        ? systemId
+        : 'agent_laboratory_upstream_original'
+    ),
     caseId: asString(first(value, 'case_id', 'caseId')),
     caseName: asString(first(value, 'case_name', 'caseName')),
     status: asString(value.status, 'queued') as BaselineRun['status'],

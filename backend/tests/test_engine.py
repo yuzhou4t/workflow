@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,13 +14,22 @@ from hypoweaver.adapters import FixtureModelGateway
 from hypoweaver.case_import import DatasetRegistry, LocalCaseImporter
 from hypoweaver.definition import build_app_a_definition
 from hypoweaver.engine import (
+    DETERMINISTIC_SAFE_SECTION_TEXTS,
     MANUSCRIPT_SECTION_SPECS,
     WorkflowEngine,
     WorkflowTransitionError,
+    _deterministic_safe_fallback_quality_problems,
+    _is_reviewer_issue_blocking_design,
+    _normalize_external_enterprise_candidate_plan,
+    _normalize_external_policy_candidate_plan,
+    _neutralize_limited_event_study_language,
+    _plan_executable_fingerprint,
 )
 from hypoweaver.models import (
     AnalysisPlan,
     CaseSubmission,
+    CandidateDesignSet,
+    DesignCandidate,
     ClaimLedger,
     CreateRunRequest,
     CriticIssue,
@@ -28,17 +38,30 @@ from hypoweaver.models import (
     DatasetRef,
     DesignEnvelope,
     DesignArena,
+    FULL_MANUSCRIPT_SECTION_IDS,
     GateDecisionRequest,
     FormalResearchContract,
     MethodRoute,
     ManuscriptPackage,
     ManuscriptSection,
+    ManuscriptSectionDraft,
+    ManuscriptSectionDraftBatch,
     ModelSpec,
+    PlannedStep,
+    ProbeCheck,
+    ProbeReport,
+    ExecutionRecord,
     ResearchPackage,
     ResearchRun,
+    ReproductionAudit,
     RevisionRequest,
+    ScientificAudit,
 )
 from hypoweaver.prompts import get_prompt
+from hypoweaver.test_dag import (
+    THREAT_FE_CLUSTER_FEASIBILITY,
+    THREAT_MECHANISM_INTERACTION_BOUNDARY,
+)
 from hypoweaver.repository import (
     RunRepository,
     TransitionInProgressError,
@@ -47,66 +70,478 @@ from hypoweaver.repository import (
 
 
 class FullManuscriptGateway:
-    async def generate(self, prompt_key, payload, output_model):
-        spec = payload["section_spec"]
-        return ManuscriptSection(
+    provider_name = "fixture"
+
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
+        self.assert_writer_prompt(prompt_key)
+        return ManuscriptSectionDraftBatch(
+            sections=[self.section_draft(spec) for spec in payload["section_specs"]]
+        )
+
+    @staticmethod
+    def assert_writer_prompt(prompt_key: str) -> None:
+        if prompt_key != "manuscript_section_draft_batch":
+            raise AssertionError(f"unexpected writer prompt: {prompt_key}")
+
+    @staticmethod
+    def section_draft(spec: dict) -> ManuscriptSectionDraft:
+        return ManuscriptSectionDraft(
             section_id=spec["section_id"],
-            title=spec["title"],
-            content_markdown=(
+            content_template=(
                 "本节依据研究问题、冻结设计与已经执行的证据展开论述。"
                 "所有结论均保持授权强度，未执行的分析明确列为后续研究计划。"
             )
             * 12,
-            status="generated",
-            claim_ids=[],
-            run_ids=[],
         )
 
 
 class FailingWriterGateway:
-    async def generate(self, prompt_key, payload, output_model):
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
         raise RuntimeError("writer timeout")
 
 
 class FeedbackTrackingGateway(FullManuscriptGateway):
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.call_contexts = []
 
-    async def generate(self, prompt_key, payload, output_model):
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
         self.calls.append(payload)
-        return await super().generate(prompt_key, payload, output_model)
+        self.call_contexts.append(call_context)
+        return await super().generate(
+            prompt_key,
+            payload,
+            output_model,
+            call_context=call_context,
+        )
+
+
+class ScientificAuditIsolationGateway(FeedbackTrackingGateway):
+    @staticmethod
+    def section_draft(spec: dict) -> ManuscriptSectionDraft:
+        draft = FullManuscriptGateway.section_draft(spec)
+        if spec["section_id"] == "empirical_results":
+            draft.content_template = (
+                "事件研究显示各期动态效应如下。" + draft.content_template
+            )
+        return draft
+
+
+class WorkflowCallRecordingGateway(FullManuscriptGateway):
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self.fixture = FixtureModelGateway()
+
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
+        self.calls.append(
+            {
+                "prompt_key": prompt_key,
+                "payload": payload,
+                "call_context": call_context,
+            }
+        )
+        if prompt_key == "manuscript_section_draft_batch":
+            return await super().generate(
+                prompt_key,
+                payload,
+                output_model,
+                call_context=call_context,
+            )
+        return await self.fixture.generate(
+            prompt_key,
+            payload,
+            output_model,
+            call_context=call_context,
+        )
+
+
+class FailOnceBatchGateway:
+    provider_name = "fixture"
+
+    def __init__(
+        self,
+        prompt_key: str,
+        payload_key: str,
+        target_values: list[str],
+    ) -> None:
+        self.prompt_key = prompt_key
+        self.payload_key = payload_key
+        self.target_values = target_values
+        self.failed = False
+        self.calls: list[dict] = []
+        self.fixture = FixtureModelGateway()
+
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
+        self.calls.append(
+            {
+                "prompt_key": prompt_key,
+                "payload": payload,
+                "call_context": call_context,
+            }
+        )
+        if (
+            not self.failed
+            and prompt_key == self.prompt_key
+            and payload.get(self.payload_key) == self.target_values
+        ):
+            self.failed = True
+            raise RuntimeError("fixture batch failure")
+        return await self.fixture.generate(
+            prompt_key,
+            payload,
+            output_model,
+            call_context=call_context,
+        )
+
+
+class ActiveCallTrackingGateway:
+    provider_name = "fixture"
+
+    def __init__(self) -> None:
+        self.active = 0
+        self.max_active = 0
+        self.calls: list[dict] = []
+        self.fixture = FixtureModelGateway()
+
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
+        self.calls.append(payload)
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            await asyncio.sleep(0.01)
+            return await self.fixture.generate(
+                prompt_key,
+                payload,
+                output_model,
+                call_context=call_context,
+            )
+        finally:
+            self.active -= 1
+
+
+class CriticalUnknownReviewerGateway:
+    provider_name = "fixture"
+
+    def __init__(self) -> None:
+        self.fixture = FixtureModelGateway()
+
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
+        result = await self.fixture.generate(
+            prompt_key,
+            payload,
+            output_model,
+            call_context=call_context,
+        )
+        if prompt_key != "reviewer_report_batch":
+            return result
+        for report in result.reports:
+            if report.dimension != "measurement":
+                continue
+            for review in report.candidate_reviews:
+                if review.candidate_id == "candidate-identification_first":
+                    review.verdict = "revise"
+                    review.issues.append(
+                        CriticIssue(
+                            issue_id="critical-unknown-technical",
+                            dimension="measurement",
+                            severity="critical",
+                            evidence="unregistered technical concern",
+                            why_it_matters="preserve it without guessing a repair",
+                            required_fix="do not parse this prose",
+                            return_stage="analysis_plan",
+                            repair_type="technical",
+                            threat_id="panel.future_technical_threat",
+                        )
+                    )
+                else:
+                    review.verdict = "reject"
+                    review.issues.append(
+                        CriticIssue(
+                            issue_id=f"human-block-{review.candidate_id}",
+                            dimension="measurement",
+                            severity="critical",
+                            evidence="a human-owned input is missing",
+                            why_it_matters="code cannot repair the candidate",
+                            required_fix="human decision required",
+                            return_stage="human",
+                            repair_type="human_required",
+                        )
+                    )
+        return result
+
+
+class PolicyCriticalReviewerGateway:
+    """Reproduce the repairable critical cluster review seen in Case002 r2."""
+
+    provider_name = "fixture"
+
+    def __init__(self) -> None:
+        self.fixture = FixtureModelGateway()
+
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
+        result = await self.fixture.generate(
+            prompt_key,
+            payload,
+            output_model,
+            call_context=call_context,
+        )
+        if prompt_key != "reviewer_report_batch":
+            return result
+        for report in result.reports:
+            if report.dimension != "statistical":
+                continue
+            # Deliberately flag only one of three otherwise identical frozen
+            # cluster specifications. The code-owned merge must propagate the
+            # shared invariant instead of permitting candidate shopping.
+            for review in report.candidate_reviews[:1]:
+                review.verdict = "revise"
+                review.issues.append(
+                    CriticIssue(
+                        issue_id=f"sparse-cluster-{review.candidate_id}",
+                        dimension="statistical",
+                        severity="critical",
+                        evidence="the frozen interaction cluster contains many singletons",
+                        why_it_matters="inference requires the frozen entity-cluster sensitivity",
+                        required_fix="retain the code-owned entity cluster check",
+                        return_stage="analysis_plan",
+                        repair_type="technical",
+                        threat_id="policy.entity_cluster_sensitivity",
+                    )
+                )
+        return result
 
 
 class RepairingManuscriptGateway(FullManuscriptGateway):
-    async def generate(self, prompt_key, payload, output_model):
-        if (
-            payload["section_spec"]["section_id"] == "introduction"
-            and "revision_feedback" not in payload
-        ):
-            return ManuscriptSection(
-                section_id="introduction",
-                title="引言",
-                content_markdown="现有研究多聚焦其他问题。" * 30,
-                status="generated",
-            )
-        return await super().generate(prompt_key, payload, output_model)
+    def __init__(self) -> None:
+        self.call_contexts = []
+
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
+        self.assert_writer_prompt(prompt_key)
+        self.call_contexts.append(call_context)
+        sections = []
+        for spec in payload["section_specs"]:
+            if spec["section_id"] == "introduction" and "revision_feedback" not in spec:
+                sections.append(
+                    ManuscriptSectionDraft(
+                        section_id="introduction",
+                        content_template="现有研究多聚焦其他问题。" * 30,
+                    )
+                )
+            else:
+                sections.append(self.section_draft(spec))
+        return ManuscriptSectionDraftBatch(sections=sections)
 
 
 class SecondRoundRepairingGateway(FullManuscriptGateway):
     def __init__(self) -> None:
         self.introduction_calls = 0
+        self.call_contexts = []
 
-    async def generate(self, prompt_key, payload, output_model):
-        if payload["section_spec"]["section_id"] == "introduction":
-            self.introduction_calls += 1
-            if self.introduction_calls < 3:
-                return ManuscriptSection(
-                    section_id="introduction",
-                    title="引言",
-                    content_markdown="现有研究多聚焦其他问题。" * 30,
-                    status="generated",
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
+        self.assert_writer_prompt(prompt_key)
+        self.call_contexts.append(call_context)
+        sections = []
+        for spec in payload["section_specs"]:
+            if spec["section_id"] == "introduction":
+                self.introduction_calls += 1
+                if self.introduction_calls < 3:
+                    sections.append(
+                        ManuscriptSectionDraft(
+                            section_id="introduction",
+                            content_template="现有研究多聚焦其他问题。" * 30,
+                        )
+                    )
+                    continue
+            sections.append(self.section_draft(spec))
+        return ManuscriptSectionDraftBatch(sections=sections)
+
+
+class AnchorRepairGateway(FullManuscriptGateway):
+    def __init__(
+        self,
+        bad_initial_sections: set[str],
+        *,
+        fail_first_repair: bool = False,
+        fail_all_repairs: bool = False,
+    ) -> None:
+        self.bad_initial_sections = set(bad_initial_sections)
+        self.fail_first_repair = fail_first_repair
+        self.fail_all_repairs = fail_all_repairs
+        self.calls: list[list[str]] = []
+        self.payloads: list[dict] = []
+        self.call_contexts = []
+
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
+        self.assert_writer_prompt(prompt_key)
+        section_ids = [spec["section_id"] for spec in payload["section_specs"]]
+        self.calls.append(section_ids)
+        self.payloads.append(payload)
+        self.call_contexts.append(call_context)
+        is_repair = any(
+            "revision_feedback" in spec for spec in payload["section_specs"]
+        )
+        if is_repair and (self.fail_first_repair or self.fail_all_repairs):
+            self.fail_first_repair = False
+            raise RuntimeError("targeted repair timeout")
+        sections = []
+        for spec in payload["section_specs"]:
+            section = self.section_draft(spec)
+            if not is_repair and spec["section_id"] in self.bad_initial_sections:
+                section.content_template += "\n[[STATEMENT:unknown-anchor]]"
+            sections.append(section)
+        return ManuscriptSectionDraftBatch(sections=sections)
+
+
+class ExhaustedRepairBatchGateway(FullManuscriptGateway):
+    def __init__(
+        self,
+        target_section: str,
+        repairable_section: str,
+    ) -> None:
+        self.target_section = target_section
+        self.problem_sections = {target_section, repairable_section}
+        self.calls: list[list[str]] = []
+        self.call_contexts = []
+
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
+        self.assert_writer_prompt(prompt_key)
+        section_ids = [
+            spec["section_id"] for spec in payload["section_specs"]
+        ]
+        self.calls.append(section_ids)
+        self.call_contexts.append(call_context)
+        is_repair = any(
+            "revision_feedback" in spec for spec in payload["section_specs"]
+        )
+        if is_repair and self.target_section in section_ids:
+            raise RuntimeError(
+                f"逻辑模型调用 {call_context.logical_call_id} 已达最多 3 次尝试。"
+            )
+        sections = []
+        for spec in payload["section_specs"]:
+            section = self.section_draft(spec)
+            if not is_repair and spec["section_id"] in self.problem_sections:
+                section.content_template = "现有研究多聚焦其他问题。" * 30
+            sections.append(section)
+        return ManuscriptSectionDraftBatch(sections=sections)
+
+
+class PersistentUnsafeWriterGateway(FullManuscriptGateway):
+    def __init__(self, unsafe_sections: set[str]) -> None:
+        self.unsafe_sections = set(unsafe_sections)
+        self.calls: list[list[str]] = []
+        self.call_contexts = []
+
+    async def generate(
+        self,
+        prompt_key,
+        payload,
+        output_model,
+        *,
+        call_context=None,
+    ):
+        self.assert_writer_prompt(prompt_key)
+        self.calls.append(
+            [spec["section_id"] for spec in payload["section_specs"]]
+        )
+        self.call_contexts.append(call_context)
+        return ManuscriptSectionDraftBatch(
+            sections=[
+                ManuscriptSectionDraft(
+                    section_id=spec["section_id"],
+                    content_template=(
+                        "回归结果显示未经锚点授权的方向判断。" * 12
+                        if spec["section_id"] in self.unsafe_sections
+                        else self.section_draft(spec).content_template
+                    ),
                 )
-        return await super().generate(prompt_key, payload, output_model)
+                for spec in payload["section_specs"]
+            ]
+        )
 
 
 class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
@@ -119,9 +554,9 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         self.tempdir.cleanup()
 
-    async def _to_h2(self):
+    async def _to_h2(self, preset_case_id: str = "green-finance-did"):
         run = await self.engine.create_run(
-            CreateRunRequest(preset_case_id="green-finance-did")
+            CreateRunRequest(preset_case_id=preset_case_id)
         )
         return await self.engine.decide_gate(
             run.id,
@@ -129,13 +564,27 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
             GateDecisionRequest(action="approve", idempotency_key="approve-h1"),
         )
 
-    async def _to_h3(self):
-        run = await self._to_h2()
+    async def _to_h3(self, preset_case_id: str = "green-finance-did"):
+        run = await self._to_h2(preset_case_id)
         return await self.engine.decide_gate(
             run.id,
             "H2",
             GateDecisionRequest(action="approve", idempotency_key="approve-h2"),
         )
+
+    async def test_explicit_v2_engine_builds_the_frozen_split_budget(self) -> None:
+        engine = WorkflowEngine(
+            self.repository,
+            model_call_budget_mode="v2",
+        )
+        run = await engine.create_run(
+            CreateRunRequest(preset_case_id="green-finance-did")
+        )
+        snapshot = engine._model_budget(run).snapshot()
+        self.assertEqual(snapshot["budget_mode"], "v2")
+        self.assertEqual(snapshot["provider_attempt_ceiling"], 40)
+        self.assertEqual(snapshot["logical_call_ceiling"], 20)
+        self.assertEqual(snapshot["group_counting_unit"], "logical_call")
 
     async def test_fixture_flow_stops_at_each_gate_and_completes_plan_only(self) -> None:
         run = await self.engine.create_run(
@@ -423,6 +872,297 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(contract.approved_plan, selected_plan)
         self.assertEqual(run.decisions[-1].selected_candidate_id, selected)
 
+    async def test_arena_keeps_only_viable_candidate_with_unknown_critical(
+        self,
+    ) -> None:
+        with patch.object(
+            self.engine,
+            "_reviewer_gateway",
+            return_value=CriticalUnknownReviewerGateway(),
+        ):
+            run = await self._to_h2("esg-panel")
+
+        arena = DesignArena.model_validate(run.artifacts["design_arena"]["payload"])
+        self.assertEqual(
+            arena.recommended_candidate_ids,
+            ["candidate-identification_first"],
+        )
+        self.assertEqual(
+            arena.provisional_candidate_id,
+            "candidate-identification_first",
+        )
+        selected = next(
+            candidate
+            for candidate in arena.candidates
+            if candidate.candidate_id == arena.provisional_candidate_id
+        )
+        placeholder = next(
+            step
+            for step in selected.plan.robustness_tests
+            if step.threat_id == "panel.future_technical_threat"
+        )
+        self.assertTrue(placeholder.required_for_admission)
+        self.assertIn("not_executable", placeholder.not_executable_reason or "")
+        critic = CriticReport.model_validate(
+            run.artifacts["critic_report"]["payload"]
+        )
+        self.assertEqual(critic.verdict, "revise")
+
+        advanced = await self.engine.decide_gate(
+            run.id,
+            "H2",
+            GateDecisionRequest(
+                action="approve",
+                selected_candidate_id="candidate-identification_first",
+                idempotency_key="critical-unknown-arena-h2",
+            ),
+        )
+        self.assertEqual(
+            (advanced.status, advanced.current_gate),
+            ("waiting_human", "H3"),
+        )
+        self.assertIn("formal_research_contract", advanced.artifacts)
+
+    async def test_h2_refresh_is_idempotent_with_unknown_reviewer_threat(self) -> None:
+        run = await self._to_h2("esg-panel")
+        arena = DesignArena.model_validate(run.artifacts["design_arena"]["payload"])
+        selected = arena.provisional_candidate_id
+        self.assertIsNotNone(selected)
+        candidate_with_unknown = next(
+            candidate
+            for candidate in arena.candidates
+            if candidate.candidate_id != selected
+        )
+        review = next(
+            review
+            for report in arena.reviewer_reports
+            for review in report.candidate_reviews
+            if review.candidate_id == candidate_with_unknown.candidate_id
+        )
+        review.issues.append(
+            CriticIssue(
+                issue_id="unknown-reviewer-issue",
+                dimension="measurement",
+                severity="minor",
+                evidence="the threat is not in the frozen registry",
+                why_it_matters="the issue must remain visible but not executable",
+                required_fix="guess alternative_exposure=forbidden",
+                return_stage="analysis_plan",
+                repair_type="scientific",
+                threat_id="panel.unregistered_threat",
+            )
+        )
+        self.engine._put_artifact(run, "design_arena", arena)
+        self.repository.save(run, expected_version=run.version)
+
+        refreshed = await self.engine.decide_gate(
+            run.id,
+            "H2",
+            GateDecisionRequest(
+                action="approve",
+                selected_candidate_id=selected,
+                idempotency_key="unknown-threat-refresh",
+            ),
+        )
+        self.assertEqual(
+            (refreshed.status, refreshed.current_gate),
+            ("waiting_human", "H2"),
+        )
+        refreshed_arena = DesignArena.model_validate(
+            refreshed.artifacts["design_arena"]["payload"]
+        )
+        refreshed_candidate = next(
+            candidate
+            for candidate in refreshed_arena.candidates
+            if candidate.candidate_id == candidate_with_unknown.candidate_id
+        )
+        placeholder = next(
+            step
+            for step in refreshed_candidate.plan.robustness_tests
+            if step.threat_id == "panel.unregistered_threat"
+        )
+        self.assertEqual(placeholder.source_issue_ids, ["unknown-reviewer-issue"])
+        self.assertTrue(placeholder.required_for_admission)
+        self.assertIn("not_executable", placeholder.not_executable_reason or "")
+        self.assertNotIn("alternative_exposure", str(placeholder.parameters))
+
+        completed = await self.engine.decide_gate(
+            refreshed.id,
+            "H2",
+            GateDecisionRequest(
+                action="approve",
+                selected_candidate_id=selected,
+                idempotency_key="unknown-threat-approve",
+            ),
+        )
+        self.assertEqual(
+            (completed.status, completed.current_gate),
+            ("waiting_human", "H3"),
+        )
+        self.assertIn("formal_research_contract", completed.artifacts)
+
+    async def test_h2_keeps_critical_technical_unknown_threat_as_placeholder(
+        self,
+    ) -> None:
+        run = await self._to_h2("esg-panel")
+        arena = DesignArena.model_validate(run.artifacts["design_arena"]["payload"])
+        selected = arena.provisional_candidate_id
+        self.assertIsNotNone(selected)
+        selected_review = next(
+            review
+            for report in arena.reviewer_reports
+            for review in report.candidate_reviews
+            if review.candidate_id == selected
+        )
+        selected_review.verdict = "revise"
+        selected_review.issues.append(
+            CriticIssue(
+                issue_id="critical-technical-unknown",
+                dimension="measurement",
+                severity="critical",
+                evidence="the model emitted an unregistered technical threat",
+                why_it_matters="the issue must remain visible without blocking H2",
+                required_fix="do not infer execution parameters from this prose",
+                return_stage="analysis_plan",
+                repair_type="technical",
+                threat_id="panel.future_technical_threat",
+            )
+        )
+        self.engine._put_artifact(run, "design_arena", arena)
+        self.repository.save(run, expected_version=run.version)
+
+        refreshed = await self.engine.decide_gate(
+            run.id,
+            "H2",
+            GateDecisionRequest(
+                action="approve",
+                selected_candidate_id=selected,
+                idempotency_key="critical-technical-refresh",
+            ),
+        )
+        self.assertEqual(
+            (refreshed.status, refreshed.current_gate),
+            ("waiting_human", "H2"),
+        )
+        refreshed_arena = DesignArena.model_validate(
+            refreshed.artifacts["design_arena"]["payload"]
+        )
+        refreshed_candidate = next(
+            candidate
+            for candidate in refreshed_arena.candidates
+            if candidate.candidate_id == selected
+        )
+        placeholder = next(
+            step
+            for step in refreshed_candidate.plan.robustness_tests
+            if step.threat_id == "panel.future_technical_threat"
+        )
+        self.assertTrue(placeholder.required_for_admission)
+        self.assertIn("not_executable", placeholder.not_executable_reason or "")
+
+        completed = await self.engine.decide_gate(
+            refreshed.id,
+            "H2",
+            GateDecisionRequest(
+                action="approve",
+                selected_candidate_id=selected,
+                idempotency_key="critical-technical-approve",
+            ),
+        )
+        self.assertEqual(
+            (completed.status, completed.current_gate),
+            ("waiting_human", "H3"),
+        )
+        critic = CriticReport.model_validate(
+            completed.artifacts["critic_report"]["payload"]
+        )
+        self.assertEqual(critic.verdict, "revise")
+        self.assertIn("formal_research_contract", completed.artifacts)
+
+    def test_reviewer_critical_issue_uses_code_owned_blocking_rules(
+        self,
+    ) -> None:
+        technical = CriticIssue(
+            issue_id="critical-technical",
+            dimension="measurement",
+            severity="critical",
+            evidence="unregistered technical concern",
+            why_it_matters="it must be preserved as a placeholder",
+            required_fix="do not parse this prose",
+            return_stage="analysis_plan",
+            repair_type="technical",
+            threat_id="panel.future_technical_threat",
+        )
+        human_required = technical.model_copy(
+            update={
+                "issue_id": "critical-human",
+                "repair_type": "human_required",
+                "return_stage": "human",
+            }
+        )
+        registered = technical.model_copy(
+            update={
+                "issue_id": "critical-registered",
+                "threat_id": THREAT_FE_CLUSTER_FEASIBILITY,
+            }
+        )
+        scientific = technical.model_copy(
+            update={
+                "issue_id": "critical-policy-scientific",
+                "repair_type": "scientific",
+                "threat_id": "policy.entity_cluster_sensitivity",
+            }
+        )
+
+        self.assertFalse(
+            _is_reviewer_issue_blocking_design(
+                technical,
+                "panel_association",
+            )
+        )
+        self.assertTrue(
+            _is_reviewer_issue_blocking_design(
+                human_required,
+                "panel_association",
+            )
+        )
+        self.assertTrue(
+            _is_reviewer_issue_blocking_design(
+                registered,
+                "panel_association",
+            )
+        )
+        self.assertFalse(
+            _is_reviewer_issue_blocking_design(
+                technical,
+                "policy_causal",
+            )
+        )
+        self.assertFalse(
+            _is_reviewer_issue_blocking_design(
+                scientific,
+                "policy_causal",
+            )
+        )
+        self.assertTrue(
+            _is_reviewer_issue_blocking_design(
+                human_required,
+                "policy_causal",
+            )
+        )
+        policy_replication_boundary = human_required.model_copy(
+            update={
+                "issue_id": "critical-policy-replication-boundary",
+                "threat_id": "policy.independent_replication",
+            }
+        )
+        self.assertFalse(
+            _is_reviewer_issue_blocking_design(
+                policy_replication_boundary,
+                "policy_causal",
+            )
+        )
+
     def test_reproduction_comparison_ignores_run_ids_but_not_results(self) -> None:
         primary = ResearchRun(
             research_run_id="primary",
@@ -457,6 +1197,427 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(route_step.status, "succeeded")
         self.assertEqual(route_step.prompts[0].role, "code")
         self.assertEqual(run.artifacts["method_route"]["payload"]["route_status"], "routed")
+
+    def test_external_policy_plan_binds_code_owned_executable_steps(self) -> None:
+        package = ResearchPackage(
+            case_id="policy-normalizer",
+            title="policy normalizer",
+            research_question="policy effect?",
+            hypotheses=[{"hypothesis_id": "H1", "statement": "effect"}],
+            variables=[
+                {"name": "firm", "role": "id"},
+                {"name": "year", "role": "time"},
+                {"name": "group", "role": "exposure"},
+                {"name": "y", "role": "outcome"},
+                {"name": "y_alt", "role": "outcome"},
+                {"name": "x", "role": "control"},
+            ],
+            dataset_refs=[
+                {
+                    "dataset_id": "policy-data",
+                    "filename": "policy.csv",
+                    "role": "main",
+                    "sha256": "a" * 64,
+                    "size_bytes": 1,
+                }
+            ],
+            design_envelope=DesignEnvelope(
+                benchmark_track="reproduction_aligned",
+                research_goal="causal",
+            ),
+            policy_design={
+                "policy_date": "2007-07",
+                "group_field": "group",
+                "time_field": "year",
+                "fixed_effects": ["firm", "year"],
+                "cluster_fields": ["firm", "year"],
+                "event_reference_year": 2006,
+                "event_years": [2005, 2007, 2008],
+                "event_remote_pre_years": [2004],
+            },
+        )
+        profile = DataProfile(
+            profile_execution_status="succeeded",
+            data_structure="panel",
+            unit_of_observation="firm-year",
+            entity_key=["firm"],
+            time_key="year",
+            readiness="ready",
+        )
+        plan = AnalysisPlan(
+            plan_id="draft-policy",
+            plan_version=1,
+            method_family="policy_causal",
+            design_only=True,
+            estimands=[],
+            sample_rules=[],
+            variable_construction=[],
+            baseline_models=[],
+            diagnostics=[],
+            robustness_tests=[],
+            falsification_tests=[],
+            mechanism_tests=[],
+            heterogeneity_tests=[],
+            identification_assumptions=[],
+            alternative_explanations=[],
+            failure_conditions=[],
+            stop_conditions=[],
+            required_data_fields=[],
+            unsupported_requested_analyses=[],
+        )
+
+        normalized = _normalize_external_policy_candidate_plan(
+            plan,
+            profile,
+            package,
+            "external",
+            "identification_first",
+        )
+
+        self.assertFalse(normalized.design_only)
+        self.assertEqual(normalized.baseline_models[0].outcome, "y")
+        self.assertEqual(normalized.baseline_models[0].controls, ["x"])
+        self.assertEqual(normalized.check_registry_version, "policy-did-v2")
+        self.assertEqual(
+            {item.step_id for item in normalized.falsification_tests},
+            {
+                "check-policy-event-study",
+                "check-policy-placebo-time",
+                "check-policy-permutation-placebo",
+            },
+        )
+        self.assertTrue(
+            {
+                "check-policy-group-fixed-pre",
+                "check-policy-group-stable-only",
+                "check-policy-cluster-entity",
+            }.issubset(
+                {item.step_id for item in normalized.robustness_tests}
+            )
+        )
+        policy_contract = normalized.baseline_models[0].parameters["policy_design"]
+        self.assertEqual(policy_contract["placebo_repetitions"], 500)
+        self.assertEqual(
+            policy_contract["permutation_scheme"],
+            "assignment_unit_label",
+        )
+        self.assertEqual(policy_contract["permutation_unit_field"], "firm")
+        self.assertEqual(
+            policy_contract["group_assignment_mode"],
+            "observed_time_varying",
+        )
+
+        direct = _normalize_external_policy_candidate_plan(
+            plan,
+            profile,
+            package,
+            "external",
+            "direct_baseline",
+        )
+        self.assertEqual(
+            direct.baseline_models[0].controls,
+            ["x"],
+            "reproduction-aligned candidates must all preserve frozen controls",
+        )
+        self.assertEqual(
+            direct.baseline_models[0].parameters["policy_design"][
+                "event_remote_pre_years"
+            ],
+            [2004],
+        )
+        self.assertEqual(
+            direct.baseline_models[0].parameters["policy_design"][
+                "event_term_scaling"
+            ],
+            "binary_group_year_contrast",
+        )
+
+    async def test_policy_critical_cluster_risk_reaches_h2_with_entity_sensitivity(
+        self,
+    ) -> None:
+        package = ResearchPackage(
+            case_id="policy-r2-regression",
+            title="policy r2 regression",
+            research_question="policy effect?",
+            hypotheses=[{"hypothesis_id": "H1", "statement": "effect"}],
+            variables=[
+                {"name": "firm", "role": "id"},
+                {"name": "year", "role": "time"},
+                {"name": "group", "role": "exposure"},
+                {"name": "y", "role": "outcome"},
+                {"name": "y_alt", "role": "outcome"},
+                {"name": "x", "role": "control"},
+                {"name": "industry", "role": "cluster"},
+            ],
+            dataset_refs=[
+                {
+                    "dataset_id": "policy-r2-data",
+                    "filename": "policy.csv",
+                    "role": "main",
+                    "sha256": "a" * 64,
+                    "size_bytes": 1,
+                }
+            ],
+            design_envelope=DesignEnvelope(
+                benchmark_track="reproduction_aligned",
+                research_goal="causal",
+            ),
+            policy_design={
+                "policy_date": "2007-07",
+                "group_field": "group",
+                "time_field": "year",
+                "fixed_effects": ["firm", "year"],
+                "cluster_fields": ["industry", "year"],
+                "event_reference_year": 2006,
+                "event_years": [2005, 2007, 2008],
+            },
+        )
+        profile = DataProfile(
+            profile_execution_status="succeeded",
+            data_structure="panel",
+            unit_of_observation="firm-year",
+            entity_key=["firm"],
+            time_key="year",
+            readiness="ready",
+        )
+        route = MethodRoute(
+            route_status="routed",
+            research_goal="causal",
+            primary_route="policy_causal",
+            route_reason=["frozen policy DID"],
+            required_assumptions=[],
+            testable_assumptions=[],
+            untestable_assumptions=[],
+            alternative_routes=[],
+            rejected_routes=[],
+            missing_information=[],
+        )
+        draft = AnalysisPlan(
+            plan_id="draft-policy-r2",
+            plan_version=1,
+            method_family="policy_causal",
+            design_only=True,
+            estimands=[],
+            sample_rules=[],
+            variable_construction=[],
+            baseline_models=[],
+            diagnostics=[],
+            robustness_tests=[],
+            falsification_tests=[],
+            mechanism_tests=[],
+            heterogeneity_tests=[],
+            identification_assumptions=[],
+            alternative_explanations=[],
+            failure_conditions=[],
+            stop_conditions=[],
+            required_data_fields=[],
+            unsupported_requested_analyses=[],
+        )
+        candidates = []
+        for strategy in (
+            "direct_baseline",
+            "identification_first",
+            "measurement_robustness",
+        ):
+            candidate_id = f"candidate-{strategy}"
+            plan = _normalize_external_policy_candidate_plan(
+                draft.model_copy(update={"plan_id": f"plan-{strategy}"}),
+                profile,
+                package,
+                "external",
+                strategy,
+            )
+            candidates.append(
+                DesignCandidate(
+                    candidate_id=candidate_id,
+                    strategy=strategy,
+                    rationale=strategy,
+                    plan=plan,
+                    probe_report=ProbeReport(
+                        report_id=f"probe-{candidate_id}",
+                        candidate_id=candidate_id,
+                        verdict="warn",
+                        checks=[
+                            ProbeCheck(
+                                check_id="policy_cluster_support",
+                                status="warn",
+                                evidence="many frozen interaction clusters are singletons",
+                            )
+                        ],
+                        executor_ready=True,
+                    ),
+                )
+            )
+        candidate_set = CandidateDesignSet(
+            candidate_set_id="policy-r2-candidates",
+            candidates=candidates,
+        )
+        state = await self.engine.create_run(
+            CreateRunRequest(preset_case_id="green-finance-did")
+        )
+
+        with patch.object(
+            self.engine,
+            "_reviewer_gateway",
+            return_value=PolicyCriticalReviewerGateway(),
+        ):
+            await self.engine._review_design_arena(
+                state,
+                package,
+                profile,
+                route,
+                package.design_envelope,
+                candidate_set,
+            )
+
+        self.assertEqual((state.status, state.current_gate), ("waiting_human", "H2"))
+        arena = DesignArena.model_validate(state.artifacts["design_arena"]["payload"])
+        self.assertEqual(
+            set(arena.recommended_candidate_ids),
+            {candidate.candidate_id for candidate in candidates},
+        )
+        for candidate in arena.candidates:
+            self.assertEqual(candidate.plan.baseline_models[0].controls, ["x"])
+            entity_cluster = next(
+                step
+                for step in candidate.plan.robustness_tests
+                if step.threat_id == "policy.entity_cluster_sensitivity"
+            )
+            self.assertTrue(entity_cluster.required_for_admission)
+        statistical = next(
+            report
+            for report in arena.reviewer_reports
+            if report.dimension == "statistical"
+        )
+        for review in statistical.candidate_reviews:
+            self.assertIn(
+                "policy.entity_cluster_sensitivity",
+                {issue.threat_id for issue in review.issues},
+            )
+        critic = CriticReport.model_validate(state.artifacts["critic_report"]["payload"])
+        self.assertEqual(critic.verdict, "revise")
+        self.assertTrue(
+            any(
+                "disposition=delegated_to_frozen_test_dag_and_claim_gate" in risk
+                for risk in critic.remaining_risks
+            )
+        )
+
+    def test_blocked_arena_critic_aggregates_all_candidates(self) -> None:
+        technical = CriticIssue(
+            issue_id="technical-a",
+            dimension="statistical",
+            severity="critical",
+            evidence="repairable",
+            why_it_matters="risk",
+            required_fix="frozen check",
+            return_stage="analysis_plan",
+            repair_type="technical",
+            threat_id="policy.entity_cluster_sensitivity",
+        )
+        human = technical.model_copy(
+            update={
+                "issue_id": "human-b",
+                "repair_type": "human_required",
+                "return_stage": "human",
+            }
+        )
+        candidates = [
+            DesignCandidate(
+                candidate_id=f"candidate-{suffix}",
+                strategy=strategy,
+                rationale=strategy,
+                plan=AnalysisPlan(
+                    plan_id=f"plan-{suffix}",
+                    plan_version=1,
+                    method_family="policy_causal",
+                    design_only=True,
+                    estimands=[],
+                    sample_rules=[],
+                    variable_construction=[],
+                    baseline_models=[],
+                    diagnostics=[],
+                    robustness_tests=[],
+                    falsification_tests=[],
+                    mechanism_tests=[],
+                    heterogeneity_tests=[],
+                    identification_assumptions=[],
+                    alternative_explanations=[],
+                    failure_conditions=[],
+                    stop_conditions=[],
+                    required_data_fields=[],
+                    unsupported_requested_analyses=[],
+                ),
+                probe_report=ProbeReport(
+                    report_id=f"probe-{suffix}",
+                    candidate_id=f"candidate-{suffix}",
+                    verdict="warn",
+                    checks=[],
+                    executor_ready=True,
+                ),
+            )
+            for suffix, strategy in (
+                ("a", "direct_baseline"),
+                ("b", "identification_first"),
+            )
+        ]
+        arena = DesignArena(
+            arena_id="blocked-arena",
+            candidates=candidates,
+            reviewer_reports=[
+                {
+                    "report_id": "blocked-statistical",
+                    "dimension": "statistical",
+                    "reviewer_policy": "fixture",
+                    "candidate_reviews": [
+                        {
+                            "candidate_id": "candidate-a",
+                            "verdict": "reject",
+                            "issues": [technical],
+                        },
+                        {
+                            "candidate_id": "candidate-b",
+                            "verdict": "revise",
+                            "issues": [human],
+                        },
+                    ],
+                }
+            ],
+            recommended_candidate_ids=[],
+            provisional_candidate_id=None,
+            selection_rationale=[],
+        )
+
+        summary = self.engine._critic_report_for_blocked_arena(arena)
+
+        self.assertEqual(summary.report_id, "arena-critic-all-candidates")
+        self.assertEqual(summary.verdict, "blocked")
+        self.assertEqual({issue.issue_id for issue in summary.issues}, {"technical-a", "human-b"})
+        rendered = "\n".join(summary.remaining_risks)
+        self.assertIn("candidate-a", rendered)
+        self.assertIn("Reviewer reject=statistical", rendered)
+        self.assertIn("candidate-b", rendered)
+        self.assertIn("blocking issues=human-b", rendered)
+
+    def test_policy_reviewer_prompt_lists_the_code_owned_threat_registry(self) -> None:
+        prompt = get_prompt("reviewer_report_batch")
+        self.assertEqual(prompt.version, "1.1.2")
+        system = prompt.system
+        for threat_id in (
+            "policy.group_time_support",
+            "policy.event_study_pretrends",
+            "policy.placebo_timing",
+            "policy.group_fixed_last_pre",
+            "policy.group_stable_entities_only",
+            "policy.entity_cluster_sensitivity",
+            "policy.permutation_placebo",
+            "policy.alternative_outcome",
+            "policy.independent_replication",
+        ):
+            self.assertIn(threat_id, system)
+        self.assertIn("repair_type=technical/scientific", system)
+        self.assertIn("analysis-ready", system)
+        self.assertIn("缺少更上游的原始数据清洗或 ETL 日志", system)
 
     async def test_failed_design_retry_reuses_completed_candidates(self) -> None:
         run = await self._to_h2()
@@ -501,19 +1662,227 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
             ),
             completed_design_steps,
         )
-        self.assertTrue(
-            any(step.node_id == "design_candidate_reuse" for step in run.steps)
+        self.assertEqual(
+            len(
+                [
+                    step
+                    for step in run.steps
+                    if step.node_id.startswith(f"{design_node}_batch_")
+                    and step.status == "succeeded"
+                ]
+            ),
+            2,
         )
 
-    async def test_design_arena_continues_when_one_candidate_call_fails(self) -> None:
+    async def test_design_retry_only_calls_missing_candidate_batch(self) -> None:
+        gateway = FailOnceBatchGateway(
+            "candidate_plan_batch",
+            "candidate_strategies",
+            ["measurement_robustness"],
+        )
+        with patch.object(self.engine, "_gateway", return_value=gateway):
+            run = await self._to_h2()
+            self.assertEqual((run.status, run.current_gate), ("failed", None))
+            run = await self.engine.retry_design(run.id)
+
+        self.assertEqual(
+            (run.status, run.current_gate),
+            ("waiting_human", "H2"),
+            msg=run.last_error,
+        )
+        candidate_calls = [
+            call
+            for call in gateway.calls
+            if call["prompt_key"] == "candidate_plan_batch"
+        ]
+        direct_calls = [
+            call
+            for call in candidate_calls
+            if call["payload"]["candidate_strategies"]
+            == ["direct_baseline", "identification_first"]
+        ]
+        missing_calls = [
+            call
+            for call in candidate_calls
+            if call["payload"]["candidate_strategies"]
+            == ["measurement_robustness"]
+        ]
+        self.assertEqual(len(direct_calls), 1)
+        self.assertEqual(len(missing_calls), 2)
+        self.assertEqual(
+            missing_calls[0]["call_context"].logical_call_id,
+            missing_calls[1]["call_context"].logical_call_id,
+        )
+        self.assertEqual(
+            missing_calls[0]["call_context"].logical_call_id,
+            f"{run.id}:design_policy_causal_batch_2",
+        )
+
+    async def test_design_retry_only_calls_missing_reviewer_batch(self) -> None:
+        gateway = FailOnceBatchGateway(
+            "reviewer_report_batch",
+            "dimensions",
+            ["causal", "statistical"],
+        )
+        with patch.object(
+            self.engine,
+            "_reviewer_gateway",
+            return_value=gateway,
+        ):
+            run = await self._to_h2()
+            self.assertEqual((run.status, run.current_gate), ("failed", None))
+            run = await self.engine.retry_design(run.id)
+
+        self.assertEqual(
+            (run.status, run.current_gate),
+            ("waiting_human", "H2"),
+            msg=run.last_error,
+        )
+        measurement_calls = [
+            call
+            for call in gateway.calls
+            if call["payload"]["dimensions"]
+            == ["measurement", "reproducibility"]
+        ]
+        causal_calls = [
+            call
+            for call in gateway.calls
+            if call["payload"]["dimensions"] == ["causal", "statistical"]
+        ]
+        self.assertEqual(len(measurement_calls), 1)
+        self.assertEqual(len(causal_calls), 2)
+        self.assertEqual(
+            causal_calls[0]["call_context"].logical_call_id,
+            causal_calls[1]["call_context"].logical_call_id,
+        )
+        self.assertEqual(
+            causal_calls[0]["call_context"].logical_call_id,
+            f"{run.id}:design_reviewer_batch_2",
+        )
+
+    async def test_qwen_reviewer_batches_are_serial_without_network(self) -> None:
+        run = await self._to_h2()
+        package = self.engine._artifact(run, "research_package", ResearchPackage)
+        profile = self.engine._artifact(run, "data_profile", DataProfile)
+        route = self.engine._artifact(run, "method_route", MethodRoute)
+        envelope = self.engine._artifact(run, "design_envelope", DesignEnvelope)
+        candidate_set = self.engine._artifact(
+            run,
+            "candidate_design_set",
+            CandidateDesignSet,
+        )
+        run.steps = [
+            step
+            for step in run.steps
+            if not step.node_id.startswith("design_reviewer_batch_")
+            and not step.node_id.startswith("critic_")
+        ]
+        run.model_provider = "qwen"
+        gateway = ActiveCallTrackingGateway()
+
+        with patch.object(
+            self.engine,
+            "_reviewer_gateway",
+            return_value=gateway,
+        ):
+            await self.engine._review_design_arena(
+                run,
+                package,
+                profile,
+                route,
+                envelope,
+                candidate_set,
+            )
+
+        self.assertEqual(len(gateway.calls), 2)
+        self.assertEqual(gateway.max_active, 1)
+
+    async def test_qwen_reviewer_batches_fail_fast_without_starting_sibling(
+        self,
+    ) -> None:
+        run = await self._to_h2()
+        package = self.engine._artifact(run, "research_package", ResearchPackage)
+        profile = self.engine._artifact(run, "data_profile", DataProfile)
+        route = self.engine._artifact(run, "method_route", MethodRoute)
+        envelope = self.engine._artifact(run, "design_envelope", DesignEnvelope)
+        candidate_set = self.engine._artifact(
+            run,
+            "candidate_design_set",
+            CandidateDesignSet,
+        )
+        run.steps = [
+            step
+            for step in run.steps
+            if not step.node_id.startswith("design_reviewer_batch_")
+            and not step.node_id.startswith("critic_")
+        ]
+        run.model_provider = "qwen"
+        gateway = FailOnceBatchGateway(
+            "reviewer_report_batch",
+            "dimensions",
+            ["measurement", "reproducibility"],
+        )
+
+        with (
+            patch.object(
+                self.engine,
+                "_reviewer_gateway",
+                return_value=gateway,
+            ),
+            self.assertRaisesRegex(RuntimeError, "fixture batch failure"),
+        ):
+            await self.engine._review_design_arena(
+                run,
+                package,
+                profile,
+                route,
+                envelope,
+                candidate_set,
+            )
+
+        self.assertEqual(len(gateway.calls), 1)
+        self.assertEqual(
+            gateway.calls[0]["payload"]["dimensions"],
+            ["measurement", "reproducibility"],
+        )
+
+    async def test_qwen_design_retry_rejects_incomplete_receipt_evidence(self) -> None:
+        gateway = FailOnceBatchGateway(
+            "candidate_plan_batch",
+            "candidate_strategies",
+            ["measurement_robustness"],
+        )
+        with patch.object(self.engine, "_gateway", return_value=gateway):
+            run = await self._to_h2()
+        self.assertEqual((run.status, run.current_gate), ("failed", None))
+        run.model_provider = "qwen"
+        self.engine._put_artifact(
+            run,
+            "model_usage",
+            {
+                "llm_calls": 1,
+                "call_receipts": [],
+            },
+        )
+        run = self.repository.save(run, expected_version=run.version)
+
+        with self.assertRaisesRegex(
+            WorkflowTransitionError,
+            "receipt 数量不一致",
+        ):
+            await self.engine.retry_design(run.id)
+
+    async def test_design_arena_blocks_when_one_required_candidate_batch_fails(
+        self,
+    ) -> None:
         original_llm_step = self.engine._llm_step
 
         async def fail_one_candidate(*args, **kwargs):
             prompt_key = args[2]
             payload = args[3]
             if (
-                prompt_key == "analysis_design"
-                and payload["candidate_strategy"] == "direct_baseline"
+                prompt_key == "candidate_plan_batch"
+                and "direct_baseline" in payload["candidate_strategies"]
             ):
                 raise RuntimeError("candidate timeout")
             return await original_llm_step(*args, **kwargs)
@@ -521,13 +1890,10 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.engine, "_llm_step", side_effect=fail_one_candidate):
             run = await self._to_h2()
 
-        self.assertEqual((run.status, run.current_gate), ("waiting_human", "H2"))
-        candidates = run.artifacts["candidate_design_set"]["payload"]["candidates"]
-        self.assertEqual(len(candidates), 2)
-        self.assertNotIn(
-            "candidate-direct_baseline",
-            {candidate["candidate_id"] for candidate in candidates},
-        )
+        self.assertEqual((run.status, run.current_gate), ("failed", None))
+        self.assertTrue(run.current_node_id.startswith("design_policy_causal"))
+        self.assertIn("candidate timeout", run.last_error or "")
+        self.assertNotIn("candidate_design_set", run.artifacts)
 
     def test_explicit_mechanism_goal_wins_over_incidental_index_word(self) -> None:
         package = ResearchPackage(
@@ -568,6 +1934,70 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(route.primary_route, "mechanism_boundary")
         self.assertEqual(route.research_goal, "mechanism")
 
+    def test_enterprise_mechanism_check_targets_only_declared_mechanism_claims(self) -> None:
+        package = ResearchPackage(
+            case_id="mechanism-scope",
+            title="机制作用域",
+            research_question="x 与 y 的关联边界是什么？",
+            hypotheses=[
+                {"hypothesis_id": "H1", "statement": "x 与 y 存在主关联。"},
+                {
+                    "hypothesis_id": "H2",
+                    "statement": "m 可能刻画关联边界。",
+                    "mechanism": "m 是预先声明的机制边界。",
+                },
+            ],
+            variables=[
+                {"name": "firm", "role": "id"},
+                {"name": "year", "role": "time"},
+                {"name": "y", "role": "outcome"},
+                {"name": "x", "role": "exposure"},
+                {"name": "m", "role": "mediator"},
+            ],
+        )
+        plan = AnalysisPlan(
+            plan_id="mechanism-scope-plan",
+            plan_version=1,
+            method_family="mechanism_boundary",
+            design_only=False,
+            estimands=[],
+            sample_rules=[],
+            variable_construction=[],
+            baseline_models=[
+                ModelSpec(
+                    step_id="baseline",
+                    name="baseline",
+                    rationale="frozen baseline",
+                    estimator="PanelOLS",
+                    outcome="y",
+                    treatments_or_exposures=["x"],
+                    fixed_effects=["firm", "year"],
+                    standard_error_strategy="clustered by firm",
+                )
+            ],
+            diagnostics=[],
+            robustness_tests=[],
+            falsification_tests=[],
+            mechanism_tests=[],
+            heterogeneity_tests=[],
+            identification_assumptions=[],
+            alternative_explanations=[],
+            failure_conditions=[],
+            stop_conditions=[],
+            required_data_fields=["firm", "year", "y", "x", "m"],
+            unsupported_requested_analyses=[],
+        )
+
+        compiled = self.engine._compile_enterprise_panel_plan(plan, package, [])
+        mechanism = next(
+            item
+            for item in compiled.mechanism_tests
+            if item.threat_id == THREAT_MECHANISM_INTERACTION_BOUNDARY
+        )
+
+        self.assertEqual(mechanism.target_claim_ids, ["claim-H2"])
+        self.assertNotIn("claim-H1", mechanism.target_claim_ids)
+
     def test_analysis_design_prompt_distinguishes_model_and_planned_steps(self) -> None:
         prompt = get_prompt("analysis_design")
 
@@ -576,6 +2006,163 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("必须严格使用 PlannedStep", prompt.system)
         self.assertIn("具体设置必须放入 parameters", prompt.system)
         self.assertIn("其余每个计划类别最多 1 个最关键步骤", prompt.system)
+
+    def test_candidate_fingerprint_ignores_prose_but_tracks_execution(self) -> None:
+        plan = AnalysisPlan(
+            plan_id="candidate-a",
+            plan_version=1,
+            method_family="panel_association",
+            design_only=False,
+            estimands=[],
+            sample_rules=[],
+            variable_construction=[],
+            baseline_models=[
+                ModelSpec(
+                    step_id="baseline-a",
+                    name="文字名称 A",
+                    rationale="文字理由 A",
+                    estimator="PanelOLS",
+                    outcome="y",
+                    treatments_or_exposures=["x"],
+                    fixed_effects=["firm", "year"],
+                    standard_error_strategy="clustered by firm",
+                )
+            ],
+            diagnostics=[],
+            robustness_tests=[],
+            falsification_tests=[],
+            mechanism_tests=[],
+            heterogeneity_tests=[],
+            identification_assumptions=["说明文字 A"],
+            alternative_explanations=[],
+            failure_conditions=[],
+            stop_conditions=[],
+            required_data_fields=["firm", "year", "y", "x"],
+            unsupported_requested_analyses=[],
+        )
+        prose_only = plan.model_copy(
+            update={
+                "plan_id": "candidate-b",
+                "identification_assumptions": ["完全不同的说明文字 B"],
+                "baseline_models": [
+                    plan.baseline_models[0].model_copy(
+                        update={
+                            "step_id": "baseline-b",
+                            "name": "文字名称 B",
+                            "rationale": "文字理由 B",
+                        }
+                    )
+                ],
+            }
+        )
+        executable_change = prose_only.model_copy(
+            update={
+                "baseline_models": [
+                    prose_only.baseline_models[0].model_copy(
+                        update={"standard_error_strategy": "heteroskedastic"}
+                    )
+                ]
+            }
+        )
+
+        self.assertEqual(
+            _plan_executable_fingerprint(plan),
+            _plan_executable_fingerprint(prose_only),
+        )
+        self.assertNotEqual(
+            _plan_executable_fingerprint(plan),
+            _plan_executable_fingerprint(executable_change),
+        )
+
+    def test_external_panel_candidate_execution_fields_are_code_owned(self) -> None:
+        plan = AnalysisPlan(
+            plan_id="external-candidate",
+            plan_version=1,
+            method_family="mechanism_boundary",
+            design_only=True,
+            estimands=[],
+            sample_rules=[],
+            variable_construction=[],
+            baseline_models=[
+                ModelSpec(
+                    step_id="baseline",
+                    name="baseline",
+                    rationale="frozen",
+                    estimator="PanelOLS",
+                    outcome="y",
+                    treatments_or_exposures=["x"],
+                    fixed_effects=["S", "YEAR"],
+                    standard_error_strategy="cluster_by_S",
+                )
+            ],
+            diagnostics=[],
+            robustness_tests=[],
+            falsification_tests=[],
+            mechanism_tests=[],
+            heterogeneity_tests=[],
+            identification_assumptions=[],
+            alternative_explanations=[],
+            failure_conditions=[],
+            stop_conditions=[],
+            required_data_fields=["S", "YEAR", "y", "x"],
+            unsupported_requested_analyses=[],
+        )
+        profile = DataProfile(
+            profile_execution_status="succeeded",
+            data_structure="panel",
+            unit_of_observation="firm-year",
+            entity_key=["S"],
+            time_key="YEAR",
+            supported_method_families=[
+                "panel_association",
+                "mechanism_boundary",
+            ],
+            readiness="partially_ready",
+        )
+        package = ResearchPackage(
+            case_id="external-case",
+            title="external case",
+            research_question="x and y",
+            hypotheses=[{"hypothesis_id": "H1", "statement": "x and y"}],
+            variables=[
+                {"name": "S", "role": "id"},
+                {"name": "YEAR", "role": "time"},
+                {"name": "y", "role": "outcome"},
+                {"name": "x", "role": "exposure"},
+            ],
+            dataset_refs=[
+                DatasetRef(
+                    dataset_id="main-data",
+                    role="main",
+                    filename="main.csv",
+                    sha256="a" * 64,
+                    size_bytes=1,
+                )
+            ],
+        )
+
+        normalized = _normalize_external_enterprise_candidate_plan(
+            plan,
+            profile,
+            package,
+            "external",
+        )
+
+        self.assertFalse(normalized.design_only)
+        baseline = normalized.baseline_models[0]
+        self.assertEqual(
+            baseline.standard_error_strategy,
+            "cluster_by_entity_finite_sample_correction",
+        )
+        self.assertEqual(baseline.parameters["cluster_variable"], "S")
+        self.assertTrue(
+            _normalize_external_enterprise_candidate_plan(
+                plan,
+                profile,
+                package,
+                "fixture",
+            ).design_only
+        )
 
     def test_data_section_receives_executed_sample_evidence(self) -> None:
         spec = next(
@@ -590,12 +2177,15 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         for prompt_key in (
             "evidence_assessment",
             "scientific_audit",
-            "claim_ledger",
         ):
             prompt = get_prompt(prompt_key)
             self.assertEqual(prompt.version, "1.1.0")
             self.assertIn("interaction_term", prompt.system)
             self.assertIn("主效应", prompt.system)
+        claim_prompt = get_prompt("claim_ledger")
+        self.assertEqual(claim_prompt.version, "1.2.0")
+        self.assertIn("不得手抄任何阿拉伯数字", claim_prompt.system)
+        self.assertIn("interaction_term", claim_prompt.system)
 
     def test_llm_package_excludes_unknown_fields_from_model_input(self) -> None:
         package = ResearchPackage(
@@ -751,6 +2341,68 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         persisted = self.engine.get_run(run.id)
         self.assertEqual((persisted.status, persisted.current_gate), ("waiting_human", "H1"))
 
+    async def test_artifact_payload_tampering_is_rejected_by_all_read_paths(self) -> None:
+        run = await self.engine.create_run(
+            CreateRunRequest(preset_case_id="esg-panel")
+        )
+        run.artifacts["research_package"]["payload"]["title"] = "tampered"
+
+        with self.assertRaisesRegex(
+            WorkflowTransitionError,
+            "artifact sha256 mismatch: research_package",
+        ):
+            self.engine._artifact(run, "research_package", ResearchPackage)
+        with self.assertRaisesRegex(
+            WorkflowTransitionError,
+            "artifact sha256 mismatch: research_package",
+        ):
+            self.engine._gate_artifact_hashes(run, "H1")
+
+    async def test_h4_rejects_tampered_source_payload_before_sealing(self) -> None:
+        run = await self._to_h3()
+        run = await self.engine.decide_gate(
+            run.id,
+            "H3",
+            GateDecisionRequest(
+                action="generate_plan_only",
+                idempotency_key="tamper-h3",
+                claims=[
+                    {"claim_id": claim.claim_id, "decision": "hold"}
+                    for claim in run.claims
+                ],
+            ),
+        )
+        self.assertEqual((run.status, run.current_gate), ("waiting_human", "H4"))
+
+        tampered = self.repository.get(run.id)
+        tampered.artifacts["research_run"]["payload"]["warnings"].append(
+            "tampered source payload"
+        )
+        self.repository.save(tampered, expected_version=tampered.version)
+
+        with self.assertRaisesRegex(
+            WorkflowTransitionError,
+            "artifact sha256 mismatch: research_run",
+        ):
+            await self.engine.decide_gate(
+                run.id,
+                "H4",
+                GateDecisionRequest(
+                    action="approve",
+                    idempotency_key="tamper-h4",
+                ),
+            )
+        persisted = self.repository.get(run.id)
+        self.assertEqual((persisted.status, persisted.current_gate), ("waiting_human", "H4"))
+        self.assertNotIn("sealed_output", persisted.artifacts)
+
+        with self.assertRaisesRegex(
+            WorkflowTransitionError,
+            "artifact sha256 mismatch: research_run",
+        ):
+            self.engine._seal_output(persisted)
+        self.assertNotIn("sealed_output", persisted.artifacts)
+
     async def test_unknown_data_structure_does_not_silently_fall_back(self) -> None:
         run = await self.engine.create_run(
             CreateRunRequest(
@@ -902,8 +2554,116 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
             "research_plan_only",
         )
 
-    async def _retryable_research_writer_run(self):
-        run = await self._to_h3()
+    async def test_executed_research_with_no_admitted_claim_seals_failure_report(self) -> None:
+        run = await self._to_h3("green-finance-did")
+        research_run = ResearchRun.model_validate(
+            run.artifacts["research_run"]["payload"]
+        )
+        research_run.fixture_only = False
+        research_run.execution_status = "succeeded"
+        research_run.scientific_status = "limited"
+        research_run.not_executed_reason = None
+        research_run.executions[0].execution_status = "succeeded"
+        self.engine._put_artifact(run, "research_run", research_run)
+        self.engine._put_artifact(
+            run,
+            "reproduction_audit",
+            ReproductionAudit(
+                audit_id="reproduction-negative-result",
+                primary_run_id=research_run.research_run_id,
+                replication_run_id="replication-negative-result",
+                status="matched",
+                mode="independent_implementation",
+                independence_scope="estimator_only",
+                shared_components=[
+                    "policy_causal analysis-table preparation",
+                    "policy event/placebo regressor construction",
+                ],
+            ),
+        )
+        self.engine._put_artifact(
+            run,
+            "scientific_audit",
+            ScientificAudit(
+                verdict="limited",
+                contract_compliant=True,
+                critical_issues=["政策前各期系数显著为正。"],
+                unresolved_risks=["模型自由文本中的未核验风险。"],
+            ),
+        )
+        run.mode = "research"
+        run.model_provider = "qwen"
+        run.execution_mode = "external"
+        run.execution_status = "succeeded"
+        run.scientific_status = "limited"
+        run.plan_only = False
+        run = self.repository.save(run, expected_version=run.version)
+
+        run = await self.engine.decide_gate(
+            run.id,
+            "H3",
+            GateDecisionRequest(
+                action="generate_identification_failure_report",
+                idempotency_key="negative-result-h3",
+                claims=[
+                    {"claim_id": claim.claim_id, "decision": "reject"}
+                    for claim in run.claims
+                ],
+            ),
+        )
+
+        self.assertEqual((run.status, run.current_gate), ("waiting_human", "H4"))
+        self.assertEqual(run.execution_status, "succeeded")
+        self.assertEqual(run.scientific_status, "limited")
+        self.assertFalse(run.plan_only)
+        manuscript = ManuscriptPackage.model_validate(
+            run.artifacts["manuscript_package"]["payload"]
+        )
+        self.assertEqual(manuscript.mode, "identification_failure_report")
+        self.assertEqual(
+            manuscript.empirical_findings_status,
+            "executed_not_admissible",
+        )
+        self.assertEqual(manuscript.audit_result, "pass_with_no_critical_issues")
+        self.assertTrue(
+            all(not section.claim_ids for section in manuscript.manuscript_sections)
+        )
+        report_text = "\n".join(
+            section.content_markdown for section in manuscript.manuscript_sections
+        )
+        self.assertNotIn("政策前各期系数显著为正", report_text)
+        self.assertNotIn("模型自由文本中的未核验风险", report_text)
+        serialized_manuscript = manuscript.model_dump_json()
+        self.assertNotIn("政策前各期系数显著为正", serialized_manuscript)
+        self.assertNotIn("模型自由文本中的未核验风险", serialized_manuscript)
+        self.assertIn("仅覆盖估计器与协方差实现", report_text)
+        self.assertIn("分析表准备", report_text)
+        self.assertIn("事件研究和安慰剂变量构造", report_text)
+        self.assertIn("allowed_strength=", report_text)
+        self.assertIn("max_allowed_strength=", report_text)
+        evidence_reasons = [
+            item["reason"]
+            for item in run.artifacts["evidence_registry"]["payload"]["evidence"]
+            if item.get("reason")
+        ]
+        self.assertTrue(any(reason in report_text for reason in evidence_reasons))
+        self.assertTrue(
+            any("ReproductionAudit" in item for item in manuscript.disclosures)
+        )
+
+        run = await self.engine.decide_gate(
+            run.id,
+            "H4",
+            GateDecisionRequest(action="approve", idempotency_key="negative-result-h4"),
+        )
+        self.assertEqual(run.status, "completed")
+        self.assertIn("sealed_output", run.artifacts)
+
+    async def _retryable_research_writer_run(
+        self,
+        preset_case_id: str = "green-finance-did",
+    ):
+        run = await self._to_h3(preset_case_id)
         research_run = ResearchRun.model_validate(
             run.artifacts["research_run"]["payload"]
         )
@@ -934,6 +2694,202 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         run.current_node_id = "scientific_writer"
         run.last_error = "writer timeout"
         return self.repository.save(run, expected_version=run.version)
+
+    async def test_full_manuscript_isolates_scientific_audit_free_text(self) -> None:
+        run = await self._retryable_research_writer_run()
+        critical_sentinel = "SCIENTIFIC_AUDIT_CRITICAL_SENTINEL"
+        unresolved_sentinel = "SCIENTIFIC_AUDIT_UNRESOLVED_SENTINEL"
+        self.engine._put_artifact(
+            run,
+            "scientific_audit",
+            ScientificAudit(
+                verdict="limited",
+                contract_compliant=True,
+                critical_issues=[critical_sentinel],
+                unresolved_risks=[unresolved_sentinel],
+            ),
+        )
+        run = self.repository.save(run, expected_version=run.version)
+        gateway = ScientificAuditIsolationGateway()
+
+        with patch.object(self.engine, "_gateway", return_value=gateway):
+            result = await self.engine.advance(run.id)
+
+        self.assertEqual((result.status, result.current_gate), ("waiting_human", "H4"))
+        writer_payload = json.dumps(gateway.calls, ensure_ascii=False)
+        manuscript = ManuscriptPackage.model_validate(
+            result.artifacts["manuscript_package"]["payload"]
+        )
+        serialized_manuscript = manuscript.model_dump_json()
+        for sentinel in (critical_sentinel, unresolved_sentinel):
+            self.assertNotIn(sentinel, writer_payload)
+            self.assertNotIn(sentinel, serialized_manuscript)
+        serialized_audit = json.dumps(
+            result.artifacts["scientific_audit"]["payload"],
+            ensure_ascii=False,
+        )
+        self.assertIn(critical_sentinel, serialized_audit)
+        self.assertIn(unresolved_sentinel, serialized_audit)
+        self.assertTrue(
+            any("独立第二意见工件" in item for item in manuscript.disclosures)
+        )
+        empirical = next(
+            section
+            for section in manuscript.manuscript_sections
+            if section.section_id == "empirical_results"
+        )
+        self.assertNotIn("事件研究显示各期动态效应", empirical.content_markdown)
+
+    def test_limited_event_study_language_is_neutralized(self) -> None:
+        source = "事件研究显示各期动态效应如下。"
+        self.assertEqual(
+            _neutralize_limited_event_study_language(
+                source,
+                limited_or_mixed=True,
+            ),
+            "事件研究报告各事件期组间差异系数如下。",
+        )
+        self.assertEqual(
+            _neutralize_limited_event_study_language(
+                source,
+                limited_or_mixed=False,
+            ),
+            source,
+        )
+
+    async def test_enterprise_panel_happy_path_uses_exact_nine_logical_calls(
+        self,
+    ) -> None:
+        gateway = WorkflowCallRecordingGateway()
+        with (
+            patch.object(self.engine, "_gateway", return_value=gateway),
+            patch.object(
+                self.engine, "_reviewer_gateway", return_value=gateway
+            ) as reviewer_gateway,
+        ):
+            run = await self._retryable_research_writer_run("esg-panel")
+            research_run = self.engine._artifact(run, "research_run", ResearchRun)
+            research_run.executions[0].estimates = [
+                {
+                    "term": "esg_score",
+                    "coefficient": -9876.5432,
+                    "standard_error": 0.0004,
+                    "p_value": 0.0002,
+                    "nobs": 29919,
+                }
+            ]
+            research_run.executions[0].diagnostic_results = {
+                "rows_used": 29919,
+                "r_squared_within": 0.987654,
+            }
+            self.engine._put_artifact(run, "research_run", research_run)
+            run = self.repository.save(run, expected_version=run.version)
+            result = await self.engine.advance(run.id)
+
+        self.assertEqual(reviewer_gateway.call_count, 3)
+
+        self.assertEqual((result.status, result.current_gate), ("waiting_human", "H4"))
+        self.assertEqual(
+            [call["prompt_key"] for call in gateway.calls],
+            [
+                "hypothesis_decomposition",
+                "candidate_plan_batch",
+                "candidate_plan_batch",
+                "reviewer_report_batch",
+                "reviewer_report_batch",
+                "evidence_claim_bundle",
+                "scientific_audit",
+                "manuscript_section_draft_batch",
+                "manuscript_section_draft_batch",
+            ],
+        )
+        self.assertEqual(
+            [call["call_context"].call_group for call in gateway.calls],
+            ["h1_h2"] * 5 + ["h3"] * 2 + ["h4"] * 2,
+        )
+        self.assertEqual(
+            [
+                call["payload"]["candidate_strategies"]
+                for call in gateway.calls[1:3]
+            ],
+            [
+                ["direct_baseline", "identification_first"],
+                ["measurement_robustness"],
+            ],
+        )
+        self.assertEqual(
+            [call["payload"]["dimensions"] for call in gateway.calls[3:5]],
+            [
+                ["measurement", "reproducibility"],
+                ["causal", "statistical"],
+            ],
+        )
+        writer_calls = gateway.calls[7:]
+        self.assertEqual(
+            [
+                [spec["section_id"] for spec in call["payload"]["section_specs"]]
+                for call in writer_calls
+            ],
+            [
+                [
+                    "introduction",
+                    "theory_hypotheses",
+                    "data_variables",
+                    "research_design",
+                ],
+                [
+                    "empirical_results",
+                    "discussion_limitations",
+                    "conclusion",
+                    "abstract",
+                ],
+            ],
+        )
+        serialized_writer_payload = json.dumps(
+            [call["payload"] for call in writer_calls],
+            ensure_ascii=False,
+        )
+        for forbidden in (
+            "-9876.5432",
+            "0.0004",
+            "0.0002",
+            "29919",
+            "0.987654",
+            "raw_value",
+            "rendered_value",
+            "protected_values",
+            "text_template",
+        ):
+            self.assertNotIn(forbidden, serialized_writer_payload)
+        for call in writer_calls:
+            for spec in call["payload"]["section_specs"]:
+                statement_ids = {
+                    item["statement_id"] for item in spec["statement_catalog"]
+                }
+                self.assertEqual(
+                    statement_ids,
+                    set(spec["required_statement_ids"]),
+                )
+                self.assertTrue(
+                    all(
+                        set(item)
+                        == {
+                            "statement_id",
+                            "statement_kind",
+                            "claim_ids",
+                            "execution_ids",
+                            "instruction",
+                        }
+                        for item in spec["statement_catalog"]
+                    )
+                )
+                if spec["section_id"] in {"introduction", "research_design"}:
+                    self.assertEqual(spec["required_statement_ids"], [])
+                    self.assertEqual(spec["statement_catalog"], [])
+                    self.assertIn(
+                        "禁止输出任何 [[STATEMENT:...]] 锚点",
+                        spec["statement_anchor_policy"],
+                    )
 
     async def test_failed_scientific_writer_retries_without_template_fallback(self) -> None:
         run = await self._retryable_research_writer_run()
@@ -986,10 +2942,11 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_content_failure_is_rewritten_once_before_sealing(self) -> None:
         run = await self._retryable_research_writer_run()
+        gateway = RepairingManuscriptGateway()
         with patch.object(
             self.engine,
             "_gateway",
-            return_value=RepairingManuscriptGateway(),
+            return_value=gateway,
         ):
             run = await self.engine.advance(run.id)
 
@@ -1004,7 +2961,29 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         writer_steps = [
             step for step in run.steps if step.node_id == "scientific_writer"
         ]
-        self.assertEqual(len(writer_steps), 9)
+        self.assertEqual(len(writer_steps), 12)
+        writer_ids = {
+            index: f"{run.id}:manuscript_section_draft_batch_{index}"
+            for index in (1, 2)
+        }
+        primary_contexts = [
+            context
+            for context in gateway.call_contexts
+            if context.attempt_type == "primary"
+        ]
+        repair_contexts = [
+            context
+            for context in gateway.call_contexts
+            if context.attempt_type == "content_repair"
+        ]
+        self.assertCountEqual(
+            [context.logical_call_id for context in primary_contexts],
+            [writer_ids[1], writer_ids[2]],
+        )
+        self.assertEqual(
+            [context.logical_call_id for context in repair_contexts],
+            [writer_ids[1]],
+        )
 
     async def test_h4_revise_requires_comment_and_rewrites_named_section(self) -> None:
         run = await self._retryable_research_writer_run()
@@ -1041,11 +3020,25 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual((run.status, run.current_gate), ("waiting_human", "H4"))
         self.assertEqual(
-            [call["section_spec"]["section_id"] for call in gateway.calls],
+            [
+                spec["section_id"]
+                for call in gateway.calls
+                for spec in call["section_specs"]
+            ],
             ["conclusion"],
         )
-        feedback = gateway.calls[0]["revision_feedback"]["problems"]
+        feedback = gateway.calls[0]["section_specs"][0]["revision_feedback"][
+            "problems"
+        ]
         self.assertTrue(any("H4 人工审稿意见" in problem for problem in feedback))
+        self.assertEqual(
+            gateway.call_contexts[0].logical_call_id,
+            f"{run.id}:manuscript_section_draft_batch_2",
+        )
+        self.assertEqual(
+            gateway.call_contexts[0].attempt_type,
+            "content_repair",
+        )
 
     async def test_content_failure_can_use_second_bounded_repair_round(self) -> None:
         run = await self._retryable_research_writer_run()
@@ -1058,7 +3051,375 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         writer_steps = [
             step for step in run.steps if step.node_id == "scientific_writer"
         ]
-        self.assertEqual(len(writer_steps), 10)
+        self.assertEqual(len(writer_steps), 14)
+        writer_id = f"{run.id}:manuscript_section_draft_batch_1"
+        matching_contexts = [
+            context
+            for context in gateway.call_contexts
+            if context.logical_call_id == writer_id
+        ]
+        self.assertEqual(
+            [context.attempt_type for context in matching_contexts],
+            ["primary", "content_repair", "content_repair"],
+        )
+
+    async def test_ir_compile_errors_repair_only_the_affected_sections(self) -> None:
+        run = await self._retryable_research_writer_run()
+        gateway = AnchorRepairGateway({"introduction", "conclusion"})
+        with patch.object(self.engine, "_gateway", return_value=gateway):
+            run = await self.engine.advance(run.id)
+
+        self.assertEqual((run.status, run.current_gate), ("waiting_human", "H4"))
+        self.assertEqual(
+            gateway.calls,
+            [
+                [
+                    "introduction",
+                    "theory_hypotheses",
+                    "data_variables",
+                    "research_design",
+                ],
+                [
+                    "empirical_results",
+                    "discussion_limitations",
+                    "conclusion",
+                    "abstract",
+                ],
+                ["introduction"],
+                ["conclusion"],
+            ],
+        )
+        requested_ids = [section_id for call in gateway.calls for section_id in call]
+        for section_id in FULL_MANUSCRIPT_SECTION_IDS:
+            expected_count = 2 if section_id in {"introduction", "conclusion"} else 1
+            self.assertEqual(requested_ids.count(section_id), expected_count)
+        writer_ids = {
+            index: f"{run.id}:manuscript_section_draft_batch_{index}"
+            for index in (1, 2)
+        }
+        repair_contexts = [
+            context
+            for context in gateway.call_contexts
+            if context.attempt_type == "content_repair"
+        ]
+        self.assertCountEqual(
+            [context.logical_call_id for context in repair_contexts],
+            [writer_ids[1], writer_ids[2]],
+        )
+        repair_payload = json.dumps(gateway.payloads[2:], ensure_ascii=False)
+        self.assertNotIn("unknown-anchor", repair_payload)
+        self.assertIn("所有实证判断必须完全由本章获准锚点承担", repair_payload)
+
+    async def test_exhausted_repair_batch_falls_back_only_for_target_section(
+        self,
+    ) -> None:
+        run = await self._retryable_research_writer_run()
+        gateway = ExhaustedRepairBatchGateway(
+            "introduction",
+            "conclusion",
+        )
+
+        with patch.object(self.engine, "_gateway", return_value=gateway):
+            run = await self.engine.advance(run.id)
+
+        self.assertEqual((run.status, run.current_gate), ("waiting_human", "H4"))
+        self.assertEqual(
+            gateway.calls,
+            [
+                [
+                    "introduction",
+                    "theory_hypotheses",
+                    "data_variables",
+                    "research_design",
+                ],
+                [
+                    "empirical_results",
+                    "discussion_limitations",
+                    "conclusion",
+                    "abstract",
+                ],
+                ["introduction"],
+                ["conclusion"],
+                ["introduction"],
+            ],
+        )
+        manuscript = ManuscriptPackage.model_validate(
+            run.artifacts["manuscript_package"]["payload"]
+        )
+        sections_by_id = {
+            section.section_id: section
+            for section in manuscript.manuscript_sections
+        }
+        self.assertEqual(set(sections_by_id), set(FULL_MANUSCRIPT_SECTION_IDS))
+        self.assertTrue(
+            sections_by_id["introduction"].content_markdown.startswith(
+                DETERMINISTIC_SAFE_SECTION_TEXTS["introduction"][:80]
+            )
+        )
+        for section_id in set(FULL_MANUSCRIPT_SECTION_IDS) - {"introduction"}:
+            self.assertTrue(
+                sections_by_id[section_id].content_markdown.startswith(
+                    "本节依据研究问题"
+                )
+            )
+        fallback_steps = [
+            step
+            for step in run.steps
+            if isinstance(step.input, dict)
+            and step.input.get("fallback_type")
+            == "deterministic_safe_fallback"
+        ]
+        self.assertEqual(
+            [step.input["section_id"] for step in fallback_steps],
+            ["introduction"],
+        )
+
+    async def test_deterministic_safe_fallback_replaces_only_persistent_failures(
+        self,
+    ) -> None:
+        run = await self._retryable_research_writer_run()
+        target_ids = {
+            "theory_hypotheses",
+            "research_design",
+            "discussion_limitations",
+            "conclusion",
+        }
+        receipts_before = len(
+            run.artifacts.get("model_usage", {})
+            .get("payload", {})
+            .get("call_receipts", [])
+        )
+        gateway = PersistentUnsafeWriterGateway(target_ids)
+
+        with patch.object(self.engine, "_gateway", return_value=gateway):
+            run = await self.engine.advance(run.id)
+
+        self.assertEqual((run.status, run.current_gate), ("waiting_human", "H4"))
+        requested_ids = [section_id for call in gateway.calls for section_id in call]
+        for section_id in FULL_MANUSCRIPT_SECTION_IDS:
+            self.assertEqual(
+                requested_ids.count(section_id),
+                3 if section_id in target_ids else 1,
+            )
+        fallback_steps = [
+            step
+            for step in run.steps
+            if isinstance(step.input, dict)
+            and step.input.get("fallback_type") == "deterministic_safe_fallback"
+        ]
+        self.assertEqual(
+            {step.input["section_id"] for step in fallback_steps},
+            target_ids,
+        )
+        self.assertTrue(all(step.status == "succeeded" for step in fallback_steps))
+        self.assertTrue(
+            all(
+                "deterministic_safe_fallback" in " ".join(step.logs)
+                and step.prompts
+                and all(prompt.role == "code" for prompt in step.prompts)
+                for step in fallback_steps
+            )
+        )
+        manuscript = ManuscriptPackage.model_validate(
+            run.artifacts["manuscript_package"]["payload"]
+        )
+        sections_by_id = {
+            section.section_id: section
+            for section in manuscript.manuscript_sections
+        }
+        for section_id in target_ids:
+            self.assertTrue(
+                sections_by_id[section_id].content_markdown.startswith(
+                    DETERMINISTIC_SAFE_SECTION_TEXTS[section_id][:80]
+                )
+            )
+            for forbidden in (
+                "中介检验",
+                "中介效应",
+                "诊断待执行",
+                "诊断步骤尚未执行",
+                "机制步骤尚未执行",
+            ):
+                self.assertNotIn(
+                    forbidden,
+                    sections_by_id[section_id].content_markdown,
+                )
+        fallback_disclosure = next(
+            disclosure
+            for disclosure in manuscript.disclosures
+            if "确定性安全模板" in disclosure
+        )
+        for section_id in target_ids:
+            self.assertIn(section_id, fallback_disclosure)
+        for section_id in set(FULL_MANUSCRIPT_SECTION_IDS) - target_ids:
+            self.assertIn(
+                "本节依据研究问题",
+                sections_by_id[section_id].content_markdown,
+            )
+        receipts_after = len(
+            run.artifacts.get("model_usage", {})
+            .get("payload", {})
+            .get("call_receipts", [])
+        )
+        self.assertEqual(receipts_after, receipts_before)
+
+    async def test_all_sections_safe_fallback_meets_manuscript_length_floor(
+        self,
+    ) -> None:
+        run = await self._retryable_research_writer_run()
+        gateway = PersistentUnsafeWriterGateway(set(FULL_MANUSCRIPT_SECTION_IDS))
+
+        with patch.object(self.engine, "_gateway", return_value=gateway):
+            run = await self.engine.advance(run.id)
+
+        self.assertEqual((run.status, run.current_gate), ("waiting_human", "H4"))
+        self.assertEqual(len(gateway.calls), 6)
+        manuscript = ManuscriptPackage.model_validate(
+            run.artifacts["manuscript_package"]["payload"]
+        )
+        lengths_by_id = {
+            section.section_id: len(section.content_markdown.strip())
+            for section in manuscript.manuscript_sections
+        }
+        minimum_by_id = {
+            spec["section_id"]: int(
+                spec["target_characters"].split("-", 1)[0]
+            )
+            for spec in MANUSCRIPT_SECTION_SPECS
+        }
+        self.assertEqual(len(lengths_by_id), 8)
+        self.assertTrue(
+            all(
+                lengths_by_id[section_id] >= minimum_by_id[section_id]
+                for section_id in FULL_MANUSCRIPT_SECTION_IDS
+            )
+        )
+        self.assertEqual(
+            _deterministic_safe_fallback_quality_problems(
+                list(FULL_MANUSCRIPT_SECTION_IDS)
+            ),
+            [],
+        )
+        fallback_steps = [
+            step
+            for step in run.steps
+            if isinstance(step.input, dict)
+            and step.input.get("fallback_type") == "deterministic_safe_fallback"
+        ]
+        self.assertEqual(len(fallback_steps), 8)
+
+    def test_safe_fallback_quality_gate_rejects_short_or_repeated_filler(
+        self,
+    ) -> None:
+        with patch.dict(
+            DETERMINISTIC_SAFE_SECTION_TEXTS,
+            {"abstract": "甲" * 449},
+        ):
+            self.assertTrue(
+                _deterministic_safe_fallback_quality_problems(["abstract"])
+            )
+
+        distinct_left = "甲" * 650
+        distinct_right = "甲" * 119 + "乙" * 531
+        with patch.dict(
+            DETERMINISTIC_SAFE_SECTION_TEXTS,
+            {
+                "introduction": distinct_left,
+                "theory_hypotheses": distinct_right,
+            },
+        ):
+            self.assertEqual(
+                _deterministic_safe_fallback_quality_problems(
+                    ["introduction", "theory_hypotheses"]
+                ),
+                [],
+            )
+
+        repeated_right = "甲" * 120 + "乙" * 530
+        with patch.dict(
+            DETERMINISTIC_SAFE_SECTION_TEXTS,
+            {
+                "introduction": distinct_left,
+                "theory_hypotheses": repeated_right,
+            },
+        ):
+            self.assertTrue(
+                _deterministic_safe_fallback_quality_problems(
+                    ["introduction", "theory_hypotheses"]
+                )
+            )
+
+        anchor_padding = (
+            "短文"
+            + "[[STATEMENT:statement-shared]]" * 100
+        )
+        with patch.dict(
+            DETERMINISTIC_SAFE_SECTION_TEXTS,
+            {"abstract": anchor_padding},
+        ):
+            problems = _deterministic_safe_fallback_quality_problems(
+                ["abstract"]
+            )
+        self.assertTrue(any("少于" in problem for problem in problems))
+
+    async def test_transient_repair_failure_uses_second_bounded_round(self) -> None:
+        run = await self._retryable_research_writer_run()
+        gateway = AnchorRepairGateway(
+            {"introduction"},
+            fail_first_repair=True,
+        )
+        with patch.object(self.engine, "_gateway", return_value=gateway):
+            run = await self.engine.advance(run.id)
+
+        self.assertEqual((run.status, run.current_gate), ("waiting_human", "H4"))
+        self.assertEqual(
+            gateway.calls[2:],
+            [["introduction"], ["introduction"]],
+        )
+        manuscript = ManuscriptPackage.model_validate(
+            run.artifacts["manuscript_package"]["payload"]
+        )
+        self.assertEqual(
+            {section.section_id for section in manuscript.manuscript_sections},
+            set(FULL_MANUSCRIPT_SECTION_IDS),
+        )
+        self.assertFalse(
+            any(
+                isinstance(step.input, dict)
+                and step.input.get("fallback_type")
+                == "deterministic_safe_fallback"
+                for step in run.steps
+            )
+        )
+
+    async def test_failed_repair_batches_fallback_for_multiple_sections(self) -> None:
+        run = await self._retryable_research_writer_run()
+        gateway = AnchorRepairGateway(
+            {"introduction", "conclusion"},
+            fail_all_repairs=True,
+        )
+        with patch.object(self.engine, "_gateway", return_value=gateway):
+            run = await self.engine.advance(run.id)
+
+        self.assertEqual((run.status, run.current_gate), ("waiting_human", "H4"))
+        fallback_steps = [
+            step
+            for step in run.steps
+            if isinstance(step.input, dict)
+            and step.input.get("fallback_type")
+            == "deterministic_safe_fallback"
+        ]
+        self.assertEqual(
+            {step.input["section_id"] for step in fallback_steps},
+            {"introduction", "conclusion"},
+        )
+        manuscript = ManuscriptPackage.model_validate(
+            run.artifacts["manuscript_package"]["payload"]
+        )
+        self.assertEqual(
+            {section.section_id for section in manuscript.manuscript_sections},
+            set(FULL_MANUSCRIPT_SECTION_IDS),
+        )
 
     async def test_retry_refines_only_sections_that_fail_new_quality_rules(self) -> None:
         run = await self._retryable_research_writer_run()
@@ -1091,7 +3452,7 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
             [step for step in run.steps if step.node_id == "scientific_writer"]
         )
         self.assertEqual((run.status, run.current_gate), ("waiting_human", "H4"))
-        self.assertEqual(writer_steps_after - writer_steps_before, 1)
+        self.assertEqual(writer_steps_after - writer_steps_before, 2)
 
     async def test_failed_retry_reuses_valid_latest_sections_without_llm_call(self) -> None:
         run = await self._retryable_research_writer_run()
@@ -1161,7 +3522,8 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("核心解释变量 firm_size", conclusion["content_markdown"])
         self.assertIn("可能被误判", conclusion["content_markdown"])
         self.assertIn("适用性", conclusion["content_markdown"])
-        self.assertIn("未发现达到常用统计显著性阈值的", conclusion["content_markdown"])
+        self.assertNotIn("未发现达到常用统计显著性阈值的", conclusion["content_markdown"])
+        self.assertIn("相关证据边界由核验语句给出", conclusion["content_markdown"])
         self.assertIn("控制变量 firm_size", conclusion["content_markdown"])
         self.assertIn("β", conclusion["content_markdown"])
 
@@ -1361,8 +3723,16 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         run = await self._retryable_research_writer_run()
         package = self.engine._artifact(run, "research_package", ResearchPackage)
         plan = self.engine._artifact(run, "analysis_plan", AnalysisPlan)
+        plan.method_family = "panel_association"
         research_run = self.engine._artifact(run, "research_run", ResearchRun)
-        exposure, control = package.variables[:2]
+        exposure_name = plan.baseline_models[0].treatments_or_exposures[0]
+        control_name = plan.baseline_models[0].controls[0]
+        exposure = next(
+            variable for variable in package.variables if variable.name == exposure_name
+        )
+        control = next(
+            variable for variable in package.variables if variable.name == control_name
+        )
         research_run.executions[0].estimates = [
             {"term": exposure.name, "coefficient": -0.2, "p_value": 0.01},
             {"term": control.name, "coefficient": 0.3, "p_value": 0.02},
@@ -1378,6 +3748,8 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
                     "claim_id": "claim-esg",
                     "claim_text": "原始主张",
                     "final_text": f"{exposure.label}与结果变量存在初步关联。",
+                    "supporting_runs": [research_run.executions[0].execution_id],
+                    "opposing_runs": [],
                     "unresolved_risks": [],
                 }
             ],
@@ -1394,6 +3766,224 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
             evidence["writing_requirements"]["withheld_estimate_terms"],
             [control.name],
         )
+
+    async def test_writing_evidence_derives_bound_lead_term_from_frozen_plan(self) -> None:
+        run = await self._retryable_research_writer_run()
+        package = self.engine._artifact(run, "research_package", ResearchPackage)
+        plan = self.engine._artifact(run, "analysis_plan", AnalysisPlan)
+        plan.method_family = "panel_association"
+        research_run = self.engine._artifact(run, "research_run", ResearchRun)
+        exposure = plan.baseline_models[0].treatments_or_exposures[0]
+        baseline_execution = research_run.executions[0]
+        baseline_execution.estimates = [
+            {"term": exposure, "coefficient": -0.2, "p_value": 0.01}
+        ]
+        lead_term = f"{exposure}_w_lead1"
+        lead_step = PlannedStep(
+            step_id="check-lead-bound",
+            name="前导项",
+            rationale="证伪时序",
+            parameters={"lead_exposure": lead_term, "lead_source": exposure},
+        )
+        plan.falsification_tests.append(lead_step)
+        research_run.executions.append(
+            ExecutionRecord(
+                execution_id="execution-lead-bound",
+                run_type="falsification",
+                plan_step_id=lead_step.step_id,
+                check_id=lead_step.step_id,
+                execution_status="succeeded",
+                estimates=[
+                    {"term": lead_term, "coefficient": 0.1, "p_value": 0.02}
+                ],
+                provenance=baseline_execution.provenance,
+            )
+        )
+
+        evidence = self.engine._writing_evidence_pack(
+            run,
+            package,
+            plan,
+            research_run,
+            [
+                {
+                    "claim_id": "claim-lead-mixed",
+                    "claim_text": "原始主张",
+                    "final_text": "前导项证据与主结果不一致，结论只能作混合关联解读。",
+                    "supporting_runs": [baseline_execution.execution_id],
+                    "opposing_runs": ["execution-lead-bound"],
+                    "unresolved_risks": [],
+                }
+            ],
+        )["writing_evidence_pack"]
+
+        visible_by_execution = {
+            item["execution_id"]: [
+                estimate["term"] for estimate in item["estimates"]
+            ]
+            for item in evidence["executed_evidence"]["executions"]
+        }
+        self.assertEqual(
+            visible_by_execution[baseline_execution.execution_id],
+            [exposure],
+        )
+        self.assertEqual(
+            visible_by_execution["execution-lead-bound"],
+            [lead_term],
+        )
+        self.assertIn(
+            lead_term,
+            evidence["writing_requirements"]["authorized_estimate_terms"],
+        )
+
+    async def test_writing_evidence_authorizes_bound_policy_estimands(self) -> None:
+        run = await self._retryable_research_writer_run()
+        package = self.engine._artifact(run, "research_package", ResearchPackage)
+        plan = self.engine._artifact(run, "analysis_plan", AnalysisPlan)
+        plan.method_family = "policy_causal"
+        exposure = "policy_exposure"
+        baseline_step = plan.baseline_models[0]
+        baseline_step.treatments_or_exposures = [exposure]
+        baseline_execution = self.engine._artifact(
+            run, "research_run", ResearchRun
+        ).executions[0]
+        baseline_execution.estimates = [
+            {"term": exposure, "coefficient": -0.2, "p_value": 0.01},
+            {"term": "control_term", "coefficient": 0.3, "p_value": 0.02},
+        ]
+        event_step = PlannedStep(
+            step_id="check-policy-event-study",
+            name="事件研究",
+            rationale="冻结的政策前动态检验",
+            parameters={"policy_event_study": True},
+        )
+        placebo_step = PlannedStep(
+            step_id="check-policy-placebo-time",
+            name="伪政策时点",
+            rationale="冻结的证伪检验",
+            parameters={"policy_placebo": True},
+        )
+        plan.falsification_tests.extend([event_step, placebo_step])
+        research_run = self.engine._artifact(run, "research_run", ResearchRun)
+        research_run.executions[0] = baseline_execution
+        research_run.executions.extend(
+            [
+                ExecutionRecord(
+                    execution_id="execution-policy-event",
+                    run_type="falsification",
+                    plan_step_id=event_step.step_id,
+                    execution_status="succeeded",
+                    estimates=[
+                        {"term": "event_2004", "coefficient": 0.1, "p_value": 0.04},
+                        {
+                            "term": "event_remote_pre",
+                            "coefficient": 0.2,
+                            "p_value": 0.03,
+                        },
+                        {"term": "not_an_event", "coefficient": 0.5, "p_value": 0.01},
+                    ],
+                ),
+                ExecutionRecord(
+                    execution_id="execution-policy-placebo",
+                    run_type="falsification",
+                    plan_step_id=placebo_step.step_id,
+                    execution_status="succeeded",
+                    estimates=[
+                        {
+                            "term": "placebo_exposure_2004",
+                            "coefficient": -0.1,
+                            "p_value": 0.03,
+                        }
+                    ],
+                ),
+            ]
+        )
+
+        evidence = self.engine._writing_evidence_pack(
+            run,
+            package,
+            plan,
+            research_run,
+            [
+                {
+                    "claim_id": "claim-policy-mixed",
+                    "claim_text": "原始因果主张",
+                    "final_text": "证据混合，只能作非因果解读。",
+                    "supporting_runs": [
+                        baseline_execution.execution_id,
+                        "execution-policy-event",
+                    ],
+                    "opposing_runs": ["execution-policy-placebo"],
+                    "unresolved_risks": [],
+                }
+            ],
+        )["writing_evidence_pack"]
+
+        visible_by_execution = {
+            item["execution_id"]: [
+                estimate["term"] for estimate in item["estimates"]
+            ]
+            for item in evidence["executed_evidence"]["executions"]
+        }
+        self.assertEqual(
+            visible_by_execution[baseline_execution.execution_id],
+            [exposure],
+        )
+        self.assertEqual(
+            visible_by_execution["execution-policy-event"],
+            ["event_2004", "event_remote_pre"],
+        )
+        self.assertEqual(
+            visible_by_execution["execution-policy-placebo"],
+            ["placebo_exposure_2004"],
+        )
+        self.assertEqual(
+            evidence["writing_requirements"]["authorized_estimate_terms"],
+            ["event_2004", "event_remote_pre", "placebo_exposure_2004", exposure],
+        )
+        self.assertIn(
+            "control_term",
+            evidence["writing_requirements"]["withheld_estimate_terms"],
+        )
+        self.assertIn(
+            "not_an_event",
+            evidence["writing_requirements"]["withheld_estimate_terms"],
+        )
+
+    async def test_writer_payload_never_contains_raw_statistics(self) -> None:
+        run = await self._retryable_research_writer_run()
+        research_run = self.engine._artifact(run, "research_run", ResearchRun)
+        research_run.executions[0].estimates = [
+            {
+                "term": "EPD",
+                "coefficient": 1234.5678,
+                "standard_error": 0.0004,
+                "p_value": 0.0002,
+                "nobs": 29919,
+            }
+        ]
+        research_run.executions[0].diagnostic_results = {
+            "rows_used": 29919,
+            "r_squared_within": 0.987654,
+        }
+        self.engine._put_artifact(run, "research_run", research_run)
+        run = self.repository.save(run, expected_version=run.version)
+        gateway = FeedbackTrackingGateway()
+
+        with patch.object(self.engine, "_gateway", return_value=gateway):
+            result = await self.engine.advance(run.id)
+
+        self.assertEqual((result.status, result.current_gate), ("waiting_human", "H4"))
+        serialized = json.dumps(gateway.calls, ensure_ascii=False)
+        for forbidden in ("1234.5678", "0.0004", "0.0002", "29919", "0.987654"):
+            self.assertNotIn(forbidden, serialized)
+        for call in gateway.calls:
+            for spec in call["section_specs"]:
+                for execution in spec.get("safe_evidence", {}).get(
+                    "executed_evidence", {}
+                ).get("executions", []):
+                    self.assertNotIn("estimates", execution)
+                    self.assertNotIn("diagnostic_results", execution)
 
     def test_manuscript_content_audit_rejects_unexecuted_work_and_unfrozen_plan(self) -> None:
         problems = self.engine._manuscript_content_problems(
@@ -2477,6 +5067,13 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             all(edge["source"] in node_ids and edge["target"] in node_ids for edge in definition["edges"])
         )
+        stage_node_ids = [
+            node_id
+            for stage in definition["stages"]
+            for node_id in stage["node_ids"]
+        ]
+        self.assertEqual(set(stage_node_ids), node_ids)
+        self.assertEqual(len(stage_node_ids), len(node_ids))
         self.assertIn("Dify YAML", definition["description"])
 
 

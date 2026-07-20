@@ -1,0 +1,11 @@
+# Direct runtime dependency snapshot for benchmark-v3-pilot-rc1 (Python 3.11.12).
+# The front-end transitive dependency graph is frozen separately by package-lock.json.
+fastapi==0.109.0
+httpx==0.28.1
+linearmodels==7.0
+numpy==2.4.4
+openai==2.30.0
+pandas==2.3.3
+pydantic==2.12.5
+scipy==1.17.1
+uvicorn==0.27.0

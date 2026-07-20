@@ -7,17 +7,23 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from unittest.mock import patch
 
 import httpx
 from openai import APIConnectionError
 
 import hypoweaver.api as api_module
-from hypoweaver.adapters import HttpResearchExecutor, QwenModelGateway
+from hypoweaver.adapters import (
+    HttpResearchExecutor,
+    HttpResearchReproducer,
+    ModelCallBudget,
+    QwenModelGateway,
+)
 from hypoweaver.engine import PRESET_CASES
-from hypoweaver.models import ResearchPackage
+from hypoweaver.models import ResearchPackage, ResearchRun
 from hypoweaver.runtime_config import (
+    FrozenRuntimeConfigStore,
     RuntimeConfigStore,
     RuntimeConfigUpdate,
     RuntimeConnectionTestRequest,
@@ -81,6 +87,27 @@ class RuntimeConfigStoreTests(unittest.TestCase):
         self.assertEqual(status.qwen_api_key.source, "environment")
         self.assertEqual(status.qwen_model.source, "environment")
         self.assertEqual(status.research_engine_url.source, "environment")
+
+    def test_frozen_runtime_store_keeps_one_in_memory_snapshot(self) -> None:
+        self.store.update(
+            RuntimeConfigUpdate(
+                qwen_api_key="first-key",
+                qwen_model="first-model",
+                research_engine_url="http://127.0.0.1:9000",
+            )
+        )
+        frozen = FrozenRuntimeConfigStore(self.store.resolve())
+        self.store.update(
+            RuntimeConfigUpdate(
+                qwen_api_key="second-key",
+                qwen_model="second-model",
+            )
+        )
+
+        snapshot = frozen.resolve()
+
+        self.assertEqual(snapshot.qwen_api_key, "first-key")
+        self.assertEqual(snapshot.qwen_model, "first-model")
 
     def test_secret_and_executor_values_require_explicit_clear_flags(self) -> None:
         self.store.update(
@@ -198,6 +225,70 @@ class RuntimeConfigStoreTests(unittest.TestCase):
         self.assertEqual(str(gateway.client.base_url), "https://qwen.example.test/v1/")
         self.assertEqual(executor.url, "http://127.0.0.1:9000")
         self.assertEqual(executor.token, "engine-token")
+
+
+class ResearchHttpDeadlineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_executor_and_reproducer_transport_follow_contract_wall_time(self) -> None:
+        contract = SimpleNamespace(
+            budget=SimpleNamespace(max_wall_time_seconds=600),
+            model_dump=lambda **_kwargs: {"contract_id": "deadline-test"},
+        )
+        returned_run = ResearchRun(
+            research_run_id="deadline-test-run",
+            case_id="deadline-test-case",
+            contract_hash="deadline-test-plan",
+            plan_version=1,
+            execution_status="failed",
+            scientific_status="invalid",
+            fixture_only=False,
+        )
+
+        for adapter_type, endpoint in (
+            (HttpResearchExecutor, "/v1/runs"),
+            (HttpResearchReproducer, "/v1/reproductions"),
+        ):
+            with self.subTest(adapter=adapter_type.__name__):
+                adapter = adapter_type.__new__(adapter_type)
+                adapter.url = "http://127.0.0.1:9000"
+                adapter.token = None
+                response = SimpleNamespace(
+                    raise_for_status=MagicMock(),
+                    json=MagicMock(
+                        return_value=returned_run.model_dump(mode="json")
+                    ),
+                )
+                client = SimpleNamespace(
+                    post=AsyncMock(return_value=response),
+                )
+                client_context = MagicMock()
+                client_context.__aenter__ = AsyncMock(return_value=client)
+                client_context.__aexit__ = AsyncMock(return_value=None)
+                deadline_context = MagicMock()
+                deadline_context.__aenter__ = AsyncMock(return_value=None)
+                deadline_context.__aexit__ = AsyncMock(return_value=None)
+
+                with (
+                    patch(
+                        "hypoweaver.adapters.httpx.AsyncClient",
+                        return_value=client_context,
+                    ) as async_client,
+                    patch(
+                        "hypoweaver.adapters.asyncio.timeout",
+                        return_value=deadline_context,
+                    ) as overall_timeout,
+                ):
+                    result = await adapter.execute(contract)
+
+                self.assertEqual(result.research_run_id, "deadline-test-run")
+                overall_timeout.assert_called_once_with(600.0)
+                timeout = async_client.call_args.kwargs["timeout"]
+                self.assertEqual(timeout.connect, 10.0)
+                self.assertEqual(timeout.read, 600.0)
+                self.assertEqual(timeout.write, 600.0)
+                self.assertEqual(timeout.pool, 600.0)
+                self.assertTrue(
+                    client.post.await_args.args[0].endswith(endpoint)
+                )
 
 
 class RuntimeConfigApiTests(unittest.IsolatedAsyncioTestCase):
@@ -318,12 +409,47 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
                 {"case": PRESET_CASES["green-finance-did"].model_dump(mode="json")},
                 ResearchPackage,
             )
-        self.assertEqual(create_completion.await_count, 2)
+        self.assertEqual(create_completion.await_count, 3)
+        self.assertEqual(gateway.budget.llm_calls, 3)
+        self.assertEqual(len(gateway.budget.technical_failures), 3)
+        self.assertEqual(len(gateway.budget.call_receipts), 3)
+        self.assertTrue(
+            all(
+                receipt["provider"] == "qwen"
+                and receipt["model"] == "qwen-test"
+                and len(receipt["response_sha256"]) == 64
+                for receipt in gateway.budget.call_receipts
+            )
+        )
+        self.assertNotIn(
+            "qwen.example.test",
+            str(gateway.budget.call_receipts),
+        )
         self.assertEqual(
             create_completion.await_args.kwargs["extra_body"],
             {"enable_thinking": False},
         )
         self.assertEqual(create_completion.await_args.kwargs["max_tokens"], 8192)
+
+    async def test_qwen_gateway_blocks_before_exceeding_call_budget(self) -> None:
+        gateway = QwenModelGateway.__new__(QwenModelGateway)
+        gateway.model = "qwen-test"
+        gateway.budget = ModelCallBudget(max_calls=1, llm_calls=1)
+        create_completion = AsyncMock()
+        gateway.client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=create_completion)
+            )
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "1/1"):
+            await gateway.generate(
+                "intake",
+                {"case": PRESET_CASES["green-finance-did"].model_dump(mode="json")},
+                ResearchPackage,
+            )
+
+        create_completion.assert_not_awaited()
 
     async def test_qwen_gateway_accepts_writer_model_override(self) -> None:
         effective = SimpleNamespace(
@@ -346,6 +472,40 @@ class RuntimeConnectionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIs(client_class.call_args.kwargs["http_client"], gateway.http_client)
         self.assertEqual(client_class.call_args.kwargs["max_retries"], 0)
+
+    def test_model_call_budget_records_provider_receipt_without_raw_content(self) -> None:
+        # The enterprise-panel workflow reserves room for all nine mandatory
+        # first calls. This test exercises receipt recording, not exhaustion.
+        budget = ModelCallBudget(max_calls=9)
+        response = SimpleNamespace(
+            id="provider-response-id",
+            usage=SimpleNamespace(prompt_tokens=11, completion_tokens=7),
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"status":"ok"}')
+                )
+            ],
+        )
+        budget.reserve()
+        budget.record_response(
+            response,
+            0.25,
+            provider="qwen",
+            model="qwen-test",
+            started_at="2026-07-16T00:00:00+00:00",
+            completed_at="2026-07-16T00:00:01+00:00",
+        )
+
+        snapshot = budget.snapshot()
+        self.assertEqual(snapshot["llm_calls"], 1)
+        self.assertEqual(snapshot["input_tokens"], 11)
+        self.assertEqual(snapshot["output_tokens"], 7)
+        self.assertEqual(len(snapshot["call_receipts"]), 1)
+        receipt = snapshot["call_receipts"][0]
+        self.assertEqual(receipt["provider"], "qwen")
+        self.assertEqual(receipt["model"], "qwen-test")
+        self.assertEqual(len(receipt["response_sha256"]), 64)
+        self.assertNotIn("status", str(receipt))
 
     async def test_official_qwen_gateway_bypasses_environment_proxy(self) -> None:
         effective = SimpleNamespace(

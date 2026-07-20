@@ -1,5 +1,7 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { manuscriptQuality, returnedRevisionGate, revisionSeed } from '../src/components/ExecutionWorkspace'
+import { MODEL_CALL_PROTOCOL, ModelCallContract, manuscriptQuality, modelCallStageUsage, permittedClaimDecisions, returnedRevisionGate, revisionSeed } from '../src/components/ExecutionWorkspace'
 import type { RunSnapshot, StepAttempt } from '../src/runtime/types'
 
 function step(input: Partial<StepAttempt> & Pick<StepAttempt, 'id' | 'nodeId' | 'status'>): StepAttempt {
@@ -37,6 +39,64 @@ function run(steps: StepAttempt[], currentNodeId: string): RunSnapshot {
 }
 
 describe('gate revision recovery', () => {
+  it('separates human gates, logical calls, provider attempts and labels call groups for users', () => {
+    expect(MODEL_CALL_PROTOCOL).toEqual({
+      humanGateCount: 4,
+      logicalCallCount: 9,
+      maxProviderAttempts: 20,
+    })
+    expect(modelCallStageUsage({
+      maxCalls: 20,
+      llmCalls: 7,
+      logicalCalls: 4,
+      providerAttempts: 7,
+      requiredLogicalCalls: 9,
+      retryPolicy: 'shared_bounded',
+      sharedRetrySlots: 11,
+      sharedRetryRemaining: 8,
+      groupUsage: { h1_h2: 7, h3: 0, h4: 0 },
+    })).toEqual([
+      { label: '设计与审查阶段', attempts: 7 },
+      { label: '证据与结论审计阶段', attempts: 0 },
+      { label: '论文写作与复核阶段', attempts: 0 },
+    ])
+
+    const markup = renderToStaticMarkup(createElement(ModelCallContract, {
+      modelUsage: {
+        maxCalls: 20,
+        llmCalls: 7,
+        logicalCalls: 4,
+        providerAttempts: 7,
+        requiredLogicalCalls: 9,
+        retryPolicy: 'shared-retry-v1',
+        retryMode: 'global_shared_retry_pool',
+        sharedRetrySlots: 11,
+        sharedRetryRemaining: 8,
+        groupUsage: { h1_h2: 7, h3: 0, h4: 0 },
+      },
+    }))
+    expect(markup).toContain('个人工 Gate')
+    expect(markup).toContain('个逻辑模型调用')
+    expect(markup).toContain('次 Provider Attempt 上限')
+    expect(markup).toContain('共享重试池剩余')
+    expect(markup).toContain('设计与审查阶段')
+    expect(markup).not.toContain('h1_h2')
+  })
+
+  it('maps Claim Gate status to the only legal H3 actions', () => {
+    const base = {
+      id: 'claim-H1',
+      text: '关联主张',
+      supportingRuns: [],
+      requiredCheckIds: [],
+      gateReasons: [],
+    }
+    expect(permittedClaimDecisions({ ...base, admissionStatus: 'admitted', allowedStrength: 'associational' }, false)).toEqual(['approve', 'downgrade', 'reject', 'hold'])
+    expect(permittedClaimDecisions({ ...base, admissionStatus: 'downgrade_required', allowedStrength: 'mixed' }, false)).toEqual(['downgrade', 'reject', 'hold'])
+    expect(permittedClaimDecisions({ ...base, admissionStatus: 'prohibited', allowedStrength: 'prohibited' }, false)).toEqual(['reject', 'hold'])
+    expect(permittedClaimDecisions({ ...base, admissionStatus: 'admitted', allowedStrength: 'associational' }, true)).toEqual(['reject', 'hold'])
+  })
+
   it('prefills H1 from the waiting artifact instead of the later decision step', () => {
     const snapshot = run([
       step({
@@ -95,7 +155,7 @@ describe('gate revision recovery', () => {
       mode: 'full_manuscript',
       status: 'ready_for_human_review',
       researchPlan: '',
-      sections: [{ id: 'abstract', title: '摘要', content: '短结果', status: 'generated', claimIds: [], runIds: [] }],
+      sections: [{ id: 'abstract', title: '摘要', content: '短结果', status: 'generated', claimIds: [], runIds: [], statements: [] }],
       disclosures: [],
       unresolvedIssues: [],
       auditResult: 'pass_with_no_critical_issues',

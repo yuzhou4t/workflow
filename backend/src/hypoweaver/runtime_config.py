@@ -306,6 +306,18 @@ class RuntimeConfigStore:
                 temporary_path.unlink()
 
 
+class FrozenRuntimeConfigStore:
+    """In-memory runtime snapshot used by one sealed benchmark attempt."""
+
+    def __init__(self, config: EffectiveRuntimeConfig) -> None:
+        self._config = EffectiveRuntimeConfig.model_validate(
+            config.model_dump(mode="python")
+        )
+
+    def resolve(self) -> EffectiveRuntimeConfig:
+        return self._config.model_copy(deep=True)
+
+
 async def test_runtime_connection(
     request: RuntimeConnectionTestRequest,
     store: RuntimeConfigStore,
