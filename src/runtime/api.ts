@@ -377,6 +377,7 @@ function normalizeFigureBundle(value: unknown): FigureBundleView | undefined {
       return {
         id: asString(first(figure, 'figure_id', 'id'), `figure-${index + 1}`),
         recipeId: asString(first(figure, 'recipe_id', 'recipeId')),
+        recipeVersion: asString(first(figure, 'recipe_version', 'recipeVersion'), '1.0'),
         title: asString(figure.title),
         caption: asString(figure.caption),
         altText: asString(first(figure, 'alt_text', 'altText'), asString(figure.title)),

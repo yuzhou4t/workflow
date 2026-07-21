@@ -1,18 +1,18 @@
 # HypoWeaver 总体架构与 Task4 科研绘图接入规范
 
-> 文档状态：Task4 设计基线；2026-07-22 已按同仓、进程内模块完成第一版接入
+> 文档状态：HypoWeaver 科研绘图实现规范；2026-07-22 已按同仓、进程内模块完成接入并转由主仓维护
 >
 > 适用范围：Task1 论文案例集、Task2 模型/方法库、Task3 假设验证与复现工作流、Task4 自动化科研绘图
 >
 > 当前事实源：`backend/src/hypoweaver/definition.py` 与 `backend/src/hypoweaver/models.py`
 
-> 实现更新：原文中的“独立仓库 / 独立 HTTP 服务”是早期交接方案，不再是当前部署要求。`carolzhu-jr/GreenFinance_Plot_Agent` 的渲染能力现已合入 `backend/src/hypoweaver/plot_agent/`，由 `visualization.py` 在同一工作流进程内调用；不需要额外端口。保留严格 Figure 契约和职责边界，是为了隔离“绘图”和“写作”，不是为了分仓。
+> 实现更新：原文中的“独立仓库 / 独立 HTTP 服务”是已废止的早期交接方案。`carolzhu-jr/GreenFinance_Plot_Agent` 的渲染能力已按基线提交合入 `backend/src/hypoweaver/plot_agent/`，保留来源署名；从现在起由 HypoWeaver 主仓维护，并由 `visualization.py` 在同一工作流进程内调用，不需要额外端口或同学继续交付。保留严格 Figure 契约，是为了隔离“绘图”和“写作”，不是为了分仓。
 
 ## 1. 文档目的
 
-这份文档用于统一四项任务之间的架构和数据边界，并给负责 Task4 的同学一份可以独立开发、独立测试、最终通过稳定接口接入 Task3 的实现规范。
+这份文档用于统一四项任务之间的架构和数据边界，并作为 HypoWeaver 主仓科研绘图模块的实现与验收规范。
 
-Task4 不是一个只在论文完成后“美化图片”的前端组件。它是一个独立的科研图形服务，承担两类工作：
+科研绘图不是一个只在论文完成后“美化图片”的前端组件。它是主工作流内的确定性模块，承担两类工作：
 
 1. 在模型执行后生成诊断图和证据图，供 Evidence Assessment、Scientific Audit 和 H3 人工审核使用；
 2. 在 H3 授权结论后生成论文主图和附录图，供 Scientific Writer 引用并随成果包封存。
@@ -83,9 +83,11 @@ Task3 是总调度器，当前正式链路为：
 → H2 冻结 FormalResearchContract
 → Fixture / Python Research Engine
 → ResearchRun
+→ H3 前证据图
 → EvidenceAssessment + ScientificAudit
 → ClaimLedger
 → H3 逐条结论授权
+→ H3 后论文图
 → 受约束写作与一致性审计
 → 封存成果包
 ```
@@ -99,7 +101,7 @@ Task3 保证：
 - Writer 只能使用 H3 已授权的 Claim；
 - 主流程在封存前不得读取隐藏参考结果。
 
-### 2.4 Task4：自动化科研绘图服务
+### 2.4 Task4：自动化科研绘图模块
 
 Task4 接收结构化研究结果和授权信息，返回可审计、可复现的图形成果包。
 
@@ -110,7 +112,7 @@ Task4 接收结构化研究结果和授权信息，返回可审计、可复现�
 - 与 Execution、Claim 的双向追溯；
 - 不补造缺失统计量；
 - 不访问隐藏参考；
-- 可供 HypoWeaver、Agent Laboratory 和未来其他基线共同调用。
+- 通过 HypoWeaver 的严格 Figure 契约供主工作流调用。
 
 ## 3. 当前架构与 Task4 的目标位置
 
@@ -131,7 +133,7 @@ flowchart LR
     SEAL --> APPB["App B 读取隐藏参考进行盲测"]
 ```
 
-Task4 使用同一个服务完成两次调用，但两次调用的权限和输入不同。
+科研绘图使用同一个进程内模块完成两次调用，但两次调用的权限和输入不同。
 
 ### 3.1 Evidence 阶段调用
 
@@ -149,10 +151,9 @@ Task4 使用同一个服务完成两次调用，但两次调用的权限和输�
 
 - 系数与置信区间图；
 - 样本筛选流程图；
-- 缺失值和变量分布图；
-- 残差、异常值和影响点诊断图；
+- 分组趋势、变量分布、相关性和描述统计图；
 - 平行趋势与事件研究图；
-- 稳健性、机制、异质性和空间结果图。
+- 规格、机制假设关系、异质性和空间结果图。
 
 输出 Artifact：`evidence_figure_bundle`。
 
@@ -171,7 +172,7 @@ Task4 使用同一个服务完成两次调用，但两次调用的权限和输�
 
 - 论文主图；
 - 附录图；
-- 中英文标题和图注；
+- 中性标题和图注；
 - 无障碍描述；
 - Figure、Claim、Execution 的追溯信息。
 
@@ -181,7 +182,7 @@ Publication 阶段不得展示被 H3 拒绝、暂缓或未处理的 Claim，也�
 
 ## 4. Task4 的系统边界
 
-### 4.1 Task4 负责
+### 4.1 科研绘图模块负责
 
 - 管理版本化图形配方；
 - 根据结构化上下文选择合适配方；
@@ -193,7 +194,7 @@ Publication 阶段不得展示被 H3 拒绝、暂缓或未处理的 Claim，也�
 - 记录输入、配方、软件和输出哈希；
 - 返回结构化 `FigureBundle`。
 
-### 4.2 Task4 不负责
+### 4.2 科研绘图模块不负责
 
 - 提出或修改研究假设；
 - 决定应该采用哪一种计量方法；
@@ -213,11 +214,11 @@ Task4 建议由四层组成。
 每个图形配方必须有稳定 ID 和版本，例如：
 
 ```text
-coefficient_forest@1.0.0
-sample_flow@1.0.0
-event_study@1.0.0
-robustness_matrix@1.0.0
-heterogeneity_forest@1.0.0
+coefficient_forest@1.0
+sample_flow@1.0
+event_study@1.0
+heterogeneity_forest@1.0
+specification_curve@1.0
 ```
 
 配方声明：
@@ -231,23 +232,22 @@ heterogeneity_forest@1.0.0
 - 允许的输出格式；
 - 图形质量和审计规则。
 
-### 5.2 AI Figure Planner
+### 5.2 Deterministic Figure Selector
 
-大模型可以：
+当前实现不使用生图模型，也不让大模型生成或执行 SVG、Python、R 或
+JavaScript 绘图代码。代码根据 ResearchRun 中已经存在的执行类型、字段与
+状态选择已注册 Recipe，并以固定规则生成中性标题、图注和 alt text。
 
-- 从配方库中选择适合的配方；
-- 绑定结构化字段；
-- 生成标题、图注和 alt text 草稿；
-- 在多个候选图中给出优先级。
+Selector 必须：
 
-大模型不可以：
+- 只选择配方库中已经注册并版本化的 Recipe；
+- 只绑定严格 Schema 验证通过的结构化字段；
+- 缺少输入时跳过并记录 warning，不推断或补造统计量；
+- Publication 阶段只使用 H3 授权 Claim 及其 Execution；
+- 在多个候选图中使用稳定、可复现的代码排序。
 
-- 输出并执行任意 Python/R/JavaScript 绘图代码；
-- 修改源统计量；
-- 在输入缺失时推断或补造系数、标准误、置信区间；
-- 生成配方库之外的新执行逻辑。
-
-Planner 的输出必须先通过严格 `FigureSpec` Schema，再进入 Renderer。
+未来即使引入模型辅助选图，其输出也必须先通过严格 `FigureSpec` Schema，
+且不能获得任意代码执行能力。
 
 ### 5.3 Deterministic Renderer
 
@@ -255,8 +255,8 @@ Renderer 使用固定实现渲染图形。可以选择 Python 或 R，但第一�
 
 确定性要求：
 
-- 固定随机种子；
-- 固定并随服务打包的字体；
+- 不使用随机采样；
+- 按固定优先级选择运行环境字体，并在输出元数据中记录实际字体；
 - 固定颜色、线宽、画布尺寸和 DPI；
 - 对输入行和分类值执行稳定排序；
 - 不在文件元数据中写入当前时间；
@@ -278,148 +278,31 @@ Validator 至少检查：
 - 输出文件与源数据是否具有 SHA256；
 - 是否存在可能误导的截断坐标轴或视觉编码。
 
-## 6. 对外服务接口
+## 6. 进程内接口与文件读取接口
 
-第一版保持最小接口：
+当前没有独立 Task4 服务。主工作流在同一 Python 进程内完成：
 
 ```text
-GET  /v1/health
-GET  /v1/recipes
-POST /v1/render
+ResearchRun / approved ClaimLedger
+→ build_figure_requests(...)
+→ LocalFigureRenderer.render(...)
+→ FigureBundle Artifact
 ```
 
-先实现同步渲染。只有在真实运行证明单次渲染时间过长后，再增加异步 Job API，不提前增加队列复杂度。
+Renderer 只接收通过严格 `FigureRequest` 校验的数据快照，并返回一个
+`FigureBundle`。调用方继续逐项核对 stage、Recipe/version、Execution、Claim、
+输出格式和数据快照，防止测试数据回退或渲染器改写输入。
 
-### 6.1 `GET /v1/health`
+前端只通过主应用读取已经登记且哈希验证通过的文件：
 
-示例响应：
-
-```json
-{
-  "status": "ok",
-  "service": "hypoweaver-visualization-engine",
-  "version": "0.1.0",
-  "schema_versions": ["1.0"],
-  "renderer": "matplotlib",
-  "recipe_count": 5
-}
+```text
+GET /api/v1/runs/{run_id}/figures/{figure_id}/{svg|png|pdf|csv}
 ```
 
-### 6.2 `GET /v1/recipes`
-
-至少返回：
-
-- `recipe_id`；
-- `version`；
-- `title`；
-- `supported_stages`；
-- `supported_run_types`；
-- `required_fields`；
-- `optional_fields`；
-- `output_formats`。
-
-### 6.3 `POST /v1/render`
-
-请求示例：
-
-```json
-{
-  "schema_version": "1.0",
-  "request_id": "figure-request-001",
-  "stage": "evidence",
-  "case_id": "case-001",
-  "research_run_id": "research-001",
-  "contract_hash": "sha256:contract-hash",
-  "recipe_id": "coefficient_forest",
-  "recipe_version": "1.0.0",
-  "source": {
-    "artifact_id": "run-001:research_run",
-    "artifact_key": "research_run",
-    "sha256": "sha256:research-run-hash"
-  },
-  "execution_ids": ["execution-001"],
-  "claim_ids": [],
-  "bindings": {
-    "term": "term",
-    "estimate": "coefficient",
-    "ci_lower": "confidence_interval_95[0]",
-    "ci_upper": "confidence_interval_95[1]"
-  },
-  "style_profile": "journal_bw_v1",
-  "locale": "zh-CN",
-  "formats": ["svg", "png", "pdf", "csv"]
-}
-```
-
-响应示例：
-
-```json
-{
-  "schema_version": "1.0",
-  "bundle_id": "figure-bundle-001",
-  "stage": "evidence",
-  "status": "succeeded",
-  "figures": [
-    {
-      "figure_id": "figure-001",
-      "recipe_id": "coefficient_forest",
-      "recipe_version": "1.0.0",
-      "title": "基准模型核心系数及 95% 置信区间",
-      "caption": "点表示系数估计，线段表示 95% 置信区间。",
-      "alt_text": "核心解释变量的系数点估计和置信区间。",
-      "execution_ids": ["execution-001"],
-      "claim_ids": [],
-      "files": [
-        {
-          "format": "svg",
-          "mime_type": "image/svg+xml",
-          "artifact_uri": "artifact://figure-001/main.svg",
-          "sha256": "sha256:svg-hash"
-        }
-      ],
-      "data_snapshot": {
-        "format": "csv",
-        "artifact_uri": "artifact://figure-001/source.csv",
-        "sha256": "sha256:source-hash"
-      },
-      "warnings": []
-    }
-  ],
-  "renderer": {
-    "name": "hypoweaver-visualization-engine",
-    "version": "0.1.0"
-  },
-  "warnings": []
-}
-```
-
-### 6.4 错误响应
-
-错误必须结构化，至少包含：
-
-```json
-{
-  "error": {
-    "code": "MISSING_REQUIRED_FIELD",
-    "message": "coefficient_forest requires ci_lower and ci_upper",
-    "field": "bindings.ci_lower",
-    "retryable": false
-  }
-}
-```
-
-建议错误码：
-
-- `SCHEMA_VALIDATION_FAILED`；
-- `RECIPE_NOT_FOUND`；
-- `RECIPE_VERSION_MISMATCH`；
-- `MISSING_REQUIRED_FIELD`；
-- `SOURCE_HASH_MISMATCH`；
-- `EXECUTION_NOT_FOUND`；
-- `CLAIM_NOT_AUTHORIZED`；
-- `FIXTURE_EMPIRICAL_FIGURE_FORBIDDEN`；
-- `HIDDEN_REFERENCE_FORBIDDEN`；
-- `RENDER_FAILED`。
+接口不返回开发者机器绝对路径。文件统一使用 `artifact://` URI，读取时重新
+校验 SHA256；不存在、越界或被篡改的文件均失败关闭。只有在未来存在明确的
+跨进程调用需求时，才另行设计服务 API，不把已废止的 `/v1/health`、
+`/v1/recipes`、`/v1/render` 当作当前验收条件。
 
 ## 7. 核心 Schema
 
@@ -445,20 +328,10 @@ locale
 formats[]
 ```
 
-### 7.2 FigureSpec
+### 7.2 FigureBindings
 
 ```text
-figure_id
-recipe_id
-recipe_version
-field_bindings{}
-filters[]
-sort_rules[]
-labels{}
-annotations[]
-style_profile
-execution_ids[]
-claim_ids[]
+data: 通过 recipe_contracts.py 对应 Recipe 严格验证的快照
 ```
 
 ### 7.3 FigureArtifact
@@ -472,6 +345,7 @@ recipe_id
 recipe_version
 execution_ids[]
 claim_ids[]
+sources[]
 files[]
 data_snapshot
 warnings[]
@@ -489,111 +363,89 @@ renderer
 warnings[]
 ```
 
-所有对象应使用严格 Schema，拒绝未知字段。Schema 文件必须由 Task4 仓库版本控制，并输出 JSON Schema 或 OpenAPI 定义供 Task3 生成客户端或执行契约测试。
+所有对象应使用严格 Schema，拒绝未知字段。Schema 由 HypoWeaver 主仓版本控制，并通过代码工作流定义输出 JSON Schema，供前端规范化和契约测试使用。
 
-## 8. 第一版图形配方
+## 8. 图形配方清单
 
-第一版不要追求覆盖所有科研图。按当前 Task3 执行能力，分成必须打通和接口预留两组。
+主仓维护 13 个 Recipe 方向。它们共享 Figure 契约，但只有在必需结构化输入
+真实存在时才生成；“已注册方向”不等于每个 ResearchRun 都会产出对应图。
 
-### 8.1 必须真实打通
+### 8.1 由 ResearchRun 自动接入
 
-#### `coefficient_forest`
+以下五类直接消费当前结构化执行结果，满足字段条件时由代码自动选择：
 
-用途：展示一个或多个 Execution 中的系数和置信区间。
+1. `coefficient_forest`：一个或多个 Execution 的系数与 95% 置信区间；必须显示零参考线。
+2. `sample_flow`：输入、剔除和最终样本；数量必须闭合，不能虚构剔除原因。
+3. `event_study`：事件时间系数、95% 置信区间、零线和政策时点；不能自动宣称平行趋势成立。
+4. `heterogeneity_forest`：按冻结分组展示估计与区间；不能把组内显著性差异解释为组间差异显著。
+5. `specification_curve`：按冻结规格展示已成功的同尺度估计与区间；失败或未执行规格继续保留在 ResearchRun 审计记录中，不伪装成可绘制的估计点。
 
-必需字段：
+这五类均要求有限数值和完整必需字段。缺少置信区间、事件时间、分组定义或
+规格身份时跳过并记录 warning，不用标准误、p 值或默认测试数据补算。
 
-- term；
-- coefficient；
-- confidence interval lower；
-- confidence interval upper；
-- execution_id。
+### 8.2 需要主工作流提供确定性聚合输入
 
-规则：
+以下六类不允许 Renderer 自行读取原始数据计算。当前由主工作流
+`figure_data.py` 在 H3 前核对冻结字段和数据 SHA256，只生成确定性聚合输入；
+Renderer 只接收聚合快照并负责渲染：
 
-- 必须显示零参考线；
-- 不根据 p 值改变 Claim 强度；
-- 排序必须稳定；
-- 图注说明置信区间口径；
-- 缺少置信区间时失败，不自行使用标准误推算，除非配方契约明确允许并记录计算来源。
+6. `grouped_time_series`：处理组/对照组或预定义分组的时间聚合序列；显式保存结果变量、时间变量、分组变量、分组标签和可选干预时点，不能把普通时间序列包装成 DID 平行趋势检验。
+7. `descriptive_statistics`：变量名、样本量、均值、标准差、分位数等描述统计表。
+8. `correlation_heatmap`：变量顺序固定、口径明确的相关矩阵与有效样本量。
+9. `distribution_histogram`：确定性分箱边界、频数或密度；不从图像反推分布。
+10. `box_plot`：五数概括、显式 `tukey_1_5_iqr` 须线规则、分组变量和预定义分组。
+11. `scatter_plot`：经批准的点集或聚合点，可带已执行模型产生的拟合结果，但绘图层不重新估计。
 
-#### `sample_flow`
+当前这六类使用 `sample_scope=frozen_source_rows`，表示口径是冻结源数据行，
+不是经过基准模型清洗的估计样本。因此 Figure 只绑定数据源哈希，
+`execution_ids` 保持为空，不冒充属于某个 rows_used 更小的 Execution。
 
-用途：展示原始行数、缺失剔除、重复主键剔除和最终估计样本。
+### 8.3 需要额外条件输入
 
-必需字段：
+以下两类只有在专用输入经过冻结、登记和哈希校验后才可生成：
 
-- rows_input；
-- rows_used；
-- rows_dropped。
+12. `spatial_choropleth`：需要与统计结果同口径的 geometry/空间 ID 映射，且 geometry 与 value 两个来源 SHA256 都必须匹配冻结合同中的 DatasetRef；只接受 EPSG:4326 闭合、非自交、非零面积、纬度位于 ±85° 且不跨反经线的简化多边形。显示阶段采用以输入平均纬度为基准的局部等距圆柱投影，仅用于区域着色示意，不用于面积或距离比较。没有合法几何数据时不伪造地图。
+13. `mechanism_evidence_graph`：第一版只画假设关系虚线，不承载系数或 Claim 授权。节点、边、方向和中性标签必须与 H2 冻结 mechanism step 的 `parameters.mechanism_graph` 完全一致；交互项或调节效应不得被改画成中介/因果路径。
 
-规则：
-
-- 数量必须闭合；
-- 无法区分剔除原因时不得虚构分项；
-- 图形同时输出机器可读 CSV。
-
-### 8.2 提供固定 Fixture 与接口
-
-#### `event_study`
-
-展示事件时间系数、置信区间和处理前参考区间；不自动宣称平行趋势成立。
-
-#### `robustness_matrix`
-
-展示多个冻结规格中的估计方向、置信区间和执行状态；失败规格必须保留而不是隐藏。
-
-#### `heterogeneity_forest`
-
-展示分组估计及置信区间；图注必须说明分组定义，不把“组内显著、组间不显著”自动解释为组间差异显著。
-
-后续再根据 Task2 的方法库增加空间图、机制路径图、结构模型图、测度效率图等配方。
+所有 Recipe 都只进行确定性数据映射，不使用扩散模型、文生图模型或大模型
+生成绘图代码。Publication 图继续受 H3 Claim 和 Writer 授权字段约束。
 
 ## 9. 数据与 Artifact 访问
 
-Task3 不应在 HTTP 请求中发送完整原始数据。推荐方式：
+主工作流只把已经登记、带来源哈希的结构化结果或确定性聚合数据交给绘图
+模块。绘图模块不得自行寻找原始文件、重新估计模型或读取隐藏参考。
 
-1. Task3 发送 Dataset/Artifact ID、SHA256 和字段选择器；
-2. Task4 使用只读身份从受控 Artifact Store 读取所需文件；
-3. Task4 重新计算 SHA256 并与请求值核对；
-4. Task4 只读取配方声明需要的字段；
-5. Task4 把图形源数据快照与图一起写入 Artifact Store；
-6. Task3 保存返回的 FigureBundle envelope 和哈希。
+1. `visualization.py` 从已登记 Artifact 构造严格 FigureRequest；
+2. 每个 Recipe 只读取自己声明的字段并再次验证有限性和结构；
+3. Renderer 把请求数据快照与 SVG、PNG、PDF、CSV 一起写入受控目录；
+4. FigureBundle 保存 Recipe/version、Execution、Claim、数据和文件哈希；
+5. 主工作流把 Evidence/Publication FigureBundle 加入 SQLite Artifact 和封存清单。
 
-本地第一版可以使用受控共享目录，但接口中不得返回开发者机器的绝对路径。统一返回 `artifact_uri` 或相对对象存储 key。
+Figure ID 同时纳入请求、Renderer/契约代码哈希、Matplotlib/Pandas 版本和字体文件哈希。
+输出先写临时目录，再原子发布；同一不可变 URI 如已存在不同字节则失败关闭，
+不覆盖旧 FigureBundle 已记录的文件。
 
-Task4 的运行身份必须在文件系统或对象存储 ACL 层面无法访问 `02_hidden_reference`，不能只依靠 Prompt 或文件名关键词过滤。
+文件接口不得返回开发者机器绝对路径，统一使用 `artifact://` URI。App A 的
+文件系统身份仍必须无法访问 `02_hidden_reference`，不能只依靠 Prompt 或文件
+名关键词过滤。
 
-## 10. Task3 与 Task4 的代码所有权
+## 10. 代码所有权
 
-### 10.1 Task4 同学负责
+科研绘图已经是 HypoWeaver 主仓能力，由主仓统一维护以下内容：
 
-- 同仓目录 `backend/src/hypoweaver/plot_agent/`；
-- OpenAPI/JSON Schema；
-- Recipe Registry；
-- AI Figure Planner；
-- Renderer；
-- Validator；
-- 示例请求和固定 Fixture；
-- 单元测试、契约测试和确定性测试；
-- 本地启动说明；
-- Task4 自己的版本和变更记录。
+- `backend/src/hypoweaver/plot_agent/` 中的 Recipe 和 Renderer；
+- `visualization.py` 中的严格 Figure 契约、自动选择、Claim/Execution 追溯；
+- 字段 Validator、固定 Fixture、单元测试、确定性测试和版本记录；
+- 两次工作流调用、SQLite Artifact、封存哈希和一致性审计；
+- 前端预览、下载、图注、警告及追溯展示。
 
-### 10.2 Task3 团队负责
+`carolzhu-jr/GreenFinance_Plot_Agent` 及基线提交继续记录在 `UPSTREAM.md` 和
+Renderer 元数据中，作为来源署名。该来源不再形成独立仓库、独立服务或后续
+同学交付依赖；新增 Recipe、修复和发布均随 HypoWeaver 主仓评审与验证。
 
-- 在 `models.py` 增加或映射 Figure Schema；
-- 在 `visualization.py` 维护严格 Figure 契约和进程内 adapter；
-- 在工作流中增加两次调用节点；
-- 把 FigureBundle 写入 SQLite Artifact；
-- 将 FigureBundle 哈希加入封存清单；
-- 在前端展示图形、图注、警告和追溯信息；
-- 在一致性审计中校验 Publication Figure 的 Claim/Execution 引用。
+## 11. 当前工作流接入
 
-Task4 同学只需维护 `plot_agent/` 内的配方与渲染质量，不需要直接修改 Task3 状态机；Task3 团队维护调用时机、Claim 边界、封存和前端展示。
-
-## 11. Task3 目标改动
-
-目标工作流变为：
+当前正式工作流为：
 
 ```text
 research_run_merge
@@ -608,14 +460,14 @@ research_run_merge
 → complete
 ```
 
-建议新增 Artifact：
+当前 Figure Artifact：
 
 ```text
 evidence_figure_bundle
 publication_figure_bundle
 ```
 
-建议扩展：
+当前已实现：
 
 - `ManuscriptPackage` 增加 `figure_ids`；
 - 可追溯章节增加所引用的 `figure_ids`；
@@ -623,7 +475,7 @@ publication_figure_bundle
 - consistency audit 检查 Figure 引用的 Claim 和 Execution；
 - Fixture 或 plan-only 运行跳过实证图，记录明确的 `not_generated` 原因。
 
-这些属于目标设计，当前代码尚未实现，不能在界面或汇报中表述为已完成。
+新增 Recipe 继续复用这两个节点和 Artifact，不增加新的状态机分支。
 
 ## 12. 安全与科学完整性要求
 
@@ -670,19 +522,10 @@ publication_figure_bundle
 
 ### 14.2 契约测试
 
-Task3 与 Task4 共用固定请求/响应 Fixture：
-
-```text
-contracts/
-  v1/
-    evidence_coefficient_request.json
-    evidence_coefficient_response.json
-    publication_request.json
-    publication_response.json
-    errors/
-```
-
-Task4 修改 Schema 时必须运行这些 Fixture；破坏兼容性的修改必须升级 `schema_version`。
+主仓在 `backend/tests/test_visualization.py` 维护请求、响应、授权边界、文件读取和
+篡改检测测试，在 `tests/runtimeApi.test.ts` 维护前端 wire contract 规范化测试。
+Figure Schema 发生破坏兼容性的修改时必须升级 `schema_version`；Recipe 集合
+扩展同时更新工作流定义版本。
 
 ### 14.3 确定性测试
 
@@ -698,76 +541,53 @@ Task4 修改 Schema 时必须运行这些 Fixture；破坏兼容性的修改必�
 
 ### 14.4 最终验收清单
 
-- [ ] `/v1/health` 返回服务、Schema 和 Renderer 版本；
-- [ ] `/v1/recipes` 返回可验证的配方元数据；
-- [ ] `coefficient_forest` 使用真实 Task3 ResearchRun 成功渲染；
-- [ ] `sample_flow` 使用真实 Task3 diagnostics 成功渲染；
-- [ ] 每张图同时输出 SVG、PNG、PDF 和源数据 CSV；
-- [ ] 每个文件都有 SHA256；
-- [ ] 不存在的 Execution ID 被拒绝；
-- [ ] 未授权 Claim 在 Publication 阶段被拒绝；
-- [ ] Fixture 实证图被拒绝；
-- [ ] 隐藏参考路径被拒绝；
-- [ ] 缺少必需字段时明确失败且不补造数据；
-- [ ] 同一输入重复渲染结果确定；
-- [ ] Task3 仅通过 HTTP 和 Schema 接入，不导入 Task4 内部实现；
-- [ ] 至少提供一份端到端示例和本地启动说明。
+- [x] 五类自动接入 Recipe 都使用真实或固定结构化 ResearchRun 输入渲染；
+- [x] 其余 Recipe 在没有合法聚合、geometry 或路径输入时不生成，显式输入不合格时记录 warning；
+- [x] 每张图同时输出 SVG、PNG、PDF 和源数据 CSV；
+- [x] 每个文件都有 SHA256；
+- [x] 不存在的 Execution ID 被拒绝；
+- [x] 未授权 Claim 在 Publication 阶段被拒绝；
+- [x] Fixture 实证图被拒绝；
+- [x] 隐藏参考路径被拒绝；
+- [x] 缺少必需字段时明确失败且不补造数据；
+- [x] 同一输入重复渲染结果确定；
+- [x] 主工作流只通过严格 Figure 契约调用进程内 Renderer；
+- [x] 前端显示 Recipe/version、图注、警告、Claim/Execution 与四种下载格式；
+- [x] 后端 `unittest`、`npm test` 和 `npm run build` 全部通过。
 
-## 15. 推荐交付节奏
+## 15. 主仓维护节奏
 
-### Milestone 1：冻结契约
+### Milestone 1：严格契约与最小渲染（已完成）
 
-交付：
+交付 `coefficient_forest`、`sample_flow`、严格 Figure Schema、四种文件格式、
+数据/文件哈希、H3 授权边界和确定性测试。
 
-- OpenAPI；
-- FigureRequest/FigureSpec/FigureArtifact/FigureBundle Schema；
-- 两个成功 Fixture；
-- 主要错误响应 Fixture。
+### Milestone 2：ResearchRun 自动配方（已完成）
 
-验收：Task3 能在不运行 Task4 的情况下，用 Fixture 完成 adapter 契约测试。
+交付并验证 `event_study`、`heterogeneity_forest`、`specification_curve`；每个
+Recipe 只能使用对应方法的真实或固定结构化输出，不能通过临时代码补字段。
 
-### Milestone 2：最小真实渲染
+### Milestone 3：聚合数据配方（已完成）
 
-交付：
+由主工作流核对冻结字段与数据哈希，输出趋势、描述统计、相关矩阵、
+分箱、五数概括和分箱散点输入。没有合法上游输入时保持未生成状态。
 
-- `coefficient_forest`；
-- `sample_flow`；
-- SVG/PNG/PDF/CSV；
-- 哈希与确定性测试。
+### Milestone 4：条件输入配方（契约与渲染已完成）
 
-验收：能够直接消费当前 Task3 的面板基准执行结果。
+`spatial_choropleth` 与 `mechanism_evidence_graph` 已启用严格契约、科学边界和缺失输入测试；
+具体 Run 仍只在冻结 geometry/value 来源或与 H2 `mechanism_graph` 完全一致的假设边存在时产图。
 
-### Milestone 3：AI Planner 与 Publication 边界
+## 16. 给主仓维护者的简版约束
 
-交付：
-
-- 配方选择与字段绑定；
-- H3 Claim 授权校验；
-- 标题、图注和 alt text；
-- Publication FigureBundle。
-
-验收：被拒绝 Claim 无法出现在论文图中。
-
-### Milestone 4：扩展配方
-
-交付：
-
-- event study；
-- robustness matrix；
-- heterogeneity forest；
-- 与 Task2 新方法输出的契约测试。
-
-验收：每个新配方都由对应方法的真实或固定结构化输出驱动，不通过临时代码适配。
-
-## 16. 给 Task4 同学的简版任务说明
-
-> 请实现一个独立的科研图形服务。服务不负责提出假设、选择计量方法、重新估计模型或判断结论，只负责把结构化 ResearchRun 和已授权 ClaimLedger 转换成可审计、可复现的科研图。大模型只能选择已注册图形配方、绑定字段并生成文案，不得生成和执行任意绘图代码。
+> 科研绘图模块只把结构化 ResearchRun、确定性聚合 Artifact 和已授权
+> ClaimLedger 转换成可审计、可复现的科研图；不提出假设、不选择计量方法、
+> 不重新估计模型，也不判断结论。它不得读取原论文、发表结果或
+> `02_hidden_reference`，不得调用生图模型或执行大模型生成的绘图代码。
 >
-> 服务第一版提供 `/v1/health`、`/v1/recipes`、`/v1/render`，输出 SVG、PNG、PDF、源数据 CSV 和 FigureBundle JSON。每张图记录 recipe/version、输入哈希、execution_ids、claim_ids、标题、图注、alt text、警告和输出哈希。
->
-> 服务不得读取原论文、发表结果或 `02_hidden_reference`。同一输入、同一配方、同一 Renderer 和同一字体环境必须产生确定性结果。缺少必需字段时明确失败，不得补造数值。
->
-> 第一版必须真实实现 `coefficient_forest` 和 `sample_flow`，并为 `event_study`、`robustness_matrix`、`heterogeneity_forest` 提供固定 Fixture 和接口。Task3 团队负责状态机和 HTTP 接入，你不需要直接修改 Task3 引擎。
+> 每张图必须记录 Recipe/version、输入哈希、Execution、Claim、标题、图注、
+> alt text、warning 和输出哈希，并同时导出 SVG、PNG、PDF 与源数据 CSV。
+> 同一输入、Recipe、Renderer 和字体环境必须产生确定性结果；缺少必需字段时
+> 明确跳过或失败，不补造数值。
 
 ## 17. 完成定义
 
@@ -777,5 +597,5 @@ Task4 的完成不是“能画出一张好看的图”，而是：
 2. 图形及其数据、版本、Claim 和 Execution 全部可追溯；
 3. 诊断图能在科学审计前使用；
 4. 论文图受到 H3 授权边界约束；
-5. 同一接口可供 HypoWeaver 和其他 Benchmark 系统调用；
+5. 主仓前端和受控 Benchmark 流程通过同一 Figure 契约读取；
 6. 输出能够随主 Run 一起封存，并由 App B 独立评估。

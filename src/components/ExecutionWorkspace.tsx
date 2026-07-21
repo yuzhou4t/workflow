@@ -129,16 +129,16 @@ function FigureGallery({ run }: { run: RunSnapshot }) {
     `/api/v1/runs/${encodeURIComponent(run.id)}/figures/${encodeURIComponent(figureId)}/${encodeURIComponent(format)}`
   )
   return <section className="figure-gallery">
-    <header><ImageIcon size={18} /><div><strong>科研图形 · GreenFinance Plot Agent</strong><small>绘图模块生成图片；HypoWeaver Writer 负责正文</small></div></header>
+    <header><ImageIcon size={18} /><div><strong>HypoWeaver 科研绘图</strong><small>确定性绘图模块生成图片；HypoWeaver Writer 负责正文</small></div></header>
     {visibleBundles.map((bundle) => <section key={bundle.stage} className="figure-bundle">
       <div className="figure-bundle__heading"><strong>{bundle.stage === 'evidence' ? 'H3 前证据图' : 'H3 后论文图'}</strong><span>{bundle.status === 'succeeded' ? `${bundle.figures.length} 张` : '生成失败'}</span></div>
       {bundle.figures.length > 0 && <div className="figure-grid">{bundle.figures.map((figure) => {
         const png = figure.files.find((file) => file.format === 'png')
         return <article key={figure.id}>
           {png && <img src={fileUrl(figure.id, 'png')} alt={figure.altText} loading="lazy" />}
-          <div className="figure-copy"><h3>{figure.title}</h3><p>{figure.caption}</p>
+          <div className="figure-copy"><p className="figure-recipe">{figure.recipeId} · v{figure.recipeVersion}</p><h3>{figure.title}</h3><p>{figure.caption}</p>
             <div className="figure-downloads">{figure.files.map((file) => <a key={file.format} href={fileUrl(figure.id, file.format)} target="_blank" rel="noreferrer"><Download size={12} />{file.format.toUpperCase()}</a>)}</div>
-            <small>Execution {figure.executionIds.join('、')} · Claim {figure.claimIds.join('、') || 'H3 前未授权'}</small>
+            <small>Execution {figure.executionIds.join('、') || '冻结源数据聚合（未绑定估计样本）'} · Claim {figure.claimIds.join('、') || 'H3 前未授权'}</small>
           </div>
         </article>
       })}</div>}

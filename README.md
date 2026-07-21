@@ -19,9 +19,11 @@
 → 从结构化科学威胁编译已注册方法的 Test DAG
 → Fixture / Python Research Engine（互斥）
 → 独立再次执行与数值复现审计
+→ H3 前证据图
 → 代码拥有的 Evidence Registry
 → 确定性 Claim Gate 编译 ClaimLedger
 → H3 逐条结论授权
+→ H3 后论文图
 → Manuscript IR 注入受保护事实并编译 8 节论文
 → 确定性全文一致性审计
 → H4 人工审稿与定点退回
@@ -52,7 +54,7 @@
 - 黑白极简 Research Bench：默认展示 HypoWeaver 纵向链路，可展开为与 Agent Laboratory 并排的双流程对照；
 - Agent Laboratory 独立基线启动器：复用同一 Dataset ID 与文件哈希，通过同级仓库的适配器异步运行并回传阶段状态；
 - 页面级运行配置入口，支持脱敏状态、私有保存与 Qwen/Research Engine 连接测试。
-- 仓库内置 GreenFinance Plot Agent：ResearchRun 后生成证据图，H3 后只为获授权 Claim 生成论文图；Writer 继续独立负责正文。
+- 仓库内置 HypoWeaver 科研绘图：渲染基础源自 `carolzhu-jr/GreenFinance_Plot_Agent` 的已登记基线提交，现由 HypoWeaver 主仓维护；ResearchRun 后生成证据图，H3 后只为获授权 Claim 生成论文图，Writer 继续独立负责正文。
 
 六系统正式比较由同级 [`benchmark-baselines/six-system-comparison`](../benchmark-baselines/six-system-comparison/README.md) 的中立 v3 harness 管理。当前 native 与 common-executor 两块能力板均为 `12/12`，这只表示六系统所需的结构化接口已经接通，不表示系统已通过案例科学门或具有同等科研能力。特别是 HypoWeaver 原生流程不能完整交付 Case 010 的 CR/AR 两个结果变量仍是明确能力缺口；Case 004/010 配对门未全部通过，144 单元 formal 批次仍关闭且没有正式得分。
 
@@ -275,7 +277,7 @@ python3.11 -m uvicorn hypoweaver.blind_api:app --port 8002
 backend/src/hypoweaver/
   api.py              FastAPI 接口
   visualization.py    Figure 契约、结果绑定与工作流适配
-  plot_agent/         合并自 GreenFinance_Plot_Agent 的内置确定性渲染模块
+  plot_agent/         源自 GreenFinance_Plot_Agent、现由 HypoWeaver 主仓维护的确定性渲染模块
   benchmark_runner.py Agent Laboratory 独立基线启动与状态适配
   research_api.py     独立 Python Research Engine 接口
   research_engine.py  受限面板计量执行器

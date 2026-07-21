@@ -33,7 +33,7 @@ from .prompts import get_prompt
 from .visualization import FigureBundle
 
 
-DEFINITION_VERSION = "1.7.0"
+DEFINITION_VERSION = "1.8.0"
 
 
 def _schema(model: type[BaseModel] | None) -> dict[str, Any] | None:
@@ -217,14 +217,14 @@ def build_app_a_definition() -> dict[str, Any]:
             _node("research_run_merge", "ResearchRun 汇合", "merge", "execution", "统一两类执行器输出，同时保留 execution_status 与 scientific_status。", 4340, 220, input_model=ResearchRun, output_model=ResearchRun),
             _node("replication_executor", "独立复现执行", "http", "execution", "企业面板使用 NumPy 双向去均值与企业聚类复算；政策 DID 使用 NumPy 多维组内变换与手工交互聚类复算；空间路径仅标记同实现重跑。", 4500, 320, input_model=FormalResearchContract, output_model=ResearchRun),
             _node("reproduction_audit", "复现一致性审计", "code", "execution", "逐步核对合同、数据哈希、样本流、固定效应、聚类设置、实现身份以及系数和标准误容差；核心不一致即阻塞。", 4620, 220, input_model=ResearchRun, output_model=ReproductionAudit),
-            _node("evidence_visualization", "证据图生成", "code", "audit", "调用仓库内置 GreenFinance Plot Agent，把成功 Execution 的结构化统计结果渲染为可追溯证据图；不接触原始数据，也不生成 Claim。", 4740, 260, input_model=ResearchRun, output_model=FigureBundle),
+            _node("evidence_visualization", "证据图生成", "code", "audit", "调用仓库内置 HypoWeaver 科研绘图模块，把成功 Execution 与确定性聚合数据渲染为可追溯证据图；渲染器不读取原始数据，也不生成 Claim。", 4740, 260, input_model=ResearchRun, output_model=FigureBundle),
             _node("evidence_assessment", "Evidence + Candidate Claims", "llm", "audit", "一次调用同时返回 EvidenceAssessment 与原始 Candidate ClaimLedger；拆分后原始候选账本保持不变。", 4620, 140, input_model=ResearchRun, output_model=EvidenceClaimBundle, prompt_key="evidence_claim_bundle"),
             _node("scientific_audit", "Scientific Audit", "llm", "audit", "独立判断合同遵从与科学有效性，代码成功不能自动通过。", 4900, 140, input_model=EvidenceAssessment, output_model=ScientificAudit, prompt_key="scientific_audit"),
             _node("claim_ledger", "Candidate ClaimLedger", "merge", "audit", "从 Evidence/Claim Bundle 原样拆出 LLM 候选结论；独立审计不得改写，该产物也不直接进入 H3。", 5180, 140, input_model=EvidenceClaimBundle, output_model=ClaimLedger),
             _node("evidence_registry", "Evidence Registry", "code", "audit", "将冻结检查的终态、执行引用、独立复算与审计结果编译为 Claim 级证据。", 5280, 260, input_model=ResearchRun, output_model=EvidenceRegistry),
             _node("claim_gate", "确定性 Claim Gate", "code", "audit", "无 LLM、无随机数、无 I/O；拒绝未知引用与未授权因果表述，输出 H3 唯一可读的 ClaimLedger。", 5380, 260, input_model=EvidenceRegistry, output_model=ClaimLedger),
             _node("h3_gate", "H3 · 逐条结论授权", "gate", "audit", "人工逐条批准、降级、暂缓或拒绝 Claim；Fixture 只能拒绝或暂缓。", 5460, 140, input_model=ClaimLedger, output_model=GateDecisionRequest),
-            _node("publication_visualization", "论文图生成", "code", "writing", "只把 H3 批准或降级 Claim 所引用的 Execution 交给内置 Plot Agent；图形模块不参与正文写作。", 5600, 260, input_model=ClaimLedger, output_model=FigureBundle),
+            _node("publication_visualization", "论文图生成", "code", "writing", "只把 H3 批准或降级 Claim 所引用的 Execution 交给内置科研绘图模块；图形模块不参与正文写作。", 5600, 260, input_model=ClaimLedger, output_model=FigureBundle),
             _node("scientific_writer", "Scientific Writer", "llm", "writing", "用两次批量调用覆盖八章；只读取安全叙述与 statement ID，定向修复只重写未通过章节。", 5740, 140, input_model=ClaimLedger, output_model=ManuscriptSectionDraftBatch, prompt_key="manuscript_section_draft_batch"),
             _node("manuscript_ir_compile", "Manuscript IR 编译", "code", "writing", "从获批 Claim 与成功 Execution 重建语句注册表，解析锚点并按 JSON Pointer 注入受保护值。", 5900, 140, input_model=ManuscriptPackage, output_model=ManuscriptPackage),
             _node("consistency_audit", "写作一致性审计", "code", "writing", "确定性检查完整章节、未授权 Claim、虚构统计量、Run 引用与成果模式。", 6020, 140, input_model=ManuscriptPackage, output_model=ManuscriptPackage),

@@ -1487,6 +1487,7 @@ class WorkflowEngine:
         *,
         approved_ledger: ClaimLedger | None = None,
         allowed_estimate_terms: set[str] | None = None,
+        allow_dataset_derivation: bool = True,
     ) -> FigureBundle:
         if stage not in {"evidence", "publication"}:
             raise ValueError(f"unknown figure stage: {stage}")
@@ -1518,13 +1519,41 @@ class WorkflowEngine:
             artifact_key="research_run",
             sha256=str(envelope["sha256"]),
         )
+        contract = self._artifact(
+            state,
+            "formal_research_contract",
+            FormalResearchContract,
+        )
+        dataset_path: Path | None = None
+        dataset_source: FigureSource | None = None
+        dataset_warnings: list[str] = []
+        if stage == "evidence" and contract.dataset_refs and allow_dataset_derivation:
+            main_ref = next(
+                (item for item in contract.dataset_refs if item.role == "main"),
+                contract.dataset_refs[0],
+            )
+            try:
+                dataset_path = self.dataset_registry.resolve(main_ref)
+                dataset_source = FigureSource(
+                    artifact_id=f"dataset:{main_ref.dataset_id}",
+                    artifact_key=main_ref.filename,
+                    sha256=main_ref.sha256,
+                )
+            except CaseImportError as error:
+                dataset_warnings.append(
+                    f"描述类科研图未生成：主数据资产不可用（{error}）。"
+                )
         requests, warnings = build_figure_requests(
             run,
             source,
             stage,
             approved_ledger=approved_ledger,
             allowed_estimate_terms=allowed_estimate_terms,
+            contract=contract,
+            dataset_path=dataset_path,
+            dataset_source=dataset_source,
         )
+        warnings = [*dataset_warnings, *warnings]
         if not requests:
             reason = " ".join(warnings) or "没有满足绘图配方的数据。"
             bundle = empty_figure_bundle(stage, reason)
@@ -4556,6 +4585,7 @@ class WorkflowEngine:
             state,
             research_run,
             "evidence",
+            allow_dataset_derivation=common_execution_result is None,
         )
 
         mechanism_claim_ids: set[str] = set()

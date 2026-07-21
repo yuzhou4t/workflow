@@ -169,6 +169,7 @@ export interface FigureFileView {
 export interface FigureView {
   id: string
   recipeId: string
+  recipeVersion: string
   title: string
   caption: string
   altText: string
