@@ -4,23 +4,6 @@
 
 新同学接手时，请先阅读 [`README_NEXT_STEPS.md`](README_NEXT_STEPS.md)。其中写明当前架构、真实案例暴露的不足、下一阶段任务拆分、代码入口与逐项验收标准。
 
-## 四人任务与六系统测试入口
-
-本项目只使用这一个公开仓库。Case 测试和前端任务的说明统一放在
-[`student-ops/`](student-ops/README.md)，不再需要另一个任务仓库：
-
-| 分工 | 任务书 |
-|---|---|
-| Case 005：完整六系统测试 | [`student-ops/assignments/CASE_005.md`](student-ops/assignments/CASE_005.md) |
-| Case 007：完整六系统测试 | [`student-ops/assignments/CASE_007.md`](student-ops/assignments/CASE_007.md) |
-| Case 009：修复后完整六系统重跑 | [`student-ops/assignments/CASE_009.md`](student-ops/assignments/CASE_009.md) |
-| HypoWeaver 前端 UI | [`student-ops/assignments/FRONTEND_UI.md`](student-ops/assignments/FRONTEND_UI.md) |
-
-Case 同学在 Windows 11 上先按
-[`student-ops/docs/STUDENT_RUNBOOK_ZH.md`](student-ops/docs/STUDENT_RUNBOOK_ZH.md)
-让自己的 AI 配置 WSL2 环境并生成环境报告。当前只做环境准备；正式 release、本人负责的
-可见案例包和授权材料由负责人后续私发并明确解锁。
-
 当前第一版优先验证一条可信的核心闭环：
 
 ```text
@@ -33,12 +16,14 @@ Case 同学在 Windows 11 上先按
 → 每个候选的无结果 Probe
 → 四类隔离 Reviewer（并行）
 → H2 人工选择候选并冻结 FormalResearchContract
+→ 从结构化科学威胁编译已注册方法的 Test DAG
 → Fixture / Python Research Engine（互斥）
 → 独立再次执行与数值复现审计
-→ EvidenceAssessment + ScientificAudit
-→ ClaimLedger
+→ 代码拥有的 Evidence Registry
+→ 确定性 Claim Gate 编译 ClaimLedger
 → H3 逐条结论授权
-→ 8 节受约束写作与确定性一致性审计
+→ Manuscript IR 注入受保护事实并编译 8 节论文
+→ 确定性全文一致性审计
 → H4 人工审稿与定点退回
 → 封存成果包
 ```
@@ -50,7 +35,11 @@ Case 同学在 Windows 11 上先按
 - 真正会暂停的 H1/H2/H3/H4 服务端状态机；
 - 三个候选研究设计、无结果 Probe、四类隔离 Reviewer 与人工候选选择；
 - H2 计划哈希冻结、乐观版本控制和幂等审批键；
+- 将结构化 Reviewer 威胁编译为企业面板或政策 DID Test DAG，并把稳定 Claim ID、必做检查和执行终态绑定到冻结计划；
 - 冻结合同的主执行、独立复算与数值容差复现审计；
+- 代码拥有的 Evidence Registry 与无 LLM、无随机数的确定性 Claim Gate；模型生成的 `ScientificAudit` 只保留为辅助意见，不能覆盖代码门禁；
+- Manuscript IR v1：实证语句绑定 Claim、Execution 和 JSON Pointer，统计数字由代码注入，裸数字、未授权因果措辞和悬空来源会失败关闭；
+- common-executor 原生接口：结果前运行到 `waiting_human/H2` 即停止，只允许用与原请求精确哈希绑定的密封公共执行结果恢复到 H3 与 Claim Gate；
 - SQLite 持久化 Run、Step Attempt、事件、决策和 Artifact，刷新页面可恢复；
 - 节点级 Prompt 模板/本次渲染、实际输入、实际输出和日志；
 - Fixture 与外部 Python 执行器接口；
@@ -64,140 +53,47 @@ Case 同学在 Windows 11 上先按
 - Agent Laboratory 独立基线启动器：复用同一 Dataset ID 与文件哈希，通过同级仓库的适配器异步运行并回传阶段状态；
 - 页面级运行配置入口，支持脱敏状态、私有保存与 Qwen/Research Engine 连接测试。
 
-## Windows 11 从零安装与本地启动
+六系统正式比较由同级 [`benchmark-baselines/six-system-comparison`](../benchmark-baselines/six-system-comparison/README.md) 的中立 v3 harness 管理。当前 native 与 common-executor 两块能力板均为 `12/12`，这只表示六系统所需的结构化接口已经接通，不表示系统已通过案例科学门或具有同等科研能力。特别是 HypoWeaver 原生流程不能完整交付 Case 010 的 CR/AR 两个结果变量仍是明确能力缺口；Case 004/010 配对门未全部通过，144 单元 formal 批次仍关闭且没有正式得分。
 
-同学的默认环境是 **Windows 11 + WSL2 + Ubuntu**。Git、Python、Node.js、测试和启动命令都在 Ubuntu 终端中执行，不要混用 Windows Python 与 WSL Python，也不要把项目放在 OneDrive 或 `/mnt/c` 下。
+## 从零安装与本地启动
 
-项目要求：
-
-- Python 3.11 或 3.12；
-- Node.js 20.19+；
-- Git；
-- 仅运行本工作流时不需要 Docker。执行 SixBench 六系统隔离测试时，另按
-  [`student-ops`](student-ops/README.md) 中的任务书安装 Docker Desktop。
-
-### 第 1 步：安装 WSL2 和 Ubuntu
-
-在 Windows 中右键 PowerShell，选择“以管理员身份运行”：
-
-```powershell
-wsl --install
-wsl --update
-wsl --set-default-version 2
-wsl -l -v
-```
-
-首次安装后按系统提示重启。如果没有自动安装 Ubuntu，先查看可用名称：
-
-```powershell
-wsl --list --online
-```
-
-如果列表中存在 `Ubuntu-24.04`，推荐安装它：
-
-```powershell
-wsl --install -d Ubuntu-24.04
-```
-
-安装完成后打开 Ubuntu，按提示创建 Linux 用户名和密码。`wsl -l -v` 中该 Ubuntu 的 `VERSION` 必须是 `2`。官方说明见 [Microsoft WSL 安装文档](https://learn.microsoft.com/windows/wsl/install)。
-
-### 第 2 步：在 Ubuntu 中安装基础工具
-
-以下命令全部在 Ubuntu 终端执行：
+要求 Python 3.11、Node.js 20.19+ 和 Git。下面命令适用于 macOS / Linux：
 
 ```bash
-sudo apt update
-sudo apt install -y git curl ca-certificates build-essential python3 python3-venv python3-pip
-
-python3 --version
-git --version
-```
-
-`python3 --version` 必须显示 3.11 或 3.12。如果不是这两个版本，先停止，让本机 AI 根据实际 Ubuntu 版本安装受支持的 Python，不要跳过版本检查。
-
-使用 nvm 安装 Node.js 20：
-
-```bash
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
-source ~/.bashrc
-nvm install 20
-nvm alias default 20
-
-node --version
-npm --version
-```
-
-`node --version` 必须不低于 `v20.19.0`。nvm 的安装与验证方式见 [nvm 官方仓库](https://github.com/nvm-sh/nvm)。
-
-### 第 3 步：克隆项目并安装依赖
-
-项目放在 WSL 自己的 Linux 文件系统：
-
-```bash
-mkdir -p ~/work
-cd ~/work
 git clone https://github.com/yuzhou4t/workflow.git
 cd workflow
 
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
+python3.11 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r backend/requirements.txt
 npm ci
 ```
 
-以后每次新开 Ubuntu 终端，都先进入项目并激活虚拟环境：
+先在仓库根目录运行离线验证；这一步不需要 API Key 或案例数据：
 
 ```bash
-cd ~/work/workflow
-source .venv/bin/activate
-```
-
-### 第 4 步：先做离线验证
-
-这一步不需要 API Key，也不需要案例数据：
-
-```bash
-cd ~/work/workflow
-source .venv/bin/activate
-export PYTHONPATH=backend/src
-
-python -m unittest discover -s backend/tests -v
+PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v
 npm test
 npm run build
 ```
 
-三项都通过后再启动服务。若失败，把完整错误交给本机 AI 排查，不要通过删除测试或修改科学门禁来“修绿”。
-
-### 第 5 步：在三个 Ubuntu 终端启动服务
-
-终端一，启动主后端：
+然后分别在三个终端启动主后端、研究执行器和前端：
 
 ```bash
-cd ~/work/workflow
-source .venv/bin/activate
-export PYTHONPATH=backend/src
-python -m uvicorn hypoweaver.api:app --port 8000
+PYTHONPATH=backend/src .venv/bin/python -m uvicorn hypoweaver.api:app --port 8000
 ```
 
-终端二，启动研究执行器：
-
 ```bash
-cd ~/work/workflow
-source .venv/bin/activate
-export PYTHONPATH=backend/src
-python -m uvicorn hypoweaver.research_api:app --port 9000
+PYTHONPATH=backend/src .venv/bin/python -m uvicorn hypoweaver.research_api:app --port 9000
 ```
 
-终端三，启动前端：
-
 ```bash
-cd ~/work/workflow
-source ~/.bashrc
 npm run dev -- --port 5174
 ```
 
-Windows 浏览器直接访问 `http://127.0.0.1:5174`。前端开发服务器会把 `/api` 代理到 `http://127.0.0.1:8000`；也可以设置 `VITE_API_TARGET` 指向其他后端地址。
+Windows PowerShell 可使用 `py -3.11 -m venv .venv`，并将上面的 `.venv/bin/python` 替换为 `.venv\Scripts\python.exe`；运行 Python 命令前设置 `$env:PYTHONPATH="backend/src"`。
+
+前端开发服务器会把 `/api` 代理到 `http://127.0.0.1:8000`。也可以设置 `VITE_API_TARGET` 指向其他后端地址。
 
 页面入口：
 
@@ -213,56 +109,6 @@ http://127.0.0.1:5174/#settings  API Key、模型和执行器配置
 curl -s http://127.0.0.1:8000/api/v1/health
 curl -s http://127.0.0.1:9000/v1/health
 ```
-
-两个地址都应返回健康状态。端口被占用时先查明占用进程，不要随意结束未知服务。
-
-### 可以直接交给本机 AI 的安装提示词
-
-```text
-你负责在这台 Windows 11 电脑上部署 HypoWeaver workflow。
-
-请严格按照本 README 的“Windows 11 从零安装与本地启动”执行：
-1. 先检查 WSL2、Ubuntu、Python、Node.js、npm、Git 和可用磁盘；
-2. 管理员权限、启用 WSL、安装系统组件和重启前必须让我确认；
-3. 所有项目命令在 WSL2 Ubuntu 中执行，项目放在 ~/work，不放 OneDrive 或 /mnt/c；
-4. Python 必须为 3.11 或 3.12，Node.js 必须不低于 20.19；
-5. 先创建 .venv、安装依赖并运行后端测试、前端测试和生产构建；
-6. 离线验证全部通过后，向我汇报版本、命令结果和仍存在的 blocker；
-7. 在我提供 API Key 前，不测试外部模型、不搜索案例数据、不修改科学门禁；
-8. 需要 API Key 时让我本人在 #settings 页面输入，不要要求我把 Key 发到聊天、命令或文件中。
-
-遇到错误时保留完整日志，说明原因和最小修复方案；不要静默更换 Python、模型、代码分支或测试标准。
-```
-
-### 可以按需获取什么
-
-本机 AI 可以按需克隆这个公开仓库，并通过 `apt`、`pip` 和 `npm` 获取 README 明确列出的公开
-依赖。开始修改前必须先记录当前仓库 URL、分支、完整 commit 和 `git status`；如果任务书给了
-指定 base commit，就切到该 commit 后再创建自己的分支，不能直接用当时最新的 `main` 代替。
-
-按需获取不包括案例数据、论文、作者代码、隐藏参考、已有系统输出或互联网上搜索到的
-“相似案例”。这些内容不属于本工作流公开仓库，也不能由 AI 自行补齐。用于 SixBench 正式
-六系统测试时，还必须服从任务仓库发放的精确 release：只能获取 release 列出的公开仓库和
-完整 commit；冻结后不得再 `git pull`、换分支或更新依赖。
-
-<details>
-<summary>已有 macOS / Linux 环境的简短安装方式</summary>
-
-已有 Python 3.11/3.12、Node.js 20.19+ 和 Git 时，可以使用：
-
-```bash
-git clone https://github.com/yuzhou4t/workflow.git
-cd workflow
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-npm ci
-```
-
-后续验证和启动命令与上面的 WSL2 命令相同。
-
-</details>
 
 ## 首次配置与测试范围
 
@@ -301,9 +147,7 @@ backend/var/datasets.json
 ## 验证
 
 ```bash
-source .venv/bin/activate
-export PYTHONPATH=backend/src
-python -m unittest discover -s backend/tests -v
+PYTHONPATH=backend/src python3.11 -m unittest discover -s backend/tests -v
 npm test
 npm run build
 ```
@@ -378,9 +222,7 @@ Qwen 测试会发起一次 `max_tokens=1` 的最小模型调用；Research Engin
 本仓库同时提供一个独立、受限的本地执行器。它不执行模型生成的任意代码，只按冻结合同运行已经实现的估计器；当前支持 `panel_association`、`mechanism_boundary` 的双向固定效应基准模型，以及具有固定权重资产、双向固定效应和直接/间接/总效应分解的空间杜宾基准模型。其他方法会明确返回未支持：
 
 ```bash
-source .venv/bin/activate
-export PYTHONPATH=backend/src
-python -m uvicorn hypoweaver.research_api:app --port 9000
+PYTHONPATH=backend/src python3.11 -m uvicorn hypoweaver.research_api:app --port 9000
 ```
 
 执行器读取私有 Dataset Registry，通过 Dataset ID 解析已上传 CSV，并在估计前复核文件 SHA256。企业面板合同会按 H2 冻结参数逐项运行当前已支持的诊断、稳健性、证伪、机制和异质性步骤；不支持或预算内未完成的步骤会明确标记，不会静默替换模型。空间执行器当前只支持冻结的空间杜宾基准模型。`scientific_status` 由实际完成情况和识别边界决定，不能由代码运行成功自动升级。
@@ -418,10 +260,9 @@ Schema 不能识别用户故意粘贴进普通自由文本字段的隐藏答案�
 盲测 App B 已实现为独立进程与独立 SQLite 数据库。它只能在主 Run 封存后读取 `sealed_output + AnalysisPlan + ResearchRun + ClaimLedger + HiddenReference`，先验证 HMAC 封存签名和各 Artifact 哈希，再执行六维评估；LLM 只能建议分项分数，总分由代码按适用权重计算。App B 没有任何回写 App A 的接口。
 
 ```bash
-source .venv/bin/activate
-export PYTHONPATH=backend/src
-export HYPOWEAVER_BLIND_DB_PATH=backend/var/blind/hypoweaver_blind.db
-python -m uvicorn hypoweaver.blind_api:app --port 8002
+PYTHONPATH=backend/src \
+HYPOWEAVER_BLIND_DB_PATH=backend/var/blind/hypoweaver_blind.db \
+python3.11 -m uvicorn hypoweaver.blind_api:app --port 8002
 ```
 
 `05_AppB_BlindEvaluator.yml` 同样只是历史设计参考，不参与运行。
@@ -442,6 +283,10 @@ backend/src/hypoweaver/
   definition.py       代码工作流定义
   engine.py           状态机与闸门
   models.py           严格领域 Schema
+  test_dag.py         方法检查注册表、Test DAG 与 Evidence Registry 编译
+  claim_gate.py       确定性 Claim 准入与最大措辞门
+  manuscript_ir.py    受保护事实注入与论文 IR 编译审计
+  common_executor_adapter.py  H2 结果前停止与密封结果恢复
   prompts.py          版本化 Prompt 注册表
   adapters.py         Fixture、Qwen 与 Python 执行器适配
   repository.py       SQLite Run 快照与乐观锁

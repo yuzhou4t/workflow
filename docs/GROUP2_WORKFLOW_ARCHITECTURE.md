@@ -45,19 +45,21 @@ Reviewer Arena 汇合：淘汰硬失败，保留多个可行候选
   ↓
 H2：人工选择一个候选并冻结 FormalResearchContract
   ↓
+从结构化科学威胁编译已注册方法的 Test DAG
+  ↓
 真实执行器运行冻结模型
   ↓
 独立再次执行 + 数值容差复现审计
   ↓
-EvidenceAssessment + ScientificAudit
+代码拥有的 Evidence Registry
   ↓
-ClaimLedger
+确定性 Claim Gate 编译 ClaimLedger
   ↓
 H3：逐条批准、降级、暂缓或拒绝结论
   ↓
-8 个通用论文章节分节写作
+Manuscript IR 绑定 Claim、Execution 与受保护事实
   ↓
-确定性证据、变量角色与 H3 授权审计
+8 个通用论文章节分节写作 + 确定性全文审计
   ↓
 H4：人工批准、退回指定章节或终止
   ↓
@@ -74,10 +76,10 @@ HMAC 防篡改封存
 | Evidence–Idea Loop | 三个候选设计器 | 只处理已有假设的研究设计，不承担文献和政策 Scout |
 | 多方案竞争与质疑 | Candidate Set + 4 个隔离 Reviewer | 不用总分或多数投票决定科学真值，硬失败直接淘汰 |
 | G2 候选选择 | 合并进 H2 | 当前案例已有数据，先完成无结果 Probe，再由人选择候选 |
-| Probe Tree / G3 | 每候选 ProbeReport + H2 合同冻结 | 已实现低成本结构预检；尚未实现多层可执行分支树和预算树 |
+| Probe Tree / G3 | ProbeReport + H2 合同冻结 + 企业面板/政策 DID Test DAG | 已实现低成本结构预检、稳定威胁/Claim 绑定和必做检查终态；尚未实现其他方法注册表和开放式多层预算树 |
 | Formal Research Loop | 冻结合同、真实执行、独立复现 | 已实现主运行与第二次独立运行的确定性比较 |
-| G4 Claim 审核 | H3 ClaimLedger | 已实现逐条授权、降级、暂缓和拒绝 |
-| Writing–Review Loop | 分节 Writer + 证据审计 + H4 | 已实现 H4 定点退回；未提供文献时禁止虚构引用 |
+| G4 Claim 审核 | Evidence Registry + 确定性 Claim Gate + H3 | 代码先给出准入状态与最大措辞，人类只能批准、降级、暂缓或拒绝，不能越过上限 |
+| Writing–Review Loop | Manuscript IR + 分节 Writer + H4 | 统计事实由代码按来源指针注入，H4 支持定点退回；未提供文献时禁止虚构引用 |
 | G5 发布决定 | H4 封存决定 | 当前第一版将最终人工发布关口命名为 H4 |
 | Versioned Memory | SQLite Run / Step / Event / Decision / Artifact | 已实现单 Run 可恢复审计历史；跨任务经验库尚未启用 |
 
@@ -90,6 +92,8 @@ HMAC 防篡改封存
 5. 最终方案由人类在 H2 选择并冻结。
 
 这实现了《框架设计》中“扩大探索空间、降低自我认证风险、保留多个可行方案”的核心思想。尚未实现的是动态 19 角色池、Scout 证据图和完整多分支 Probe Tree；这些应在前三个案例验证稳定后再扩展。
+
+用于六系统 common-executor 对照时，同一生产状态机会在 `waiting_human/H2`、冻结合同和任何统计结果产生之前停止。恢复入口只接受与原 `AnalysisRequest` 精确哈希绑定的密封公共执行结果，跳过原生估计器后继续 Evidence Registry、Claim Gate 与 H3；重新规划、换结果或直接给 Writer 看结果都不属于该接口。
 
 ## 4. 怎样自然贴近原文方法
 
@@ -145,45 +149,17 @@ H3 将三条结论全部降级为“未发现达到常用统计显著性阈值�
 
 这个案例只能视为“方法选择与流程约束压力测试”，不能视为原论文的数值复现。隐藏参考揭示后确认：原文使用 31 省样本和作者的试点区距离矩阵，而安全案例只有 30 省，并使用公开坐标按披露公式独立重建的全省距离矩阵；部分控制变量也只能近似映射。只有取得原始分析样本、固定省份顺序和作者实际权重矩阵后，才应计算系数复现误差。
 
-## 6. 下一步 Benchmark 计划
+## 6. 六系统 Benchmark v3 的当前边界
 
-### 第一步：3 个案例校准
+正式协议由同级 [`six-system-comparison`](../../benchmark-baselines/six-system-comparison/README.md) 中立 harness 管理，不再由本仓库内的双流程演示或 App B 单独定义。当前比较 HypoWeaver、Agent Laboratory、data-to-paper、Direct Qwen、Qwen Code-Agent + fixed Writer 和 DeepScientist。
 
-选择三类互补案例：
+它保留两块互不混合的能力板：
 
-1. 企业面板固定效应案例；
-2. 政策评估 DID 案例；
-3. 空间面板案例。
+- `native_system_package`：比较六套系统按各自原生流程交付完整科研包的能力；
+- `common_executor_reasoning_control`：六套流程先提交无结果分析请求，再使用同一 benchmark 执行器，比较方法选择、诊断和主张校准。
 
-每个案例同时运行 HypoWeaver、Agent Laboratory 和原论文参考，但隐藏参考只在两个系统封存后揭示。
+每块能力板又分别报告两个输入视图：`discovery_blind` 是自主选方法的主视图，`reproduction_aligned` 是给定冻结方法规格的复现诊断视图；二者不平均。两个能力板当前均显示 `12/12`，只说明结构化前后阶段或声明接口已经接通，不说明系统通过科学硬门，也不证明案例级科研能力相同。HypoWeaver 原生流程不能完整交付 Case 010 的 CR/AR 两个结果变量仍是明确能力缺口，不能用接口齐全代替这项能力证据。
 
-### 第二步：统一比较维度
+当前 formal 明确关闭：Case 004 的科学冻结失败；Case 010 虽通过本地科学复算，但第三方数据处理权和哈希绑定外发授权未解决，而且正式协议要求 Case 004/010 成对通过，不能退化为 Case 010 单案例正式榜。因此目前没有 144 单元 formal 结果，也没有可发布的正式排名。Case 005/007/009 仍是 validation；在最终哈希绑定授权前也没有外发运行。即使未来两个准留出案例完成，结论也只能表述为“初步跨方法证据”，不能据此宣称通用 AI Scientist 能力已获证明。
 
-每个系统至少比较：
-
-- 研究问题与估计目标覆盖率；
-- 变量角色、样本、权重或处理定义忠实度；
-- 方法家族与原文方法的结构对齐程度；
-- 代码执行状态与科学有效状态；
-- 主结果方向、量级、显著性和样本量差异；
-- 诊断、稳健性、证伪和复现完成率；
-- 未授权结论进入稿件的数量；
-- Reviewer 发现专家标注问题的召回率和误报率；
-- 人工闸门耗时、LLM 调用量与总耗时。
-
-### 第三步：做消融实验
-
-至少对比：
-
-- 去掉隔离 Reviewer；
-- 去掉 Probe；
-- 去掉 H2 合同冻结；
-- 去掉独立复现；
-- 去掉 H3 写作白名单；
-- 全自动与人机协作。
-
-这样才能回答性能提升究竟来自“更多 Agent”，还是来自独立质疑、真实执行、冻结合同与人工把关。
-
-### 第四步：再扩展完整目标态
-
-只有前三个案例达到稳定门槛后，再增加完整 Probe Tree、预算控制、Scout / EvidenceBundle、Citation Auditor、跨任务版本化记忆和 12 案例 Benchmark。否则过早引入 19 个角色只会增加编排成本，无法证明研究质量真的提高。
+后续消融仍应围绕隔离 Reviewer、Probe、H2 冻结、独立复算、Claim Gate 与 Manuscript IR 展开，用故障召回、证据可追溯、主张越界和资源成本解释差异，而不是把多 Agent 数量本身当作研究贡献。

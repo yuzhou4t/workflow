@@ -2201,6 +2201,129 @@ class WorkflowEngine:
         finally:
             self.repository.release_transition(run_id, request.idempotency_key)
 
+    async def ingest_external_research_run(
+        self,
+        run_id: str,
+        *,
+        selected_candidate_id: str,
+        analysis_request: dict[str, Any],
+        execution_result_bytes: bytes,
+        execution_result_sha256: str,
+        expected_run_version: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> RunState:
+        """Approve H2 and resume through H3 with one sealed external result.
+
+        This is the native common-executor stop/resume boundary.  The current
+        Run must still be waiting at its genuine H2 gate; no native statistical
+        executor is called.  Validation of the shared benchmark contracts is
+        delegated to ``common_executor_adapter`` before any transition is
+        claimed or persisted.
+        """
+
+        from .common_executor_adapter import (
+            build_pre_result_binding,
+            validate_sealed_common_result,
+        )
+
+        if self.model_call_budget_mode != "v3":
+            raise WorkflowTransitionError(
+                "external ResearchRun ingestion requires the frozen v3 model budget"
+            )
+        state = self.get_run(run_id)
+        transition_key = idempotency_key or f"common-executor-{uuid4()}"
+        if transition_key in state.processed_idempotency_keys:
+            return state
+        if expected_run_version is not None and expected_run_version != state.version:
+            raise VersionConflictError(
+                f"run {run_id} changed; expected version {expected_run_version}, "
+                f"actual {state.version}"
+            )
+        if state.status != "waiting_human" or state.current_gate != "H2":
+            raise WorkflowTransitionError(
+                "external ResearchRun ingestion requires a waiting H2 Run"
+            )
+        _request, request_binding = build_pre_result_binding(
+            state,
+            analysis_request,
+            selected_candidate_id=selected_candidate_id,
+        )
+        if hashlib.sha256(execution_result_bytes).hexdigest() != execution_result_sha256:
+            raise WorkflowTransitionError(
+                "external execution result bytes do not match the declared sha256"
+            )
+        result_model, result_binding = validate_sealed_common_result(
+            execution_result_bytes,
+            pre_result_binding=request_binding,
+        )
+        if self._refresh_h2_test_dag_if_needed(state, selected_candidate_id):
+            raise WorkflowTransitionError(
+                "H2 plan required deterministic migration after AnalysisRequest export; "
+                "discard the result and rerun the pre-result stage"
+            )
+
+        current_version = state.version
+        self.repository.claim_transition(
+            run_id,
+            expected_version=current_version,
+            idempotency_key=transition_key,
+        )
+        try:
+            reviewed_hashes = self._gate_artifact_hashes(state, "H2")
+            state.processed_idempotency_keys.append(transition_key)
+            decision = DecisionRecord(
+                gate="H2",
+                action="approve",
+                actor="benchmark_common_executor",
+                comment=(
+                    "Freeze the selected native H2 design and ingest the exact "
+                    "benchmark-owned common-executor result."
+                ),
+                selected_candidate_id=selected_candidate_id,
+                reviewed_hashes=reviewed_hashes,
+            )
+            state.decisions.append(decision)
+            self._record_step(
+                state,
+                "h2_gate",
+                "succeeded",
+                input_value={"reviewed_artifacts": reviewed_hashes},
+                output_value=decision,
+                logs=["H2 common-executor decision was recorded before result ingestion."],
+            )
+            state.current_gate = None
+            self._put_artifact(
+                state,
+                "common_executor_request_binding",
+                request_binding,
+            )
+            self._put_artifact(
+                state,
+                "common_executor_result_binding",
+                result_binding,
+            )
+            try:
+                await self._after_h2(
+                    state,
+                    decision,
+                    common_execution_result=result_model,
+                )
+            except WorkflowTransitionError:
+                raise
+            except Exception as error:
+                state.status = "failed"
+                state.last_error = str(error)
+                self._event(
+                    state,
+                    "run.failed",
+                    f"Common-executor H3 resume failed: {error}",
+                    node_id=state.current_node_id,
+                    status="failed",
+                )
+            return self.repository.save(state, expected_version=current_version)
+        finally:
+            self.repository.release_transition(run_id, transition_key)
+
     @staticmethod
     def _gate_artifact_hashes(state: RunState, gate: str) -> dict[str, str]:
         keys = {
@@ -3981,7 +4104,13 @@ class WorkflowEngine:
             )
             self._put_artifact(state, "analysis_plan", plan)
 
-    async def _after_h2(self, state: RunState, decision: DecisionRecord) -> None:
+    async def _after_h2(
+        self,
+        state: RunState,
+        decision: DecisionRecord,
+        *,
+        common_execution_result: dict[str, Any] | None = None,
+    ) -> None:
         state.status = "running"
         package = self._artifact(state, "research_package", ResearchPackage)
         if "design_arena" in state.artifacts:
@@ -4071,41 +4200,71 @@ class WorkflowEngine:
 
         # Execution mode is a code-owned boundary.  A model-authored design_only
         # flag must never route a real external case through FixtureExecutor.
-        use_fixture = state.execution_mode == "fixture"
-        executor: ResearchExecutor = (
-            FixtureExecutor()
-            if use_fixture
-            else HttpResearchExecutor(self.runtime_config_store)
-        )
-        selected_node = "fixture_executor" if use_fixture else "external_executor"
-        skipped_node = "external_executor" if use_fixture else "fixture_executor"
+        # The common board is the only alternate route: its exact result bytes
+        # were validated and persisted before this method was entered.
+        common_reproduction_audit: ReproductionAudit | None = None
+        if common_execution_result is not None:
+            from .common_executor_adapter import build_bound_research_run
+
+            use_fixture = False
+            selected_node = "common_executor"
+            skipped_nodes = ("fixture_executor", "external_executor")
+            research_run, common_reproduction_audit = build_bound_research_run(
+                common_execution_result,
+                contract,
+            )
+            executor_name = "benchmark-owned common executor"
+            executor = None
+        else:
+            use_fixture = state.execution_mode == "fixture"
+            executor = (
+                FixtureExecutor()
+                if use_fixture
+                else HttpResearchExecutor(self.runtime_config_store)
+            )
+            selected_node = "fixture_executor" if use_fixture else "external_executor"
+            skipped_nodes = (
+                ("external_executor",)
+                if use_fixture
+                else ("fixture_executor",)
+            )
+            executor_name = executor.executor_name
         self._record_step(
             state,
             "execution_router",
             "succeeded",
-            input_value={"execution_mode": state.execution_mode, "design_only": plan.design_only},
+            input_value={
+                "execution_mode": (
+                    "common_executor_reasoning_control"
+                    if common_execution_result is not None
+                    else state.execution_mode
+                ),
+                "design_only": plan.design_only,
+            },
             output_value={"selected": selected_node},
             logs=[f"执行器路由选择 {selected_node}。"],
         )
-        self._record_step(
-            state,
-            skipped_node,
-            "skipped",
-            input_value=contract,
-            logs=["互斥执行器未被选择。"],
-        )
-        try:
-            research_run = await executor.execute(contract)
-        except Exception as error:
+        for skipped_node in skipped_nodes:
             self._record_step(
                 state,
-                selected_node,
-                "failed",
+                skipped_node,
+                "skipped",
                 input_value=contract,
-                logs=["执行器调用失败；没有生成或补造任何统计结果。"],
-                error=str(error),
+                logs=["互斥执行器未被选择。"],
             )
-            raise
+        if executor is not None:
+            try:
+                research_run = await executor.execute(contract)
+            except Exception as error:
+                self._record_step(
+                    state,
+                    selected_node,
+                    "failed",
+                    input_value=contract,
+                    logs=["执行器调用失败；没有生成或补造任何统计结果。"],
+                    error=str(error),
+                )
+                raise
         self._validate_research_run_binding(research_run, contract)
         self._record_step(
             state,
@@ -4113,7 +4272,7 @@ class WorkflowEngine:
             "succeeded",
             input_value=contract,
             output_value=research_run,
-            logs=[f"{executor.executor_name} 返回通过 ResearchRun Schema 的结果。"],
+            logs=[f"{executor_name} 返回通过 ResearchRun Schema 的结果。"],
         )
         self._record_step(
             state,
@@ -4124,7 +4283,20 @@ class WorkflowEngine:
             logs=["执行状态与科学状态已分别保留。"],
         )
         reproduction_audit: ReproductionAudit
-        if use_fixture:
+        if common_reproduction_audit is not None:
+            reproduction_audit = common_reproduction_audit
+            self._record_step(
+                state,
+                "replication_executor",
+                "skipped",
+                input_value=contract,
+                output_value=reproduction_audit,
+                logs=[
+                    "Common-executor control supplied one execution only; "
+                    "it was not relabeled as independent replication."
+                ],
+            )
+        elif use_fixture:
             reproduction_audit = ReproductionAudit(
                 audit_id=f"reproduction-{uuid4()}",
                 primary_run_id=research_run.research_run_id,
