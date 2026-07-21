@@ -752,6 +752,26 @@ input::placeholder, textarea::placeholder { color: #9aa6b6; }
 .run-error-summary { align-items: flex-start; flex-wrap: wrap; }
 .run-error-summary > button { margin-left: auto; }
 
+.figure-gallery { margin-top: 18px; border: 1px solid #d4d4cf; border-radius: 5px; background: #fff; }
+.figure-gallery > header { display: flex; align-items: center; gap: 10px; padding: 15px 16px; border-bottom: 1px solid #e5e5e1; }
+.figure-gallery > header div { display: grid; gap: 2px; }
+.figure-gallery > header strong { font-size: 12px; }
+.figure-gallery > header small { color: #777; font-size: 9px; }
+.figure-bundle { padding: 16px; }
+.figure-bundle + .figure-bundle { border-top: 1px solid #e5e5e1; }
+.figure-bundle__heading { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 10px; }
+.figure-bundle__heading span { color: #777; }
+.figure-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.figure-grid article { overflow: hidden; border: 1px solid #deded9; border-radius: 4px; background: #fafaf8; }
+.figure-grid img { display: block; width: 100%; aspect-ratio: 8 / 5; object-fit: contain; border-bottom: 1px solid #deded9; background: #fff; }
+.figure-copy { display: grid; gap: 8px; padding: 12px; }
+.figure-copy h3 { margin: 0; font-size: 12px; }
+.figure-copy p { margin: 0; color: #555; font-size: 10px; line-height: 1.55; }
+.figure-copy small { color: #888; font-size: 8px; word-break: break-all; }
+.figure-downloads { display: flex; flex-wrap: wrap; gap: 6px; }
+.figure-downloads a { display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px; border: 1px solid #d4d4cf; border-radius: 3px; color: #333; font-size: 8px; text-decoration: none; }
+.figure-warnings { margin: 10px 0 0; padding-left: 18px; color: #8a5d12; font-size: 9px; line-height: 1.5; }
+
 .manuscript-draft {
   margin-top: 22px;
   border-top: 1px solid #cfcfca;
@@ -793,6 +813,10 @@ input::placeholder, textarea::placeholder { color: #9aa6b6; }
 .manuscript-draft > aside { margin: 0 24px 24px; padding: 14px 16px; border: 1px solid #dfdfdc; background: #fafaf9; }
 .manuscript-draft > aside strong { font-size: 11px; }
 .manuscript-draft > aside ul { margin: 8px 0 0; padding-left: 18px; color: #666; font-size: 10px; line-height: 1.6; }
+
+@media (max-width: 760px) {
+  .figure-grid { grid-template-columns: 1fr; }
+}
 
 .comparison-panel {
   margin-top: 24px;

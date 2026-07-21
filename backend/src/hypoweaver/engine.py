@@ -115,6 +115,17 @@ from .test_dag import (
     schedule_test_dag,
     stable_claim_id,
 )
+from .visualization import (
+    FigureBundle,
+    FigureRenderer,
+    FigureSource,
+    FigureStage,
+    LocalFigureRenderer,
+    build_figure_requests,
+    empty_figure_bundle,
+    publication_figure_problems,
+    render_figure_requests,
+)
 
 
 def _neutralize_limited_event_study_language(
@@ -1251,6 +1262,7 @@ class WorkflowEngine:
         repository: RunRepository,
         dataset_registry: DatasetRegistry | None = None,
         runtime_config_store: RuntimeConfigStore | None = None,
+        visualization_renderer: FigureRenderer | None = None,
         *,
         model_call_limit: int = 20,
         model_call_budget_mode: ModelCallBudgetMode = "legacy",
@@ -1266,6 +1278,7 @@ class WorkflowEngine:
         self.repository = repository
         self.dataset_registry = dataset_registry or DatasetRegistry()
         self.runtime_config_store = runtime_config_store
+        self.visualization_renderer = visualization_renderer
         self.model_call_limit = model_call_limit
         self.model_call_budget_mode = model_call_budget_mode
         self.model_call_provider_attempt_limit = (
@@ -1465,6 +1478,91 @@ class WorkflowEngine:
             status=status,
         )
         return step
+
+    async def _render_figure_stage(
+        self,
+        state: RunState,
+        run: ResearchRun,
+        stage: FigureStage,
+        *,
+        approved_ledger: ClaimLedger | None = None,
+        allowed_estimate_terms: set[str] | None = None,
+    ) -> FigureBundle:
+        if stage not in {"evidence", "publication"}:
+            raise ValueError(f"unknown figure stage: {stage}")
+        node_id = f"{stage}_visualization"
+        artifact_key = f"{stage}_figure_bundle"
+
+        if run.fixture_only or state.plan_only:
+            bundle = empty_figure_bundle(
+                stage,
+                "Fixture 或未执行 ResearchRun 禁止生成实证图。",
+            )
+            self._put_artifact(state, artifact_key, bundle)
+            self._record_step(
+                state,
+                node_id,
+                "skipped",
+                input_value={"research_run_id": run.research_run_id},
+                output_value=bundle,
+                logs=["Fixture/plan-only 边界生效；未调用内置绘图模块。"],
+            )
+            return bundle
+
+        renderer = self.visualization_renderer or LocalFigureRenderer()
+
+        envelope = self._artifact_envelope(state, "research_run")
+        assert envelope is not None
+        source = FigureSource(
+            artifact_id=str(envelope["artifact_id"]),
+            artifact_key="research_run",
+            sha256=str(envelope["sha256"]),
+        )
+        requests, warnings = build_figure_requests(
+            run,
+            source,
+            stage,
+            approved_ledger=approved_ledger,
+            allowed_estimate_terms=allowed_estimate_terms,
+        )
+        if not requests:
+            reason = " ".join(warnings) or "没有满足绘图配方的数据。"
+            bundle = empty_figure_bundle(stage, reason)
+            self._put_artifact(state, artifact_key, bundle)
+            self._record_step(
+                state,
+                node_id,
+                "skipped",
+                input_value={"research_run_id": run.research_run_id},
+                output_value=bundle,
+                logs=["没有可验证的配方输入；未调用内置绘图模块。"],
+            )
+            return bundle
+
+        bundle = await render_figure_requests(
+            renderer,
+            requests,
+            stage,
+            initial_warnings=warnings,
+        )
+        self._put_artifact(state, artifact_key, bundle)
+        succeeded = bundle.status == "succeeded"
+        self._record_step(
+            state,
+            node_id,
+            "succeeded" if succeeded else "failed",
+            input_value=requests,
+            output_value=bundle,
+            logs=[
+                (
+                    f"内置绘图模块返回 {len(bundle.figures)} 张可追溯图形。"
+                    if succeeded
+                    else "内置绘图模块未返回通过契约校验的图形；写作链路继续。"
+                )
+            ],
+            error=None if succeeded else "; ".join(bundle.warnings),
+        )
+        return bundle
 
     async def _llm_step(
         self,
@@ -2329,8 +2427,8 @@ class WorkflowEngine:
         keys = {
             "H1": ("research_package",),
             "H2": ("design_arena", "analysis_plan", "critic_report"),
-            "H3": ("claim_ledger", "research_run"),
-            "H4": ("manuscript_package",),
+            "H3": ("claim_ledger", "research_run", "evidence_figure_bundle"),
+            "H4": ("manuscript_package", "publication_figure_bundle"),
         }[gate]
         hashes: dict[str, str] = {}
         for key in keys:
@@ -4454,6 +4552,11 @@ class WorkflowEngine:
             "fixture_only",
         )
         self._put_artifact(state, "research_run", research_run)
+        evidence_figure_bundle = await self._render_figure_stage(
+            state,
+            research_run,
+            "evidence",
+        )
 
         mechanism_claim_ids: set[str] = set()
         if plan.method_family in {
@@ -4513,6 +4616,9 @@ class WorkflowEngine:
             {
                 "research_package": self._llm_research_package(package),
                 "research_run": research_run.model_dump(mode="json"),
+                "evidence_figure_bundle": evidence_figure_bundle.model_dump(
+                    mode="json"
+                ),
                 "reproduction_audit": reproduction_audit.model_dump(mode="json"),
                 "authoritative_evidence_registry": evidence_registry.model_dump(
                     mode="json"
@@ -4556,6 +4662,9 @@ class WorkflowEngine:
             {
                 "contract": contract.model_dump(mode="json"),
                 "research_run": research_run.model_dump(mode="json"),
+                "evidence_figure_bundle": evidence_figure_bundle.model_dump(
+                    mode="json"
+                ),
                 "reproduction_audit": reproduction_audit.model_dump(mode="json"),
                 "authoritative_evidence_registry": evidence_registry.model_dump(
                     mode="json"
@@ -4699,6 +4808,28 @@ class WorkflowEngine:
                 )
         state.claims = ledger.claims
         self._put_artifact(state, "approved_claim_ledger", ledger)
+        authorized_figure_terms: set[str] = set()
+        if approved_claims:
+            writing_evidence = self._writing_evidence_pack(
+                state,
+                package,
+                plan,
+                run,
+                approved_claims,
+            )["writing_evidence_pack"]
+            authorized_figure_terms = set(
+                writing_evidence.get("writing_requirements", {}).get(
+                    "authorized_estimate_terms",
+                    [],
+                )
+            )
+        await self._render_figure_stage(
+            state,
+            run,
+            "publication",
+            approved_ledger=ledger,
+            allowed_estimate_terms=authorized_figure_terms,
+        )
 
         await self._finalize_manuscript(
             state,
@@ -4940,6 +5071,30 @@ class WorkflowEngine:
                 human_review_feedback=human_review_feedback,
             )
         manuscript.version = max(manuscript.version, manuscript_version)
+        manuscript.figure_ids = []
+        for section in manuscript.manuscript_sections:
+            section.figure_ids = []
+        publication_payload = self._artifact_payload(
+            state,
+            "publication_figure_bundle",
+            required=False,
+        )
+        publication_bundle = (
+            FigureBundle.model_validate(publication_payload)
+            if isinstance(publication_payload, dict)
+            else None
+        )
+        if (
+            manuscript.mode == "full_manuscript"
+            and publication_bundle is not None
+            and publication_bundle.status == "succeeded"
+        ):
+            manuscript.figure_ids = [
+                figure.figure_id for figure in publication_bundle.figures
+            ]
+            for section in manuscript.manuscript_sections:
+                if section.section_id == "empirical_results":
+                    section.figure_ids = list(manuscript.figure_ids)
 
         if manuscript.mode == "full_manuscript":
             self._record_step(
@@ -5012,6 +5167,29 @@ class WorkflowEngine:
             problems.append("成果引用了不存在的 ResearchRun/Execution")
         if manuscript.mode == "full_manuscript" and not approved_ids:
             problems.append("没有 H3 获批 Claim 时不得生成完整实证论文")
+        if publication_bundle is not None:
+            problems.extend(
+                publication_figure_problems(
+                    publication_bundle,
+                    approved_claim_ids=approved_ids,
+                    allowed_execution_ids={
+                        execution.execution_id for execution in run.executions
+                    },
+                )
+            )
+            available_figure_ids = {
+                figure.figure_id for figure in publication_bundle.figures
+            }
+            used_figure_ids = {
+                *manuscript.figure_ids,
+                *[
+                    figure_id
+                    for section in manuscript.manuscript_sections
+                    for figure_id in section.figure_ids
+                ],
+            }
+            if not used_figure_ids.issubset(available_figure_ids):
+                problems.append("成果引用了不存在的 Publication Figure")
         for section in manuscript.manuscript_sections:
             if section.status == "not_generated":
                 continue
@@ -5148,6 +5326,41 @@ class WorkflowEngine:
                         "H4 Manuscript IR re-audit failed: "
                         + "; ".join(ir_problems)
                     )
+                publication_payload = self._artifact_payload(
+                    state,
+                    "publication_figure_bundle",
+                    required=False,
+                )
+                if isinstance(publication_payload, dict):
+                    publication_bundle = FigureBundle.model_validate(
+                        publication_payload
+                    )
+                    figure_problems = publication_figure_problems(
+                        publication_bundle,
+                        approved_claim_ids={
+                            claim.claim_id
+                            for claim in ledger.claims
+                            if claim.approval_status
+                            in {"approved", "downgraded"}
+                        },
+                        allowed_execution_ids={
+                            execution.execution_id
+                            for execution in run.executions
+                        },
+                    )
+                    available_figure_ids = {
+                        figure.figure_id
+                        for figure in publication_bundle.figures
+                    }
+                    if set(manuscript.figure_ids) != available_figure_ids:
+                        figure_problems.append(
+                            "Manuscript Figure references do not match the sealed Publication FigureBundle"
+                        )
+                    if figure_problems:
+                        raise WorkflowTransitionError(
+                            "H4 Publication Figure re-audit failed: "
+                            + "; ".join(figure_problems)
+                        )
             elif manuscript.mode != "identification_failure_report":
                 raise WorkflowTransitionError(
                     "Executed research H4 requires a full manuscript or an "
@@ -5176,6 +5389,17 @@ class WorkflowEngine:
             "claim_ledger_sha256": source_hashes["approved_claim_ledger"],
             "manuscript_sha256": source_hashes["manuscript_package"],
         }
+        for artifact_key in (
+            "evidence_figure_bundle",
+            "publication_figure_bundle",
+        ):
+            envelope = self._artifact_envelope(
+                state,
+                artifact_key,
+                required=False,
+            )
+            if envelope is not None:
+                sealed[f"{artifact_key}_sha256"] = envelope["sha256"]
         sealed["seal_sha256"] = sign_manifest(sealed)
         self._record_step(
             state,

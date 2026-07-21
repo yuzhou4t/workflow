@@ -39,6 +39,8 @@ from .runtime_config import (
     RuntimeConnectionTestResult,
     test_runtime_connection,
 )
+from .plot_agent.renderer import resolve_artifact_uri
+from .visualization import FigureBundle
 
 
 repository = RunRepository()
@@ -326,6 +328,53 @@ def get_artifact(run_id: str, artifact_key: str) -> dict:
         return run.artifacts[artifact_key]
     except KeyError as error:
         raise HTTPException(status_code=404, detail="artifact not found") from error
+
+
+@app.get("/api/v1/runs/{run_id}/figures/{figure_id}/{file_format}")
+def get_figure_file(
+    run_id: str,
+    figure_id: str,
+    file_format: str,
+) -> FileResponse:
+    try:
+        run = engine.get_run(run_id)
+    except RunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="run not found") from error
+    for artifact_key in (
+        "evidence_figure_bundle",
+        "publication_figure_bundle",
+    ):
+        envelope = run.artifacts.get(artifact_key)
+        if not isinstance(envelope, dict):
+            continue
+        try:
+            bundle = FigureBundle.model_validate(envelope.get("payload"))
+        except (TypeError, ValueError):
+            continue
+        for figure in bundle.figures:
+            if figure.figure_id != figure_id:
+                continue
+            file = next(
+                (item for item in figure.files if item.format == file_format),
+                None,
+            )
+            if file is None:
+                break
+            try:
+                path = resolve_artifact_uri(
+                    file.artifact_uri,
+                    expected_sha256=file.sha256,
+                )
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=404,
+                    detail="figure file not found",
+                ) from error
+            return FileResponse(
+                path,
+                media_type=file.mime_type,
+            )
+    raise HTTPException(status_code=404, detail="figure not found")
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]

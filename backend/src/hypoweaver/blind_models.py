@@ -35,6 +35,8 @@ class SealedOutput(StrictModel):
     claim_ledger_sha256: str
     manuscript_sha256: str
     analysis_plan_sha256: str | None = None
+    evidence_figure_bundle_sha256: str | None = None
+    publication_figure_bundle_sha256: str | None = None
     seal_sha256: str
 
 

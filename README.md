@@ -52,6 +52,7 @@
 - 黑白极简 Research Bench：默认展示 HypoWeaver 纵向链路，可展开为与 Agent Laboratory 并排的双流程对照；
 - Agent Laboratory 独立基线启动器：复用同一 Dataset ID 与文件哈希，通过同级仓库的适配器异步运行并回传阶段状态；
 - 页面级运行配置入口，支持脱敏状态、私有保存与 Qwen/Research Engine 连接测试。
+- 仓库内置 GreenFinance Plot Agent：ResearchRun 后生成证据图，H3 后只为获授权 Claim 生成论文图；Writer 继续独立负责正文。
 
 六系统正式比较由同级 [`benchmark-baselines/six-system-comparison`](../benchmark-baselines/six-system-comparison/README.md) 的中立 v3 harness 管理。当前 native 与 common-executor 两块能力板均为 `12/12`，这只表示六系统所需的结构化接口已经接通，不表示系统已通过案例科学门或具有同等科研能力。特别是 HypoWeaver 原生流程不能完整交付 Case 010 的 CR/AR 两个结果变量仍是明确能力缺口；Case 004/010 配对门未全部通过，144 单元 formal 批次仍关闭且没有正式得分。
 
@@ -247,6 +248,7 @@ POST /api/v1/runs/{run_id}/gates/{H1|H2|H3|H4}
 POST /api/v1/runs/{run_id}/revisions
 POST /api/v1/runs/{run_id}/writing/retry
 GET  /api/v1/runs/{run_id}/artifacts/{artifact_key}
+GET  /api/v1/runs/{run_id}/figures/{figure_id}/{svg|png|pdf|csv}
 ```
 
 H1/H2 被退回后，Run 会进入 `blocked`，必须通过 `revisions` 接口提交新版 `CaseSubmission` 或递增版本的 `AnalysisPlan`；系统不会自动越过退回意见。
@@ -272,6 +274,8 @@ python3.11 -m uvicorn hypoweaver.blind_api:app --port 8002
 ```text
 backend/src/hypoweaver/
   api.py              FastAPI 接口
+  visualization.py    Figure 契约、结果绑定与工作流适配
+  plot_agent/         合并自 GreenFinance_Plot_Agent 的内置确定性渲染模块
   benchmark_runner.py Agent Laboratory 独立基线启动与状态适配
   research_api.py     独立 Python Research Engine 接口
   research_engine.py  受限面板计量执行器

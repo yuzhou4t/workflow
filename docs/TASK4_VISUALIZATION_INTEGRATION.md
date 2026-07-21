@@ -1,10 +1,12 @@
 # HypoWeaver 总体架构与 Task4 科研绘图接入规范
 
-> 文档状态：Task4 设计与交接基线
+> 文档状态：Task4 设计基线；2026-07-22 已按同仓、进程内模块完成第一版接入
 >
 > 适用范围：Task1 论文案例集、Task2 模型/方法库、Task3 假设验证与复现工作流、Task4 自动化科研绘图
 >
 > 当前事实源：`backend/src/hypoweaver/definition.py` 与 `backend/src/hypoweaver/models.py`
+
+> 实现更新：原文中的“独立仓库 / 独立 HTTP 服务”是早期交接方案，不再是当前部署要求。`carolzhu-jr/GreenFinance_Plot_Agent` 的渲染能力现已合入 `backend/src/hypoweaver/plot_agent/`，由 `visualization.py` 在同一工作流进程内调用；不需要额外端口。保留严格 Figure 契约和职责边界，是为了隔离“绘图”和“写作”，不是为了分仓。
 
 ## 1. 文档目的
 
@@ -566,7 +568,7 @@ Task4 的运行身份必须在文件系统或对象存储 ACL 层面无法访问
 
 ### 10.1 Task4 同学负责
 
-- 独立 Task4 服务仓库或独立服务目录；
+- 同仓目录 `backend/src/hypoweaver/plot_agent/`；
 - OpenAPI/JSON Schema；
 - Recipe Registry；
 - AI Figure Planner；
@@ -580,14 +582,14 @@ Task4 的运行身份必须在文件系统或对象存储 ACL 层面无法访问
 ### 10.2 Task3 团队负责
 
 - 在 `models.py` 增加或映射 Figure Schema；
-- 增加 Task4 HTTP adapter 和运行配置；
+- 在 `visualization.py` 维护严格 Figure 契约和进程内 adapter；
 - 在工作流中增加两次调用节点；
 - 把 FigureBundle 写入 SQLite Artifact；
 - 将 FigureBundle 哈希加入封存清单；
 - 在前端展示图形、图注、警告和追溯信息；
 - 在一致性审计中校验 Publication Figure 的 Claim/Execution 引用。
 
-Task4 同学不需要直接修改 Task3 状态机。双方先冻结接口和 Fixture，再由 Task3 团队完成接入。
+Task4 同学只需维护 `plot_agent/` 内的配方与渲染质量，不需要直接修改 Task3 状态机；Task3 团队维护调用时机、Claim 边界、封存和前端展示。
 
 ## 11. Task3 目标改动
 

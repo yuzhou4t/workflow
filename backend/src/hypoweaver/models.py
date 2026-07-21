@@ -992,6 +992,7 @@ class ManuscriptSection(StrictModel):
     status: Literal["generated", "not_generated"]
     claim_ids: list[str] = Field(default_factory=list)
     run_ids: list[str] = Field(default_factory=list)
+    figure_ids: list[str] = Field(default_factory=list)
     content_template: str | None = None
     statements: list[ManuscriptStatement] = Field(default_factory=list)
 
@@ -1027,6 +1028,7 @@ class ManuscriptPackage(StrictModel):
     status: Literal["draft", "needs_revision", "ready_for_human_review", "not_generated"]
     research_plan_markdown: str
     manuscript_sections: list[ManuscriptSection]
+    figure_ids: list[str] = Field(default_factory=list)
     empirical_findings_status: Literal[
         "included",
         "not_executed",

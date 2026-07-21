@@ -1,4 +1,4 @@
-import { Check, CheckCircle2, ChevronDown, Circle, CircleAlert, Clock3, FileText, LoaderCircle, RotateCcw, Settings2, ShieldCheck, Trash2, XCircle } from 'lucide-react'
+import { Check, CheckCircle2, ChevronDown, Circle, CircleAlert, Clock3, Download, FileText, Image as ImageIcon, LoaderCircle, RotateCcw, Settings2, ShieldCheck, Trash2, XCircle } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import type { BaselineRun, ClaimDecision, ClaimRecord, GateDecisionInput, ManuscriptStatementSourceView, ModelCallGroup, ModelUsageView, RunSnapshot, RunSummary, StepAttempt, WorkflowDefinition, WorkflowStage } from '../runtime/types'
 
@@ -120,6 +120,31 @@ function StatementProvenance({ statements }: { statements: ManuscriptStatementSo
       {statement.sources.length > 0 && <small>{statement.sources.map((source) => `${source.kind} · ${source.id} · ${source.path}`).join('；')}</small>}
     </li>)}</ul>
   </details>
+}
+
+function FigureGallery({ run }: { run: RunSnapshot }) {
+  const visibleBundles = run.figureBundles.filter((bundle) => bundle.status !== 'not_generated')
+  if (!visibleBundles.length) return null
+  const fileUrl = (figureId: string, format: string) => (
+    `/api/v1/runs/${encodeURIComponent(run.id)}/figures/${encodeURIComponent(figureId)}/${encodeURIComponent(format)}`
+  )
+  return <section className="figure-gallery">
+    <header><ImageIcon size={18} /><div><strong>科研图形 · GreenFinance Plot Agent</strong><small>绘图模块生成图片；HypoWeaver Writer 负责正文</small></div></header>
+    {visibleBundles.map((bundle) => <section key={bundle.stage} className="figure-bundle">
+      <div className="figure-bundle__heading"><strong>{bundle.stage === 'evidence' ? 'H3 前证据图' : 'H3 后论文图'}</strong><span>{bundle.status === 'succeeded' ? `${bundle.figures.length} 张` : '生成失败'}</span></div>
+      {bundle.figures.length > 0 && <div className="figure-grid">{bundle.figures.map((figure) => {
+        const png = figure.files.find((file) => file.format === 'png')
+        return <article key={figure.id}>
+          {png && <img src={fileUrl(figure.id, 'png')} alt={figure.altText} loading="lazy" />}
+          <div className="figure-copy"><h3>{figure.title}</h3><p>{figure.caption}</p>
+            <div className="figure-downloads">{figure.files.map((file) => <a key={file.format} href={fileUrl(figure.id, file.format)} target="_blank" rel="noreferrer"><Download size={12} />{file.format.toUpperCase()}</a>)}</div>
+            <small>Execution {figure.executionIds.join('、')} · Claim {figure.claimIds.join('、') || 'H3 前未授权'}</small>
+          </div>
+        </article>
+      })}</div>}
+      {bundle.warnings.length > 0 && <ul className="figure-warnings">{bundle.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+    </section>)}
+  </section>
 }
 
 const statusText = {
@@ -525,6 +550,8 @@ export function ExecutionWorkspace({
             })}
           </div>
 
+          {run && <FigureGallery run={run} />}
+
           {run && (run.status === 'completed' || preservedDraft) && <section className="result-summary">
             <div className="result-summary__heading">{preservedDraft ? <CircleAlert size={20} /> : <Check size={20} />}<div><h2>{preservedDraft ? '本次重生成失败，上一版已保留' : run.planOnly ? '研究计划已生成' : identificationFailure ? '识别失败报告已生成' : manuscriptState.complete ? '完整论文初稿已生成' : '论文初稿不完整'}</h2><p>{preservedDraft ? `仍显示论文初稿 v${run.manuscript?.version ?? '—'}；失败原因与本次尝试记录保留在上方。` : run.planOnly ? '本次没有统计结论。' : identificationFailure ? '分析已经执行，但没有研究主张通过 Claim Gate；这不是技术失败。' : manuscriptState.complete ? `共 ${run.manuscript?.sections.length ?? 0} 节、${manuscriptState.characterCount.toLocaleString()} 字；实证表述受 H3 授权结论约束。` : '当前成果没有达到完整论文门槛，不将其冒充为已完成。'}</p></div>{!run.planOnly && !identificationFailure && <button type="button" className={manuscriptState.complete ? 'quiet-button' : 'primary-button'} disabled={busy} onClick={() => void onRetryWriting()}><RotateCcw size={14} />{preservedDraft ? '调整后重试论文写作' : manuscriptState.complete ? '重新生成论文' : '生成完整论文'}</button>}</div>
             {!run.planOnly && <>
@@ -545,7 +572,7 @@ export function ExecutionWorkspace({
                     <h3>{section.title}</h3>
                     <div className="manuscript-copy">{section.content}</div>
                     <StatementProvenance statements={section.statements} />
-                    {(section.claimIds.length > 0 || section.runIds.length > 0) && <footer>Claim {section.claimIds.join('、') || '—'} · Run {section.runIds.join('、') || '—'}</footer>}
+                    {(section.claimIds.length > 0 || section.runIds.length > 0 || section.figureIds.length > 0) && <footer>Claim {section.claimIds.join('、') || '—'} · Run {section.runIds.join('、') || '—'} · Figure {section.figureIds.join('、') || '—'}</footer>}
                   </section>)}
                 </div>
                 {run.manuscript.disclosures.length > 0 && <aside><strong>写作披露</strong><ul>{run.manuscript.disclosures.map((item) => <li key={item}>{item}</li>)}</ul></aside>}

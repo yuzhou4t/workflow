@@ -608,6 +608,10 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.execution_status, "fixture_only")
         self.assertEqual(run.scientific_status, "not_evaluated")
         self.assertTrue(run.plan_only)
+        self.assertEqual(
+            run.artifacts["evidence_figure_bundle"]["payload"]["status"],
+            "not_generated",
+        )
         self.assertTrue(run.claims)
         self.assertTrue(
             all(
@@ -631,6 +635,10 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual((run.status, run.current_gate), ("waiting_human", "H4"))
         self.assertNotIn("sealed_output", run.artifacts)
+        self.assertEqual(
+            run.artifacts["publication_figure_bundle"]["payload"]["status"],
+            "not_generated",
+        )
         run = await self.engine.decide_gate(
             run.id,
             "H4",

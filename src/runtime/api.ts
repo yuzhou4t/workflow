@@ -9,6 +9,7 @@ import type {
   GateDecisionInput,
   LocalCaseImportResult,
   DesignArenaView,
+  FigureBundleView,
   ManuscriptPackageView,
   ManuscriptStatementSourceView,
   ModelCallGroup,
@@ -43,8 +44,8 @@ const stageDefinitions = [
   { id: 'understanding', order: 2, title: '研究理解', description: '拆解假设、形成数据画像并完成方法路由。', nodeIds: ['decompose', 'profile', 'route'] },
   { id: 'method-design', order: 3, title: '方法设计', description: '设计、批判并有限修订分析计划，在 H2 冻结合同。', nodeIds: ['design', 'critique', 'revise_plan', 'await_h2', 'freeze'] },
   { id: 'execution', order: 4, title: '模型执行', description: '通过 Fixture 或隔离的外部执行器生成 ResearchRun。', nodeIds: ['execute'] },
-  { id: 'result-audit', order: 5, title: '结果审计', description: '解释结果、审查科学有效性并在 H3 授权 ClaimLedger。', nodeIds: ['interpret', 'scientific_audit', 'build_claims', 'await_h3', 'seal'] },
-  { id: 'writing', order: 6, title: '结论与写作', description: '仅使用获批结论写作并完成一致性审计。', nodeIds: ['write', 'audit_draft', 'complete'] },
+  { id: 'result-audit', order: 5, title: '结果审计', description: '先生成证据图，再审查科学有效性并在 H3 授权 ClaimLedger。', nodeIds: ['evidence_visualization', 'interpret', 'scientific_audit', 'build_claims', 'await_h3', 'seal'] },
+  { id: 'writing', order: 6, title: '结论与写作', description: '先生成 H3 授权论文图，再由 Writer 完成正文和一致性审计。', nodeIds: ['publication_visualization', 'write', 'audit_draft', 'complete'] },
 ] satisfies WorkflowStage[]
 
 const deterministicSteps: Array<Pick<WorkflowNode, 'id' | 'title' | 'type' | 'kind' | 'description'>> = [
@@ -52,8 +53,10 @@ const deterministicSteps: Array<Pick<WorkflowNode, 'id' | 'title' | 'type' | 'ki
   { id: 'await_h2', title: 'H2 冻结分析计划', type: 'gate', kind: 'gate', description: '批准后冻结版本化 FormalResearchContract。' },
   { id: 'freeze', title: '冻结研究合同', type: 'code', kind: 'code', description: '确定性生成合同哈希和版本。' },
   { id: 'execute', title: '执行研究计划', type: 'executor', kind: 'http', description: 'Fixture 或隔离 Python 执行器，执行状态与科学状态分离。' },
+  { id: 'evidence_visualization', title: '生成证据图', type: 'code', kind: 'code', description: '仓库内置 Plot Agent 只读取结构化统计结果。' },
   { id: 'await_h3', title: 'H3 结论授权', type: 'gate', kind: 'gate', description: '逐条授权 Claim；Fixture 只能拒绝或暂缓。' },
   { id: 'seal', title: '封存 ClaimLedger', type: 'code', kind: 'code', description: '封存人工决定，形成不可变审计产物。' },
+  { id: 'publication_visualization', title: '生成论文图', type: 'code', kind: 'code', description: '只渲染 H3 已授权 Claim 所引用的 Execution。' },
   { id: 'complete', title: '成果包完成', type: 'end', kind: 'end', description: '输出研究计划或获批论文成果包。' },
 ]
 
@@ -325,6 +328,7 @@ function normalizeManuscript(value: unknown): ManuscriptPackageView | undefined 
     mode: asString(manuscript.mode, 'research_plan_only') as ManuscriptPackageView['mode'],
     status: asString(manuscript.status, 'not_generated') as ManuscriptPackageView['status'],
     researchPlan: asString(first(manuscript, 'research_plan_markdown', 'researchPlan')),
+    figureIds: asArray(first(manuscript, 'figure_ids', 'figureIds')).map(String),
     sections: asArray(first(manuscript, 'manuscript_sections', 'sections')).map((value, index) => {
       const section = asRecord(value)
       return {
@@ -334,6 +338,7 @@ function normalizeManuscript(value: unknown): ManuscriptPackageView | undefined 
         status: asString(section.status, 'not_generated') as 'generated' | 'not_generated',
         claimIds: asArray(first(section, 'claim_ids', 'claimIds')).map(String),
         runIds: asArray(first(section, 'run_ids', 'runIds')).map(String),
+        figureIds: asArray(first(section, 'figure_ids', 'figureIds')).map(String),
         statements: asArray(section.statements).map((value, statementIndex) => {
           const statement = asRecord(value)
           return {
@@ -356,6 +361,39 @@ function normalizeManuscript(value: unknown): ManuscriptPackageView | undefined 
     disclosures: asArray(manuscript.disclosures).map(String),
     unresolvedIssues: asArray(first(manuscript, 'unresolved_issues', 'unresolvedIssues')).map(String),
     auditResult: asString(first(manuscript, 'audit_result', 'auditResult'), 'not_run') as ManuscriptPackageView['auditResult'],
+  }
+}
+
+function normalizeFigureBundle(value: unknown): FigureBundleView | undefined {
+  const bundle = asRecord(value)
+  if (!Object.keys(bundle).length) return undefined
+  const stage = asString(bundle.stage)
+  if (stage !== 'evidence' && stage !== 'publication') return undefined
+  return {
+    stage,
+    status: asString(bundle.status, 'failed') as FigureBundleView['status'],
+    figures: asArray(bundle.figures).map((value, index) => {
+      const figure = asRecord(value)
+      return {
+        id: asString(first(figure, 'figure_id', 'id'), `figure-${index + 1}`),
+        recipeId: asString(first(figure, 'recipe_id', 'recipeId')),
+        title: asString(figure.title),
+        caption: asString(figure.caption),
+        altText: asString(first(figure, 'alt_text', 'altText'), asString(figure.title)),
+        executionIds: asArray(first(figure, 'execution_ids', 'executionIds')).map(String),
+        claimIds: asArray(first(figure, 'claim_ids', 'claimIds')).map(String),
+        files: asArray(figure.files).map((value) => {
+          const file = asRecord(value)
+          return {
+            format: asString(file.format) as 'svg' | 'png' | 'pdf' | 'csv',
+            mimeType: asString(first(file, 'mime_type', 'mimeType')),
+            sha256: asString(file.sha256),
+          }
+        }),
+        warnings: asArray(figure.warnings).map(String),
+      }
+    }),
+    warnings: asArray(bundle.warnings).map(String),
   }
 }
 
@@ -483,6 +521,8 @@ const artifactKindByStep: Record<string, string[]> = {
   build_claims: ['claim_ledger'],
   seal: ['approved_claim_ledger'],
   write: ['manuscript_package'],
+  evidence_visualization: ['evidence_figure_bundle'],
+  publication_visualization: ['publication_figure_bundle'],
   audit_draft: ['draft_audit'],
 }
 
@@ -500,6 +540,10 @@ export function normalizeRun(payload: unknown): RunSnapshot {
   const designArenaPayload = asRecord(designArenaArtifact?.payload)
   const modelUsageArtifact = artifacts.find((artifact) => asString(artifact.kind) === 'model_usage')
   const modelUsagePayload = first(run, 'model_usage', 'modelUsage') ?? modelUsageArtifact?.payload
+  const figureBundles = artifacts
+    .filter((artifact) => ['evidence_figure_bundle', 'publication_figure_bundle'].includes(asString(artifact.kind)))
+    .map((artifact) => normalizeFigureBundle(artifact.payload))
+    .filter((bundle): bundle is FigureBundleView => Boolean(bundle))
   const modeValue = asString(first(run, 'mode', 'run_mode', 'execution_mode') ?? casePayload.execution_mode, 'fixture').toLowerCase()
   const currentStep = asString(first(run, 'current_step', 'current_node_id', 'currentNodeId', 'current_step_key'))
   const explicitGate = asString(first(run, 'current_gate', 'currentGate')).toUpperCase()
@@ -557,6 +601,7 @@ export function normalizeRun(payload: unknown): RunSnapshot {
     steps: attempts,
     events: normalizedEvents,
     claims: asArray(first(run, 'claims', 'claim_ledger') ?? claimPayload.claims).map(normalizeClaim),
+    figureBundles,
     manuscript: normalizeManuscript(manuscriptPayload),
     designArena: normalizeDesignArena(designArenaPayload),
     modelUsage: normalizeModelUsage(modelUsagePayload),

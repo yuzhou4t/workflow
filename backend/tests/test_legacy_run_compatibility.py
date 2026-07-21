@@ -53,7 +53,7 @@ _LEGACY_CLAIM_FIELDS = {
 
 class LegacyCompletedRunCompatibilityTests(unittest.IsolatedAsyncioTestCase):
     async def test_v13_completed_run_remains_hash_valid_and_read_only(self) -> None:
-        self.assertEqual(DEFINITION_VERSION, "1.6.0")
+        self.assertEqual(DEFINITION_VERSION, "1.7.0")
         with (
             tempfile.TemporaryDirectory() as tempdir,
             patch.dict(

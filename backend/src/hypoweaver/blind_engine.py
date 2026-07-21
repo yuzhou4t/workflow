@@ -100,11 +100,19 @@ class BlindEngine:
 
     @staticmethod
     def _validate_seal(request: BlindEvaluationRequest) -> None:
-        manifest = request.sealed_output.model_dump(
-            mode="json", exclude={"seal_sha256", "analysis_plan_sha256"}
+        optional_hash_fields = (
+            "analysis_plan_sha256",
+            "evidence_figure_bundle_sha256",
+            "publication_figure_bundle_sha256",
         )
-        if request.sealed_output.analysis_plan_sha256 is not None:
-            manifest["analysis_plan_sha256"] = request.sealed_output.analysis_plan_sha256
+        manifest = request.sealed_output.model_dump(
+            mode="json",
+            exclude={"seal_sha256", *optional_hash_fields},
+        )
+        for field_name in optional_hash_fields:
+            value = getattr(request.sealed_output, field_name)
+            if value is not None:
+                manifest[field_name] = value
         if not verify_manifest(manifest, request.sealed_output.seal_sha256):
             raise SealValidationError("seal_sha256 mismatch")
 

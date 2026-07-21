@@ -30,9 +30,10 @@ from .models import (
     TestableHypotheses,
 )
 from .prompts import get_prompt
+from .visualization import FigureBundle
 
 
-DEFINITION_VERSION = "1.6.0"
+DEFINITION_VERSION = "1.7.0"
 
 
 def _schema(model: type[BaseModel] | None) -> dict[str, Any] | None:
@@ -135,8 +136,9 @@ def build_app_a_definition() -> dict[str, Any]:
             "id": "audit",
             "order": 6,
             "title": "结果与结论审计",
-            "description": "一次 Evidence/Claim Bundle 与一次独立科学审计把执行结果交给确定性 Evidence Registry 和 Claim Gate。",
+            "description": "先生成可追溯证据图，再由 Evidence/Claim Bundle、独立科学审计、Evidence Registry 和 Claim Gate 完成结论准入。",
             "node_ids": [
+                "evidence_visualization",
                 "evidence_assessment",
                 "scientific_audit",
                 "claim_ledger",
@@ -149,8 +151,9 @@ def build_app_a_definition() -> dict[str, Any]:
             "id": "writing",
             "order": 7,
             "title": "受约束成果生成",
-            "description": "两次 Writer Batch 只读取安全叙述与 statement ID；IR 编译和重读审计通过后仍需 H4 人工批准才能封存。",
+            "description": "H3 后先为获授权 Claim 生成论文图；Writer 只负责正文，IR 编译和重读审计通过后仍需 H4 人工批准才能封存。",
             "node_ids": [
+                "publication_visualization",
                 "scientific_writer",
                 "manuscript_ir_compile",
                 "consistency_audit",
@@ -214,12 +217,14 @@ def build_app_a_definition() -> dict[str, Any]:
             _node("research_run_merge", "ResearchRun 汇合", "merge", "execution", "统一两类执行器输出，同时保留 execution_status 与 scientific_status。", 4340, 220, input_model=ResearchRun, output_model=ResearchRun),
             _node("replication_executor", "独立复现执行", "http", "execution", "企业面板使用 NumPy 双向去均值与企业聚类复算；政策 DID 使用 NumPy 多维组内变换与手工交互聚类复算；空间路径仅标记同实现重跑。", 4500, 320, input_model=FormalResearchContract, output_model=ResearchRun),
             _node("reproduction_audit", "复现一致性审计", "code", "execution", "逐步核对合同、数据哈希、样本流、固定效应、聚类设置、实现身份以及系数和标准误容差；核心不一致即阻塞。", 4620, 220, input_model=ResearchRun, output_model=ReproductionAudit),
+            _node("evidence_visualization", "证据图生成", "code", "audit", "调用仓库内置 GreenFinance Plot Agent，把成功 Execution 的结构化统计结果渲染为可追溯证据图；不接触原始数据，也不生成 Claim。", 4740, 260, input_model=ResearchRun, output_model=FigureBundle),
             _node("evidence_assessment", "Evidence + Candidate Claims", "llm", "audit", "一次调用同时返回 EvidenceAssessment 与原始 Candidate ClaimLedger；拆分后原始候选账本保持不变。", 4620, 140, input_model=ResearchRun, output_model=EvidenceClaimBundle, prompt_key="evidence_claim_bundle"),
             _node("scientific_audit", "Scientific Audit", "llm", "audit", "独立判断合同遵从与科学有效性，代码成功不能自动通过。", 4900, 140, input_model=EvidenceAssessment, output_model=ScientificAudit, prompt_key="scientific_audit"),
             _node("claim_ledger", "Candidate ClaimLedger", "merge", "audit", "从 Evidence/Claim Bundle 原样拆出 LLM 候选结论；独立审计不得改写，该产物也不直接进入 H3。", 5180, 140, input_model=EvidenceClaimBundle, output_model=ClaimLedger),
             _node("evidence_registry", "Evidence Registry", "code", "audit", "将冻结检查的终态、执行引用、独立复算与审计结果编译为 Claim 级证据。", 5280, 260, input_model=ResearchRun, output_model=EvidenceRegistry),
             _node("claim_gate", "确定性 Claim Gate", "code", "audit", "无 LLM、无随机数、无 I/O；拒绝未知引用与未授权因果表述，输出 H3 唯一可读的 ClaimLedger。", 5380, 260, input_model=EvidenceRegistry, output_model=ClaimLedger),
             _node("h3_gate", "H3 · 逐条结论授权", "gate", "audit", "人工逐条批准、降级、暂缓或拒绝 Claim；Fixture 只能拒绝或暂缓。", 5460, 140, input_model=ClaimLedger, output_model=GateDecisionRequest),
+            _node("publication_visualization", "论文图生成", "code", "writing", "只把 H3 批准或降级 Claim 所引用的 Execution 交给内置 Plot Agent；图形模块不参与正文写作。", 5600, 260, input_model=ClaimLedger, output_model=FigureBundle),
             _node("scientific_writer", "Scientific Writer", "llm", "writing", "用两次批量调用覆盖八章；只读取安全叙述与 statement ID，定向修复只重写未通过章节。", 5740, 140, input_model=ClaimLedger, output_model=ManuscriptSectionDraftBatch, prompt_key="manuscript_section_draft_batch"),
             _node("manuscript_ir_compile", "Manuscript IR 编译", "code", "writing", "从获批 Claim 与成功 Execution 重建语句注册表，解析锚点并按 JSON Pointer 注入受保护值。", 5900, 140, input_model=ManuscriptPackage, output_model=ManuscriptPackage),
             _node("consistency_audit", "写作一致性审计", "code", "writing", "确定性检查完整章节、未授权 Claim、虚构统计量、Run 引用与成果模式。", 6020, 140, input_model=ManuscriptPackage, output_model=ManuscriptPackage),
@@ -261,13 +266,15 @@ def build_app_a_definition() -> dict[str, Any]:
             _edge("research_run_merge", "replication_executor", "真实研究"),
             _edge("replication_executor", "reproduction_audit"),
             _edge("research_run_merge", "reproduction_audit", "Fixture"),
-            _edge("reproduction_audit", "evidence_assessment", "通过"),
+            _edge("reproduction_audit", "evidence_visualization", "通过"),
+            _edge("evidence_visualization", "evidence_assessment"),
             _edge("evidence_assessment", "scientific_audit"),
             _edge("scientific_audit", "claim_ledger"),
             _edge("claim_ledger", "evidence_registry"),
             _edge("evidence_registry", "claim_gate"),
             _edge("claim_gate", "h3_gate"),
-            _edge("h3_gate", "scientific_writer", "授权后"),
+            _edge("h3_gate", "publication_visualization", "授权后"),
+            _edge("publication_visualization", "scientific_writer"),
             _edge("scientific_writer", "manuscript_ir_compile"),
             _edge("manuscript_ir_compile", "consistency_audit"),
             _edge("consistency_audit", "h4_gate"),

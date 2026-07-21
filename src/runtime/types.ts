@@ -131,6 +131,7 @@ export interface ManuscriptSectionView {
   status: 'generated' | 'not_generated'
   claimIds: string[]
   runIds: string[]
+  figureIds: string[]
   statements: ManuscriptStatementSourceView[]
 }
 
@@ -153,9 +154,35 @@ export interface ManuscriptPackageView {
   status: 'draft' | 'needs_revision' | 'ready_for_human_review' | 'not_generated'
   researchPlan: string
   sections: ManuscriptSectionView[]
+  figureIds: string[]
   disclosures: string[]
   unresolvedIssues: string[]
   auditResult: 'not_run' | 'pass_with_no_critical_issues' | 'revise'
+}
+
+export interface FigureFileView {
+  format: 'svg' | 'png' | 'pdf' | 'csv'
+  mimeType: string
+  sha256: string
+}
+
+export interface FigureView {
+  id: string
+  recipeId: string
+  title: string
+  caption: string
+  altText: string
+  executionIds: string[]
+  claimIds: string[]
+  files: FigureFileView[]
+  warnings: string[]
+}
+
+export interface FigureBundleView {
+  stage: 'evidence' | 'publication'
+  status: 'succeeded' | 'not_generated' | 'failed'
+  figures: FigureView[]
+  warnings: string[]
 }
 
 export interface DesignCandidateView {
@@ -215,6 +242,7 @@ export interface RunSnapshot {
   steps: StepAttempt[]
   events: RunEvent[]
   claims: ClaimRecord[]
+  figureBundles: FigureBundleView[]
   manuscript?: ManuscriptPackageView
   designArena?: DesignArenaView
   modelUsage?: ModelUsageView
