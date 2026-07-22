@@ -364,6 +364,37 @@ class PanelResearchEngineTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    async def test_policy_baseline_cardinality_fails_before_both_implementations_read_data(
+        self,
+    ) -> None:
+        contract = _policy_contract(self.dataset_ref)
+        contract.approved_plan.baseline_models.append(
+            contract.approved_plan.baseline_models[0].model_copy(
+                update={"step_id": "model_baseline_secondary"}
+            )
+        )
+        contract.approved_plan_hash = canonical_sha256(
+            contract.approved_plan.model_dump(mode="json")
+        )
+        reproducer = ResearchReproducer(self.registry)
+
+        with (
+            patch.object(self.engine, "_verify_file") as verify_file,
+            patch.object(reproducer, "_resolve_source") as resolve_source,
+        ):
+            primary = self.engine.execute(contract)
+            replication = reproducer.execute(contract)
+
+        verify_file.assert_not_called()
+        resolve_source.assert_not_called()
+        for result in (primary, replication):
+            self.assertEqual(result.execution_status, "failed")
+            self.assertIn(
+                "policy-did-v2 requires exactly one baseline model",
+                result.not_executed_reason or "",
+            )
+            self.assertEqual(result.executions, [])
+
     async def test_contract_wall_time_timeout_discards_late_primary_result(self) -> None:
         now = [0.0]
         contract = self.contract.model_copy(deep=True)

@@ -33,7 +33,11 @@ from .policy_causal import (
     reproduce_policy_baseline,
     reproduce_policy_model,
 )
-from .test_dag import is_estimative_test_step, select_primary_test_dag_with_budget
+from .test_dag import (
+    is_estimative_test_step,
+    select_primary_test_dag_with_budget,
+    validate_policy_did_execution_plan,
+)
 
 
 PANEL_METHODS = {"policy_causal", "panel_association", "mechanism_boundary"}
@@ -203,10 +207,7 @@ class ResearchReproducer:
 
         plan = contract.approved_plan
         try:
-            if len(plan.baseline_models) != 1:
-                raise ReproductionError(
-                    "policy-did-v2 独立复算要求恰好一个基准模型。"
-                )
+            baseline = validate_policy_did_execution_plan(plan)
             deadline.check()
             source, actual_hashes = self._resolve_source(contract, deadline)
             provenance = _policy_provenance(contract, actual_hashes)
@@ -215,7 +216,6 @@ class ResearchReproducer:
                 contract.budget.max_executions,
             )
             selected_ids = {item.step.step_id for item in budgeted.selected}
-            baseline = plan.baseline_models[0]
             result = reproduce_policy_model(source, baseline)
             deadline.check()
         except _ContractWallTimeExceeded as error:
@@ -993,6 +993,12 @@ class ResearchReproducer:
                 f"{specification.step_id}: {reason}"
                 for specification in specifications
             ]
+        elif (
+            contract.approved_plan.method_family == "policy_causal"
+            and len(contract.approved_plan.baseline_models) != 1
+        ):
+            executions = []
+            failed_runs = [reason]
         else:
             baseline_step_id = (
                 contract.approved_plan.baseline_models[0].step_id

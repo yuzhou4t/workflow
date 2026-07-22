@@ -36,6 +36,7 @@ from hypoweaver.models import (
     CriticReport,
     DataProfile,
     DatasetRef,
+    DecisionRecord,
     DesignEnvelope,
     DesignArena,
     FULL_MANUSCRIPT_SECTION_IDS,
@@ -55,6 +56,7 @@ from hypoweaver.models import (
     ResearchRun,
     ReproductionAudit,
     RevisionRequest,
+    RunState,
     ScientificAudit,
 )
 from hypoweaver.prompts import get_prompt
@@ -1206,7 +1208,7 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(route_step.prompts[0].role, "code")
         self.assertEqual(run.artifacts["method_route"]["payload"]["route_status"], "routed")
 
-    def test_external_policy_plan_binds_code_owned_executable_steps(self) -> None:
+    async def test_external_policy_plan_binds_code_owned_executable_steps(self) -> None:
         package = ResearchPackage(
             case_id="policy-normalizer",
             title="policy normalizer",
@@ -1339,6 +1341,171 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
             ],
             "binary_group_year_contrast",
         )
+
+        state = RunState(
+            case_id=package.case_id,
+            case_name=package.title,
+            mode="research",
+            execution_mode="external",
+            case_submission=CaseSubmission.model_validate(
+                package.model_dump(
+                    mode="json",
+                    include=set(CaseSubmission.model_fields),
+                )
+            ),
+        )
+        route = MethodRoute(
+            route_status="routed",
+            research_goal="causal",
+            primary_route="policy_causal",
+            route_reason=["policy contract"],
+            required_assumptions=[],
+            testable_assumptions=[],
+            untestable_assumptions=[],
+            alternative_routes=[],
+            rejected_routes=[],
+            missing_information=[],
+        )
+        second_baseline = normalized.baseline_models[0].model_copy(
+            update={"step_id": "model_baseline_secondary"}
+        )
+        invalid_plans = {
+            "baseline_cardinality": normalized.model_copy(
+                update={
+                    "baseline_models": [
+                        normalized.baseline_models[0],
+                        second_baseline,
+                    ]
+                }
+            ),
+            "design_only": normalized.model_copy(update={"design_only": True}),
+            "registry": normalized.model_copy(update={"check_registry_version": None}),
+            "policy_design": normalized.model_copy(
+                update={
+                    "baseline_models": [
+                        normalized.baseline_models[0].model_copy(
+                            update={"parameters": {"policy_design": {}}}
+                        )
+                    ]
+                }
+            ),
+        }
+        for label, invalid_plan in invalid_plans.items():
+            with self.subTest(label=label):
+                probe = self.engine._probe_candidate(
+                    state,
+                    package,
+                    profile,
+                    route,
+                    package.design_envelope,
+                    f"candidate-{label}",
+                    invalid_plan,
+                )
+                contract_check = next(
+                    check
+                    for check in probe.checks
+                    if check.check_id == "policy_execution_contract"
+                )
+                self.assertEqual(contract_check.status, "fail")
+                self.assertEqual(probe.verdict, "fail")
+                self.assertFalse(probe.executor_ready)
+
+        invalid_candidate = DesignCandidate(
+            candidate_id="candidate-baseline-cardinality",
+            strategy="measurement_robustness",
+            rationale="regression fixture for the RC4 contract failure",
+            plan=invalid_plans["baseline_cardinality"],
+            probe_report=ProbeReport(
+                report_id="stale-probe",
+                candidate_id="candidate-baseline-cardinality",
+                verdict="pass",
+                checks=[],
+                executor_ready=True,
+            ),
+        )
+        arena = DesignArena(
+            arena_id="stale-policy-arena",
+            candidates=[invalid_candidate],
+            reviewer_reports=[],
+            recommended_candidate_ids=[invalid_candidate.candidate_id],
+            provisional_candidate_id=invalid_candidate.candidate_id,
+            selection_rationale=["simulate a stale pre-fix Probe artifact"],
+        )
+        self.engine._put_artifact(state, "research_package", package)
+        self.engine._put_artifact(state, "design_arena", arena)
+        with self.assertRaisesRegex(
+            WorkflowTransitionError,
+            "exactly one baseline model",
+        ):
+            await self.engine._after_h2(
+                state,
+                DecisionRecord(
+                    gate="H2",
+                    action="approve",
+                    actor="tester",
+                    selected_candidate_id=invalid_candidate.candidate_id,
+                ),
+            )
+        self.assertNotIn("formal_research_contract", state.artifacts)
+        self.assertEqual(state.execution_status, "not_started")
+        self.assertEqual(state.scientific_status, "not_evaluated")
+
+    async def test_primary_research_run_status_survives_replication_failure(
+        self,
+    ) -> None:
+        state = await self._to_h2("esg-panel")
+        state.mode = "research"
+        state.execution_mode = "external"
+        arena = self.engine._artifact(state, "design_arena", DesignArena)
+
+        class FailedPrimaryExecutor:
+            executor_name = "failed primary executor"
+
+            async def execute(self, contract):
+                return ResearchRun(
+                    research_run_id="failed-primary-run",
+                    case_id=contract.case_id,
+                    contract_hash=contract.approved_plan_hash,
+                    plan_version=contract.approved_plan.plan_version,
+                    execution_status="failed",
+                    scientific_status="invalid",
+                    fixture_only=False,
+                    not_executed_reason="frozen execution failed",
+                    failed_runs=["baseline failed"],
+                )
+
+        class FailedReproducer:
+            reproducer_name = "failed reproducer"
+
+            async def execute(self, contract):
+                raise RuntimeError("replication unavailable")
+
+        with (
+            patch(
+                "hypoweaver.engine.HttpResearchExecutor",
+                return_value=FailedPrimaryExecutor(),
+            ),
+            patch(
+                "hypoweaver.engine.HttpResearchReproducer",
+                return_value=FailedReproducer(),
+            ),
+        ):
+            await self.engine._after_h2(
+                state,
+                DecisionRecord(
+                    gate="H2",
+                    action="approve",
+                    actor="tester",
+                    selected_candidate_id=arena.provisional_candidate_id,
+                ),
+            )
+
+        self.assertEqual(state.status, "blocked")
+        self.assertEqual(state.current_node_id, "reproduction_audit")
+        self.assertEqual(state.execution_status, "failed")
+        self.assertEqual(state.scientific_status, "invalid")
+        persisted_run = self.engine._artifact(state, "research_run", ResearchRun)
+        self.assertEqual(persisted_run.research_run_id, "failed-primary-run")
 
     async def test_policy_critical_cluster_risk_reaches_h2_with_entity_sensitivity(
         self,

@@ -42,6 +42,7 @@ from .test_dag import (
     is_estimative_test_step,
     schedule_test_dag,
     select_primary_test_dag_with_budget,
+    validate_policy_did_execution_plan,
 )
 
 
@@ -99,6 +100,11 @@ class PanelResearchEngine:
                 contract,
                 f"本地执行器尚不支持 {plan.method_family}；当前仅支持面板关联与其机制主模型。",
             )
+        if plan.method_family == "policy_causal":
+            try:
+                validate_policy_did_execution_plan(plan)
+            except ValueError as error:
+                return self._failed_run(contract, str(error))
         if not contract.dataset_refs:
             return self._failed_run(contract, "冻结合同中没有可执行数据资产。")
         if not plan.baseline_models:
@@ -1775,26 +1781,38 @@ class PanelResearchEngine:
         *,
         reason_code: str = "dependency_failed",
     ) -> ResearchRun:
+        baselines = contract.approved_plan.baseline_models
+        invalid_policy_cardinality = (
+            contract.approved_plan.method_family == "policy_causal"
+            and len(baselines) != 1
+        )
         baseline_step_id = (
-            contract.approved_plan.baseline_models[0].step_id
-            if contract.approved_plan.baseline_models
+            "model_baseline"
+            if invalid_policy_cardinality
+            else baselines[0].step_id
+            if baselines
             else "model_baseline"
         )
-        executions = [
-            ExecutionRecord(
-                execution_id=f"execution-{uuid4()}",
-                run_type="baseline",
-                plan_step_id=baseline_step_id,
-                execution_status="failed",
-                check_id=baseline_step_id,
-                not_executed_reason_code=reason_code,
-                error=reason,
-            )
-        ]
+        executions = (
+            []
+            if invalid_policy_cardinality
+            else [
+                ExecutionRecord(
+                    execution_id=f"execution-{uuid4()}",
+                    run_type="baseline",
+                    plan_step_id=baseline_step_id,
+                    execution_status="failed",
+                    check_id=baseline_step_id,
+                    not_executed_reason_code=reason_code,
+                    error=reason,
+                )
+            ]
+        )
         if (
             contract.approved_plan.method_family
             in {"policy_causal", "panel_association", "mechanism_boundary"}
-            and contract.approved_plan.baseline_models
+            and baselines
+            and not invalid_policy_cardinality
         ):
             scheduled = schedule_test_dag(contract.approved_plan)
             dependency_reasons = {

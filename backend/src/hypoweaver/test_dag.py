@@ -19,6 +19,7 @@ from .models import (
     ScientificAudit,
     TestRole,
 )
+from .policy_causal import parse_policy_design
 
 
 ENTERPRISE_PANEL_REGISTRY_VERSION = "enterprise-panel-v1"
@@ -68,6 +69,24 @@ NotExecutedReasonCode = Literal[
 
 class TestDagError(ValueError):
     pass
+
+
+def validate_policy_did_execution_plan(plan: AnalysisPlan) -> ModelSpec:
+    """Reject an invalid policy-did-v2 plan before any data are read."""
+
+    if plan.method_family != "policy_causal":
+        raise TestDagError("policy-did-v2 only supports policy_causal plans")
+    if len(plan.baseline_models) != 1:
+        raise TestDagError("policy-did-v2 requires exactly one baseline model")
+    if plan.design_only:
+        raise TestDagError("policy-did-v2 requires design_only=false")
+    if plan.check_registry_version != POLICY_DID_REGISTRY_VERSION:
+        raise TestDagError(
+            "policy-did-v2 requires check_registry_version=policy-did-v2"
+        )
+    baseline = plan.baseline_models[0]
+    parse_policy_design(baseline)
+    return baseline
 
 
 @dataclass(frozen=True)

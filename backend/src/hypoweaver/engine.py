@@ -114,6 +114,7 @@ from .test_dag import (
     compile_policy_did_test_dag,
     schedule_test_dag,
     stable_claim_id,
+    validate_policy_did_execution_plan,
 )
 from .visualization import (
     FigureBundle,
@@ -3112,10 +3113,33 @@ class WorkflowEngine:
             if plan.method_family != route.primary_route
             else None,
         )
+        policy_baseline: ModelSpec | None = None
+        if state.execution_mode == "external" and plan.method_family == "policy_causal":
+            try:
+                policy_baseline = validate_policy_did_execution_plan(plan)
+            except ValueError as error:
+                add(
+                    "policy_execution_contract",
+                    "fail",
+                    f"政策执行合约无效：{error}",
+                    "修复唯一基准模型、执行状态、registry 和 policy_design 后重新 Probe。",
+                )
+            else:
+                add(
+                    "policy_execution_contract",
+                    "pass",
+                    "policy-did-v2 执行合约已通过数据读取前校验。",
+                )
         if not plan.baseline_models:
             add("baseline_model", "fail", "候选方案没有基准模型。", "补充可执行基准模型。")
+        elif (
+            state.execution_mode == "external"
+            and plan.method_family == "policy_causal"
+            and policy_baseline is None
+        ):
+            pass
         else:
-            model = plan.baseline_models[0]
+            model = policy_baseline or plan.baseline_models[0]
             add(
                 "core_variables",
                 "fail" if not model.outcome or not model.treatments_or_exposures else "pass",
@@ -3150,12 +3174,8 @@ class WorkflowEngine:
                     "由 H2 判断是否接受该识别风险。" if missing_fixed_effects else None,
                 )
 
-        if (
-            plan.method_family == "policy_causal"
-            and plan.baseline_models
-            and not design_only_probe
-        ):
-            model = plan.baseline_models[0]
+        if policy_baseline is not None and not design_only_probe:
+            model = policy_baseline
             policy_contract = model.parameters.get("policy_design")
             if not isinstance(policy_contract, dict):
                 add(
@@ -3279,11 +3299,15 @@ class WorkflowEngine:
 
         executor_ready = state.execution_mode == "fixture"
         if state.execution_mode == "external":
-            executor_ready = plan.method_family in {
-                "policy_causal",
-                "panel_association",
-                "mechanism_boundary",
-            }
+            executor_ready = (
+                policy_baseline is not None
+                if plan.method_family == "policy_causal"
+                else plan.method_family
+                in {
+                    "panel_association",
+                    "mechanism_boundary",
+                }
+            )
         if plan.method_family == "spatial" and plan.baseline_models:
             model = plan.baseline_models[0]
             spatial_model = self._spatial_model_type(model)
@@ -4287,6 +4311,14 @@ class WorkflowEngine:
             for issue in critic.issues
         ):
             raise WorkflowTransitionError("H2 cannot freeze a plan with unresolved critical issues")
+        if state.execution_mode == "external" and plan.method_family == "policy_causal":
+            try:
+                validate_policy_did_execution_plan(plan)
+            except ValueError as error:
+                raise WorkflowTransitionError(
+                    "H2 cannot freeze an invalid policy-did-v2 execution plan: "
+                    f"{error}"
+                ) from error
         self._validate_spatial_plan(package, plan)
         contract = FormalResearchContract(
             contract_id=f"contract-{uuid4()}",
@@ -4409,6 +4441,13 @@ class WorkflowEngine:
             output_value=research_run,
             logs=["执行状态与科学状态已分别保留。"],
         )
+        state.execution_status = research_run.execution_status
+        state.scientific_status = research_run.scientific_status
+        state.plan_only = research_run.fixture_only or research_run.execution_status in (
+            "not_executed",
+            "fixture_only",
+        )
+        self._put_artifact(state, "research_run", research_run)
         reproduction_audit: ReproductionAudit
         if common_reproduction_audit is not None:
             reproduction_audit = common_reproduction_audit
@@ -4574,13 +4613,6 @@ class WorkflowEngine:
                 status="blocked",
             )
             return
-        state.execution_status = research_run.execution_status
-        state.scientific_status = research_run.scientific_status
-        state.plan_only = research_run.fixture_only or research_run.execution_status in (
-            "not_executed",
-            "fixture_only",
-        )
-        self._put_artifact(state, "research_run", research_run)
         evidence_figure_bundle = await self._render_figure_stage(
             state,
             research_run,
