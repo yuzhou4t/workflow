@@ -19,6 +19,9 @@ Case005-HypoWeaver/
 ├── START_HERE_FOR_AI.md
 ├── SETUP.command
 ├── START.command
+├── CHECK_WINDOWS.cmd
+├── SETUP_WINDOWS.cmd
+├── START_WINDOWS.cmd
 ├── release-package.json
 ├── tools/student_handoff.py
 ├── workflow/student-benchmark/...
@@ -89,6 +92,12 @@ python3 scripts/case_operator.py status --case 005 --assignment baselines
 Case 字节、协议、provider、endpoint 和 model 不变，同一项目授权可以供四个已分配任务使用。
 当前 RC9 的 release lock 会记录本机路径和 Python 环境，因此每个工作区仍需自动生成自己的
 技术校验文件，但不需要重新进行人工授权。
+
+Windows 10/11 x64 使用单独的 WSL2 + Docker 入口：先双击 `CHECK_WINDOWS.cmd`。它不读取真实
+Case、不使用 API Key，也不调用外部模型，只验收容器的文件与网络隔离。通过后再双击
+`START_WINDOWS.cmd` 进入同一菜单。Windows 原生 Python 不属于获准执行路径。
+当前仍是负责人验收版，详细顺序和正式分发前门槛见
+[`docs/WINDOWS_PILOT_ZH.md`](docs/WINDOWS_PILOT_ZH.md)。
 
 四项材料的含义和生成顺序见
 [`docs/MATERIALS_EXPLAINED_ZH.md`](docs/MATERIALS_EXPLAINED_ZH.md)，负责人操作见

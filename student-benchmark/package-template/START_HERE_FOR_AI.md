@@ -2,7 +2,13 @@
 
 你正在处理一个已经分配好的 SixBench 单人测试包。不要先猜路径，也不要先修改配置。
 
-请按顺序执行：
+先根据电脑系统选择入口：
+
+- macOS：按下面的 `python3` 命令执行，或双击 `START.command`；
+- Windows：不要直接用 Windows Python。先双击 `CHECK_WINDOWS.cmd`，验收通过后双击
+  `START_WINDOWS.cmd`。后续命令会自动在 WSL2 + Docker 控制环境中执行。
+
+进入对应环境后，按顺序执行：
 
 ```bash
 python3 tools/student_handoff.py explain
@@ -27,6 +33,10 @@ python3 tools/student_handoff.py preflight
 环境绑定的技术性 release lock；这不代表重新进行一次人工授权。开始下载前先告诉同学并取得确认。
 HypoWeaver 分包也会安装共同执行板校验所需的 data-to-paper 运行时；这只是 release lock 的
 冻结依赖，不会增加该同学需要运行的系统或单元。
+
+Windows 的 `CHECK_WINDOWS.cmd` 不使用 API Key、不读取真实 Case，也不会调用外部模型。它会
+验证受限容器只能读取显式挂载的测试文件、只能写结果目录、不能直接访问公网，并且仍能访问
+控制器中的本地计费代理。若失败，保留并回传 `RETURN/WINDOWS_ENV_CHECK.json`，不得绕过。
 
 只有预检结果同时满足：
 

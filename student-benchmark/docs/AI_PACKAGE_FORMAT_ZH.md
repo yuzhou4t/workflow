@@ -20,8 +20,10 @@ python3 tools/student_handoff.py setup --yes
 ```
 
 虚拟环境不随 ZIP 搬运。初始化工具会在本机重建冻结运行环境，并根据本机绝对路径生成 release
-lock；这是一项自动技术校验，不是对同学重新进行人工审批。当前正式执行环境要求 macOS、
-Python 3.11、Node.js 18.18+（五基线分组）和网络连接。
+lock；这是一项自动技术校验，不是对同学重新进行人工审批。macOS 入口使用本机 Python 3.11。
+Windows 入口使用 `CHECK_WINDOWS.cmd` / `START_WINDOWS.cmd`，要求 WSL2 与 Docker Desktop；
+Python 3.11 和 Node.js 20 由固定容器提供，不使用 Windows 本机 Python。首次使用先完成不调用
+模型的隔离验收。
 
 ## 固定分工
 

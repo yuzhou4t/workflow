@@ -12,6 +12,9 @@ Rules:
 
 - Run only the Case, assignment, systems, views, boards, and seed declared in
   `ASSIGNMENT.json`.
+- On Windows, enter through `CHECK_WINDOWS.cmd` and `START_WINDOWS.cmd`. Do not
+  run the package with native Windows Python or bypass the WSL2 + Docker
+  isolation check.
 - Do not edit `ASSIGNMENT.json`, `release-package.json`, frozen source code,
   protocol files, suite files, Case files, release locks, or authorization
   receipts.

@@ -196,8 +196,20 @@ def create_venv(system_python: str, target_python: Path) -> None:
 
 
 def install_runtimes(root: Path, context: dict[str, Any]) -> None:
-    if platform.system() != "Darwin":
-        raise SetupError("当前冻结执行包只验证了 macOS，不能在其他系统正式运行")
+    runtime_platform = platform.system()
+    windows_container_mode = (
+        runtime_platform == "Linux"
+        and os.environ.get("SIXBENCH_WINDOWS_WSL_DOCKER") == "1"
+        and os.environ.get("SIXBENCH_RUNTIME_IMAGE")
+        and os.environ.get("SIXBENCH_CONTAINER_NETWORK")
+        and os.environ.get("SIXBENCH_DOCKER_HOST_ROOT")
+        and os.environ.get("SIXBENCH_CONTROLLER_ROOT")
+    )
+    if runtime_platform != "Darwin" and not windows_container_mode:
+        raise SetupError(
+            "正式包必须在已验证的 macOS 环境，或通过 START_WINDOWS.cmd "
+            "进入 WSL2 + Docker 隔离环境"
+        )
     system_python = select_python()
     systems = set(context["assignment"]["systems"])
     harness_python = context["harness_python"]
@@ -312,6 +324,12 @@ def status(root: Path, context: dict[str, Any]) -> dict[str, Any]:
         "schema_version": "sixbench-student-setup-status-v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "package_root": str(root.resolve()),
+        "execution_host": (
+            "windows_wsl2_docker"
+            if os.environ.get("SIXBENCH_WINDOWS_WSL_DOCKER") == "1"
+            else platform.system().lower()
+        ),
+        "runtime_image": os.environ.get("SIXBENCH_RUNTIME_IMAGE"),
         "ready": all(path.is_file() for path in targets.values()),
         "checks": {
             name: {

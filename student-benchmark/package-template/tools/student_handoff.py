@@ -171,13 +171,23 @@ def explain_payload(root: Path) -> dict[str, Any]:
         "release_package": str(paths["release_package"]),
         "result_root": str(paths["runs"]),
         "return_directory": str((root / "RETURN").resolve()),
+        "execution_host": (
+            "windows_wsl2_docker"
+            if os.environ.get("SIXBENCH_WINDOWS_WSL_DOCKER") == "1"
+            else platform.system().lower()
+        ),
     }
 
 
 def explain_text(payload: dict[str, Any]) -> str:
     systems = "、".join(str(item) for item in payload["systems"])
     warning = ""
-    if payload["execution_state"] != "formal":
+    if payload["execution_state"] == "windows_pilot":
+        warning = (
+            "\n当前包状态：Windows 负责人验收版。隔离检查和正式预检通过后，"
+            "仅允许项目负责人在自己的 Windows 电脑测试；尚不可分发给同学。"
+        )
+    elif payload["execution_state"] != "formal":
         warning = (
             "\n当前包状态：尚未标记为 formal。可以查看任务和做离线检查，"
             "但不得绕过授权门禁进行外部模型调用。"
@@ -192,6 +202,7 @@ def explain_text(payload: dict[str, Any]) -> str:
         f"- 应完成单元：{payload['expected_cell_count']}\n"
         f"- 正式结果目录：{payload['result_root']}\n"
         f"- 回传目录：{payload['return_directory']}\n"
+        f"- 当前执行环境：{payload['execution_host']}\n"
         "\n执行顺序：初始化本机环境 → 配置 API → 离线预检 → 明确确认 → "
         "正式运行 → 生成回传包。"
         f"{warning}"
@@ -505,6 +516,12 @@ def build_report(root: Path) -> dict[str, Any]:
             "package_root": str(root.resolve()),
             "python": sys.version.split()[0],
             "platform": platform.platform(),
+            "host_mode": (
+                "windows_wsl2_docker"
+                if os.environ.get("SIXBENCH_WINDOWS_WSL_DOCKER") == "1"
+                else platform.system().lower()
+            ),
+            "runtime_image": os.environ.get("SIXBENCH_RUNTIME_IMAGE"),
         },
         "collection_status": collection_status,
         "scientific_outcome": scientific_outcome(cells, collection_status),
@@ -715,6 +732,14 @@ def build_return_bundle(root: Path) -> tuple[dict[str, Any], Path]:
         "return_archive_sha256": sha256_file(archive),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+    windows_sync_root = os.environ.get("SIXBENCH_WINDOWS_SYNC_ROOT")
+    if (
+        os.environ.get("SIXBENCH_WINDOWS_WSL_DOCKER") == "1"
+        and windows_sync_root
+    ):
+        pointer["windows_return_directory"] = str(
+            Path(windows_sync_root) / "RETURN"
+        )
     pointer_path = return_dir / "RETURN_POINTER.json"
     reject_output_symlink(pointer_path)
     pointer_path.write_text(

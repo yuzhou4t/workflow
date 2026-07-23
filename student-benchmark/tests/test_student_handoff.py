@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 
@@ -277,6 +279,90 @@ class StudentHandoffTests(unittest.TestCase):
             self.assertEqual(payload["package_root"], str(root.resolve()))
             self.assertEqual(payload["case_number"], "005")
             self.assertEqual(payload["expected_cell_count"], 2)
+
+    def test_explain_identifies_windows_container_host(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_package(root)
+            with mock.patch.dict(
+                os.environ,
+                {"SIXBENCH_WINDOWS_WSL_DOCKER": "1"},
+                clear=False,
+            ):
+                payload = student_handoff.explain_payload(root)
+
+            self.assertEqual(payload["execution_host"], "windows_wsl2_docker")
+
+    def test_windows_bootstrap_requires_the_complete_controller_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            context = {
+                "assignment": {"systems": []},
+                "harness_python": root / "harness" / ".venv" / "bin" / "python",
+                "environment_freeze": root / "environment.txt",
+                "harness": root / "harness",
+                "data_to_paper": root / "data-to-paper",
+                "deep_scientist": root / "DeepScientist",
+            }
+            complete_environment = {
+                "SIXBENCH_WINDOWS_WSL_DOCKER": "1",
+                "SIXBENCH_RUNTIME_IMAGE": "sixbench:test",
+                "SIXBENCH_CONTAINER_NETWORK": "sixbench-internal-test",
+                "SIXBENCH_DOCKER_HOST_ROOT": "/host/package",
+                "SIXBENCH_CONTROLLER_ROOT": "/workspace",
+            }
+            with (
+                mock.patch.object(
+                    student_bootstrap.platform,
+                    "system",
+                    return_value="Linux",
+                ),
+                mock.patch.object(
+                    student_bootstrap,
+                    "select_python",
+                    return_value="/usr/local/bin/python3.11",
+                ),
+                mock.patch.object(student_bootstrap, "create_venv"),
+                mock.patch.object(student_bootstrap, "run_checked"),
+                mock.patch.dict(os.environ, {}, clear=True),
+            ):
+                with self.assertRaises(student_bootstrap.SetupError):
+                    student_bootstrap.install_runtimes(root, context)
+
+            with (
+                mock.patch.object(
+                    student_bootstrap.platform,
+                    "system",
+                    return_value="Linux",
+                ),
+                mock.patch.object(
+                    student_bootstrap,
+                    "select_python",
+                    return_value="/usr/local/bin/python3.11",
+                ),
+                mock.patch.object(student_bootstrap, "create_venv"),
+                mock.patch.object(student_bootstrap, "run_checked"),
+                mock.patch.dict(
+                    os.environ,
+                    complete_environment,
+                    clear=True,
+                ),
+            ):
+                student_bootstrap.install_runtimes(root, context)
+
+    def test_windows_template_has_three_double_click_entries(self) -> None:
+        template = MODULE_PATH.parents[1]
+        for name in (
+            "CHECK_WINDOWS.cmd",
+            "SETUP_WINDOWS.cmd",
+            "START_WINDOWS.cmd",
+        ):
+            self.assertTrue((template / name).is_file())
+        dockerfile = (
+            template / "tools" / "windows" / "Dockerfile"
+        ).read_text(encoding="utf-8")
+        self.assertIn("python:3.11.12", dockerfile)
+        self.assertIn("NODE_VERSION=20.19.4", dockerfile)
 
     def test_bootstrap_resolves_only_package_internal_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

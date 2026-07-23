@@ -137,6 +137,14 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
         workspace=workspace,
         formal=args.formal,
     )
+    windows_copies = tuple(
+        (
+            source,
+            workspace / "tools" / "windows" / source.name,
+        )
+        for source in sorted((TEMPLATE_ROOT / "tools" / "windows").iterdir())
+        if source.is_file()
+    )
     copies = (
         (TEMPLATE_ROOT / "AGENTS.md", workspace / "AGENTS.md"),
         (
@@ -149,6 +157,18 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
         ),
         (TEMPLATE_ROOT / "SETUP.command", workspace / "SETUP.command"),
         (TEMPLATE_ROOT / "START.command", workspace / "START.command"),
+        (
+            TEMPLATE_ROOT / "CHECK_WINDOWS.cmd",
+            workspace / "CHECK_WINDOWS.cmd",
+        ),
+        (
+            TEMPLATE_ROOT / "SETUP_WINDOWS.cmd",
+            workspace / "SETUP_WINDOWS.cmd",
+        ),
+        (
+            TEMPLATE_ROOT / "START_WINDOWS.cmd",
+            workspace / "START_WINDOWS.cmd",
+        ),
         (
             TEMPLATE_ROOT / "tools" / "bootstrap.py",
             workspace / "tools" / "bootstrap.py",
@@ -178,6 +198,7 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
             / "case-assignments.json",
         ),
         (release, workspace / "release-package.json"),
+        *windows_copies,
     )
     assignment_path = workspace / "ASSIGNMENT.json"
     pending_copies = [
@@ -206,6 +227,11 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
     )
     os.chmod(workspace / "START.command", 0o755)
     os.chmod(workspace / "SETUP.command", 0o755)
+    os.chmod(workspace / "tools" / "windows" / "run-in-wsl.sh", 0o755)
+    os.chmod(
+        workspace / "tools" / "windows" / "controller-entrypoint.sh",
+        0o755,
+    )
     os.chmod(workspace / "tools" / "bootstrap.py", 0o755)
     os.chmod(workspace / "tools" / "student_handoff.py", 0o755)
     os.chmod(assignment_path, 0o600)

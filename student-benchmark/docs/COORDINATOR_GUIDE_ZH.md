@@ -163,3 +163,8 @@ Case。应先在单独的 curated workspace 中只放允许发放的冻结材料
 同学回传的 `RETURN_POINTER.json` 是机器可读收件单；先核对 ZIP SHA-256，再依据
 `RESULT_SUMMARY.json` 和 `RETURN_MANIFEST.json` 合并。详细格式见
 [`AI_PACKAGE_FORMAT_ZH.md`](AI_PACKAGE_FORMAT_ZH.md)。
+
+Windows 包在正式分发前还必须先经过负责人机器验收。先只运行不读取 Case、也不使用 API 的
+`CHECK_WINDOWS.cmd`，收到通过的 `WINDOWS_ENV_CHECK.json` 后再进行 setup 和正式预检。不要把
+尚未验收的 Windows 试运行包直接发给同学。步骤见
+[`WINDOWS_PILOT_ZH.md`](WINDOWS_PILOT_ZH.md)。
