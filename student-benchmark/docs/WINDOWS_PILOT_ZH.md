@@ -14,8 +14,8 @@ Linux 镜像中。模型生成代码使用完全断网的容器，data-to-paper 
 
 要求：
 
-- Windows 10 版本 2004 / Build 19041 或更高，或 Windows 11，x64；
-- WSL2，建议默认 Ubuntu；
+- Windows 11 x64，或 Docker Desktop 当前支持的 Windows 10 22H2 / Build 19045 x64；
+- WSL 2.1.5 或更高版本（建议更新到最新版），建议默认 Ubuntu；
 - Docker Desktop，并为当前 Ubuntu 开启 WSL integration；
 - 首次构建镜像、复制工作区和安装依赖需要足够磁盘空间及网络。
 
