@@ -359,6 +359,9 @@ class StudentHandoffTests(unittest.TestCase):
             "START_WINDOWS.cmd",
         ):
             self.assertTrue((template / name).is_file())
+        check_windows = (template / "CHECK_WINDOWS.cmd").read_text(encoding="utf-8")
+        self.assertIn("RETURN\\WINDOWS_ENV_CHECK.json", check_windows)
+        self.assertIn("完整截图", check_windows)
         dockerfile = (
             template / "tools" / "windows" / "Dockerfile"
         ).read_text(encoding="utf-8")

@@ -22,6 +22,10 @@ if "%SIXBENCH_EXIT%"=="0" (
 ) else (
   echo [SixBench] 环境验收未通过，状态码：%SIXBENCH_EXIT%
 )
-echo 请把 RETURN\WINDOWS_ENV_CHECK.json 发给负责人。
+if exist "%PACKAGE_DIR%\RETURN\WINDOWS_ENV_CHECK.json" (
+  echo 请把 RETURN\WINDOWS_ENV_CHECK.json 发给负责人。
+) else (
+  echo 没有生成诊断 JSON；请把本窗口完整截图发给负责人。
+)
 pause
 exit /b %SIXBENCH_EXIT%

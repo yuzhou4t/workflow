@@ -37,6 +37,7 @@ wsl --install
 3. 双击 `CHECK_WINDOWS.cmd`。
 4. 第一次会下载基础镜像并构建运行环境。
 5. 完成后，把原文件夹中的 `RETURN/WINDOWS_ENV_CHECK.json` 发回负责人。
+   如果窗口报错且没有生成该文件，就把窗口完整截图发回。
 
 通过必须同时满足：
 
