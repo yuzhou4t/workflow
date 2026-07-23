@@ -679,6 +679,7 @@ def _first_protected_value(payload: dict[str, Any]) -> dict[str, Any]:
         "p_value",
         "fit_statistic",
         "year",
+        "period_index",
     }
     for statement in payload.get("statements") or []:
         for value in statement.get("protected_values") or []:

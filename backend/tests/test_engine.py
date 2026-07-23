@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pandas as pd
 from pydantic import ValidationError
 
 from hypoweaver.adapters import FixtureModelGateway
@@ -1450,6 +1451,211 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.execution_status, "not_started")
         self.assertEqual(state.scientific_status, "not_evaluated")
 
+    def _monthly_policy_fixture(
+        self,
+        *,
+        aligned: bool,
+    ) -> tuple[WorkflowEngine, ResearchPackage, DataProfile, AnalysisPlan]:
+        source = Path(self.tempdir.name) / (
+            "monthly-policy-aligned.csv" if aligned else "monthly-policy-blind.csv"
+        )
+        rows = []
+        for entity, group in ((1, 0), (2, 1)):
+            for period in range(1, 7):
+                post = int(period >= 4)
+                rows.append(
+                    {
+                        "entity": entity,
+                        "year": 2020,
+                        "period": period,
+                        "group": group,
+                        "post": post,
+                        "did": group * post,
+                        "outcome": float(entity + period),
+                    }
+                )
+        pd.DataFrame(rows).to_csv(source, index=False)
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        reference = DatasetRef(
+            dataset_id=f"monthly-policy-{'aligned' if aligned else 'blind'}",
+            role="main",
+            filename=source.name,
+            sha256=digest,
+            size_bytes=source.stat().st_size,
+        )
+        registry = DatasetRegistry(Path(self.tempdir.name) / "monthly-datasets.json")
+        registry.register(reference, source)
+        variables = [
+            {"name": "entity", "role": "id"},
+            {"name": "year", "role": "time", "definition": "calendar year"},
+            {
+                "name": "period",
+                "role": "time",
+                "definition": "consecutive monthly period index",
+            },
+            {"name": "group", "role": "treatment"},
+            {"name": "post", "role": "unknown"},
+            {"name": "did", "role": "unknown"},
+            {"name": "outcome", "role": "outcome"},
+        ]
+        package = ResearchPackage(
+            case_id=f"monthly-policy-{'aligned' if aligned else 'blind'}",
+            title="monthly policy",
+            research_question="policy effect?",
+            hypotheses=[{"hypothesis_id": "H1", "statement": "effect"}],
+            unit_of_analysis="entity-month",
+            sample_period="2020-01—2020-06",
+            data_structure_hint="panel",
+            variables=variables,
+            dataset_refs=[reference],
+            design_envelope=DesignEnvelope(
+                benchmark_track=(
+                    "reproduction_aligned" if aligned else "strict_blind"
+                ),
+                research_goal="causal",
+            ),
+            policy_design=(
+                {
+                    "policy_date": "2020-04",
+                    "group_field": "group",
+                    "time_field": "period",
+                    "exposure_name": "did",
+                    "fixed_effects": ["entity", "period"],
+                    "cluster_fields": ["entity"],
+                }
+                if aligned
+                else None
+            ),
+        )
+        engine = WorkflowEngine(self.repository, dataset_registry=registry)
+        profile = engine._profile(package)
+        plan = AnalysisPlan(
+            plan_id="draft-monthly-policy",
+            plan_version=1,
+            method_family="policy_causal",
+            design_only=True,
+            estimands=[],
+            sample_rules=[],
+            variable_construction=[],
+            baseline_models=[
+                ModelSpec(
+                    step_id="draft-baseline",
+                    name="draft baseline",
+                    rationale="simulate a model-authored pre-normalization draft",
+                    estimator="fixed effects",
+                    outcome="outcome",
+                    treatments_or_exposures=["group"],
+                    fixed_effects=["entity", "year"],
+                )
+            ],
+            diagnostics=[],
+            robustness_tests=[],
+            falsification_tests=[],
+            mechanism_tests=[],
+            heterogeneity_tests=[],
+            identification_assumptions=[],
+            alternative_explanations=[],
+            failure_conditions=[],
+            stop_conditions=[],
+            required_data_fields=[],
+            unsupported_requested_analyses=[],
+        )
+        return engine, package, profile, plan
+
+    async def test_profile_selects_unique_period_index_over_repeated_calendar_year(
+        self,
+    ) -> None:
+        _engine, _package, profile, _plan = self._monthly_policy_fixture(
+            aligned=True
+        )
+
+        self.assertEqual(profile.time_key, "period")
+        self.assertEqual(profile.duplicate_key_count, 0)
+
+    async def test_aligned_month_index_policy_reaches_result_free_probe(
+        self,
+    ) -> None:
+        engine, package, profile, plan = self._monthly_policy_fixture(aligned=True)
+        normalized = _normalize_external_policy_candidate_plan(
+            plan,
+            profile,
+            package,
+            "external",
+            "identification_first",
+            engine.dataset_registry,
+        )
+        contract = normalized.baseline_models[0].parameters["policy_design"]
+
+        self.assertFalse(normalized.design_only)
+        self.assertEqual(normalized.baseline_models[0].treatments_or_exposures, ["did"])
+        self.assertEqual(normalized.baseline_models[0].fixed_effects, ["entity", "period"])
+        self.assertEqual(contract["time_scale"], "period_index")
+        self.assertEqual(contract["policy_start_year"], 4)
+        self.assertEqual(contract["event_reference_year"], 3)
+        self.assertEqual(contract["policy_start_weight"], 1.0)
+        state = RunState(
+            case_id=package.case_id,
+            case_name=package.title,
+            mode="research",
+            execution_mode="external",
+            case_submission=CaseSubmission.model_validate(
+                package.model_dump(
+                    mode="json",
+                    include=set(CaseSubmission.model_fields),
+                )
+            ),
+        )
+        route = MethodRoute(
+            route_status="routed",
+            research_goal="causal",
+            primary_route="policy_causal",
+            route_reason=["visible policy contract"],
+            required_assumptions=[],
+            testable_assumptions=[],
+            untestable_assumptions=[],
+            alternative_routes=[],
+            rejected_routes=[],
+            missing_information=[],
+        )
+        probe = engine._probe_candidate(
+            state,
+            package,
+            profile,
+            route,
+            package.design_envelope,
+            "candidate-aligned-month",
+            normalized,
+        )
+
+        self.assertNotEqual(probe.verdict, "fail")
+        self.assertTrue(probe.executor_ready)
+        timing = next(
+            check for check in probe.checks if check.check_id == "policy_timing_map"
+        )
+        self.assertEqual(timing.status, "pass")
+        self.assertIn("时间刻度=period_index", timing.evidence)
+
+    async def test_blind_policy_audit_promotes_unique_group_post_interaction(
+        self,
+    ) -> None:
+        engine, package, profile, plan = self._monthly_policy_fixture(aligned=False)
+        normalized = _normalize_external_policy_candidate_plan(
+            plan,
+            profile,
+            package,
+            "external",
+            "direct_baseline",
+            engine.dataset_registry,
+        )
+        contract = normalized.baseline_models[0].parameters["policy_design"]
+
+        self.assertFalse(normalized.design_only)
+        self.assertEqual(normalized.baseline_models[0].treatments_or_exposures, ["did"])
+        self.assertEqual(contract["group_field"], "group")
+        self.assertEqual(contract["time_field"], "period")
+        self.assertEqual(contract["policy_start_year"], 4)
+        self.assertEqual(contract["time_scale"], "period_index")
+
     async def test_primary_research_run_status_survives_replication_failure(
         self,
     ) -> None:
@@ -2176,11 +2382,13 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
     def test_analysis_design_prompt_distinguishes_model_and_planned_steps(self) -> None:
         prompt = get_prompt("analysis_design")
 
-        self.assertEqual(prompt.version, "1.6.0")
+        self.assertEqual(prompt.version, "1.6.1")
         self.assertIn("baseline_models 的元素使用 ModelSpec", prompt.system)
         self.assertIn("必须严格使用 PlannedStep", prompt.system)
         self.assertIn("具体设置必须放入 parameters", prompt.system)
         self.assertIn("其余每个计划类别最多 1 个最关键步骤", prompt.system)
+        self.assertIn("实体内时间不变的处理组指示", prompt.system)
+        self.assertIn("累计期序号", prompt.system)
 
     def test_candidate_fingerprint_ignores_prose_but_tracks_execution(self) -> None:
         plan = AnalysisPlan(

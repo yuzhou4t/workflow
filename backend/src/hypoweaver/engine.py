@@ -66,6 +66,7 @@ from .models import (
     ModelCallContext,
     ModelSpec,
     PlannedStep,
+    PolicyDesignSpec,
     PromptContent,
     ProbeCheck,
     ProbeReport,
@@ -776,12 +777,289 @@ def _normalize_external_enterprise_candidate_plan(
     )
 
 
+def _visible_policy_frame(
+    package: ResearchPackage,
+    dataset_registry: DatasetRegistry | None,
+    columns: list[str],
+) -> pd.DataFrame | None:
+    """Read only visible structural fields needed to freeze a policy design."""
+
+    if dataset_registry is None:
+        return None
+    main_ref = next(
+        (item for item in package.dataset_refs if item.role == "main"),
+        None,
+    )
+    if main_ref is None:
+        return None
+    try:
+        source = dataset_registry.resolve(main_ref)
+        _verify_dataset_hash(source, main_ref.sha256)
+        frame, _ = _read_profile_csv(source, list(dict.fromkeys(columns)))
+    except (CaseImportError, OSError, ValueError):
+        return None
+    if set(columns) - set(frame.columns):
+        return None
+    return frame
+
+
+def _calendar_month_tokens(value: str | None) -> list[tuple[int, int]]:
+    if not value:
+        return []
+    tokens: list[tuple[int, int]] = []
+    for year_text, month_text in re.findall(
+        r"(?<!\d)(\d{4})[-/.](\d{1,2})(?!\d)",
+        value,
+    ):
+        month = int(month_text)
+        if 1 <= month <= 12:
+            tokens.append((int(year_text), month))
+    return tokens
+
+
+def _month_ordinal(year: int, month: int) -> int:
+    return year * 12 + month - 1
+
+
+def _calendar_month_for_period(
+    sample_period: str | None,
+    observed_values: list[int],
+    period_value: int,
+) -> str | None:
+    bounds = _calendar_month_tokens(sample_period)
+    if len(bounds) < 2 or not observed_values:
+        return None
+    start, end = bounds[0], bounds[-1]
+    expected_periods = _month_ordinal(*end) - _month_ordinal(*start) + 1
+    if (
+        expected_periods != len(observed_values)
+        or observed_values
+        != list(range(observed_values[0], observed_values[-1] + 1))
+        or period_value not in observed_values
+    ):
+        return None
+    ordinal = _month_ordinal(*start) + period_value - observed_values[0]
+    return f"{ordinal // 12:04d}-{ordinal % 12 + 1:02d}"
+
+
+def _period_for_calendar_month(
+    sample_period: str | None,
+    observed_values: list[int],
+    calendar_date: str,
+) -> int | None:
+    tokens = _calendar_month_tokens(calendar_date)
+    bounds = _calendar_month_tokens(sample_period)
+    if len(tokens) != 1 or len(bounds) < 2 or not observed_values:
+        return None
+    start, end = bounds[0], bounds[-1]
+    target = tokens[0]
+    expected_periods = _month_ordinal(*end) - _month_ordinal(*start) + 1
+    offset = _month_ordinal(*target) - _month_ordinal(*start)
+    if (
+        expected_periods != len(observed_values)
+        or observed_values
+        != list(range(observed_values[0], observed_values[-1] + 1))
+        or not 0 <= offset < expected_periods
+    ):
+        return None
+    return observed_values[0] + offset
+
+
+def _infer_visible_policy_design(
+    package: ResearchPackage,
+    profile: DataProfile,
+    dataset_registry: DatasetRegistry | None,
+) -> PolicyDesignSpec | None:
+    """Infer one unambiguous group × post contract from visible data fields.
+
+    This audit intentionally does not read the outcome or any hidden reference.
+    It only repairs a model-selected ``policy_causal`` route when the visible
+    panel contains exactly one entity-invariant binary group, one common
+    monotone post indicator, and one field equal to their rowwise product.
+    Ambiguous cases remain design-only for model or human resolution.
+    """
+
+    if (
+        dataset_registry is None
+        or len(profile.entity_key) != 1
+        or profile.time_key is None
+    ):
+        return None
+    entity = profile.entity_key[0]
+    time = profile.time_key
+    candidate_fields = [
+        item.name
+        for item in package.variables
+        if item.name not in {entity, time}
+        and item.role in {"treatment", "exposure", "unknown"}
+    ]
+    frame = _visible_policy_frame(
+        package,
+        dataset_registry,
+        [entity, time, *candidate_fields],
+    )
+    if frame is None:
+        return None
+    frame[time] = pd.to_numeric(frame[time], errors="coerce")
+    frame = frame.dropna(subset=[entity, time]).copy()
+    if frame.empty or frame.duplicated([entity, time]).any():
+        return None
+    numeric: dict[str, pd.Series] = {}
+    for field in candidate_fields:
+        values = pd.to_numeric(frame[field], errors="coerce")
+        if values.isna().any() or set(values.unique()) != {0, 1}:
+            continue
+        numeric[field] = values.astype(int)
+
+    groups = [
+        field
+        for field, values in numeric.items()
+        if values.groupby(frame[entity], observed=True).nunique().le(1).all()
+    ]
+    posts: list[tuple[str, int]] = []
+    ordered_times = sorted(int(value) for value in frame[time].unique())
+    for field, values in numeric.items():
+        by_time = values.groupby(frame[time], observed=True)
+        if not by_time.nunique().le(1).all():
+            continue
+        sequence = by_time.first().reindex(ordered_times)
+        if (
+            sequence.isna().any()
+            or int(sequence.iloc[0]) != 0
+            or int(sequence.iloc[-1]) != 1
+            or (sequence.diff().dropna() < 0).any()
+            or int(sequence.diff().fillna(0).eq(1).sum()) != 1
+        ):
+            continue
+        posts.append((field, int(sequence[sequence.eq(1)].index[0])))
+
+    matches: list[tuple[str, str, str, int]] = []
+    for group in groups:
+        for post, start_value in posts:
+            if post == group:
+                continue
+            product = numeric[group] * numeric[post]
+            for exposure, values in numeric.items():
+                if exposure in {group, post}:
+                    continue
+                if values.equals(product):
+                    matches.append((group, post, exposure, start_value))
+    if len(matches) != 1:
+        return None
+    group, _post, exposure, start_value = matches[0]
+    policy_date = _calendar_month_for_period(
+        package.sample_period,
+        ordered_times,
+        start_value,
+    )
+    if policy_date is None:
+        return None
+    return PolicyDesignSpec(
+        policy_date=policy_date,
+        group_field=group,
+        time_field=time,
+        policy_start_weight=1.0,
+        exposure_name=exposure,
+        fixed_effects=[entity, time],
+        cluster_fields=[entity],
+    )
+
+
+def _resolve_policy_timeline(
+    policy: PolicyDesignSpec,
+    package: ResearchPackage,
+    dataset_registry: DatasetRegistry | None,
+) -> dict[str, Any] | None:
+    """Map a calendar policy date to the declared time field without guessing.
+
+    Calendar-year fields retain the existing annual contract. Consecutive
+    period indices are accepted only when the visible sample-period bounds map
+    one-to-one to their observed values.
+    """
+
+    policy_year, policy_month = (int(value) for value in policy.policy_date.split("-"))
+    frame = _visible_policy_frame(
+        package,
+        dataset_registry,
+        [policy.time_field],
+    )
+    observed_values: list[int] = []
+    if frame is not None:
+        numeric = pd.to_numeric(frame[policy.time_field], errors="coerce").dropna()
+        if not numeric.empty and (numeric == numeric.astype(int)).all():
+            observed_values = sorted(int(value) for value in numeric.unique())
+
+    if not observed_values or policy_year in observed_values:
+        reference = policy.event_reference_year or policy_year - 1
+        events = list(
+            policy.event_years
+            or [
+                year
+                for year in range(policy_year - 5, policy_year + 7)
+                if year != reference
+            ]
+        )
+        return {
+            "time_scale": "calendar_year",
+            "policy_start_value": policy_year,
+            "policy_start_weight": (
+                policy.policy_start_weight
+                if policy.policy_start_weight is not None
+                else (13 - policy_month) / 12
+            ),
+            "event_reference_value": reference,
+            "event_values": events,
+            "event_remote_pre_values": list(policy.event_remote_pre_years),
+            "placebo_start_value": policy.placebo_start_year or policy_year - 3,
+        }
+
+    start_value = _period_for_calendar_month(
+        package.sample_period,
+        observed_values,
+        policy.policy_date,
+    )
+    if start_value is None:
+        return None
+    if policy.event_reference_year is not None or policy.event_years:
+        return None
+    reference = start_value - 1
+    explicit_start = max(observed_values[0], start_value - 11)
+    explicit_end = min(observed_values[-1], start_value + 11)
+    events = [
+        value
+        for value in range(explicit_start, explicit_end + 1)
+        if value != reference
+    ]
+    remote_pre = [
+        value for value in observed_values if value < explicit_start
+    ]
+    placebo = (
+        start_value - 12
+        if start_value - 12 in observed_values
+        else observed_values[0]
+    )
+    return {
+        "time_scale": "period_index",
+        "policy_start_value": start_value,
+        "policy_start_weight": (
+            policy.policy_start_weight
+            if policy.policy_start_weight is not None
+            else 1.0
+        ),
+        "event_reference_value": reference,
+        "event_values": events,
+        "event_remote_pre_values": remote_pre,
+        "placebo_start_value": placebo,
+    }
+
+
 def _normalize_external_policy_candidate_plan(
     plan: AnalysisPlan,
     profile: DataProfile,
     package: ResearchPackage,
     execution_mode: str,
     strategy: str,
+    dataset_registry: DatasetRegistry | None = None,
 ) -> AnalysisPlan:
     """Bind an executable DID contract without consulting outcome values.
 
@@ -792,7 +1070,11 @@ def _normalize_external_policy_candidate_plan(
     replaced by model prose.
     """
 
-    policy = package.policy_design
+    policy = package.policy_design or _infer_visible_policy_design(
+        package,
+        profile,
+        dataset_registry,
+    )
     if (
         execution_mode != "external"
         or plan.method_family != "policy_causal"
@@ -805,7 +1087,26 @@ def _normalize_external_policy_candidate_plan(
         return plan
 
     policy_year, policy_month = (int(value) for value in policy.policy_date.split("-"))
-    inferred_partial_weight = (13 - policy_month) / 12
+    timeline = _resolve_policy_timeline(
+        policy,
+        package,
+        dataset_registry,
+    )
+    if timeline is None:
+        return plan.model_copy(
+            update={
+                "design_only": True,
+                "unsupported_requested_analyses": list(
+                    dict.fromkeys(
+                        [
+                            *plan.unsupported_requested_analyses,
+                            "政策日期无法无歧义映射到冻结时间字段。",
+                        ]
+                    )
+                ),
+            }
+        )
+    inferred_partial_weight = float(timeline["policy_start_weight"])
     partial_weight = (
         policy.policy_start_weight
         if policy.policy_start_weight is not None
@@ -816,15 +1117,8 @@ def _normalize_external_policy_candidate_plan(
     permutation_unit = policy.permutation_unit_field or entity
     fixed_effects = list(policy.fixed_effects or [entity, time])
     cluster_fields = list(policy.cluster_fields or [entity])
-    event_reference_year = policy.event_reference_year or policy_year - 1
-    event_years = list(
-        policy.event_years
-        or [
-            year
-            for year in range(policy_year - 5, policy_year + 7)
-            if year != event_reference_year
-        ]
-    )
+    event_reference_year = int(timeline["event_reference_value"])
+    event_years = list(timeline["event_values"])
     visible = {item.name for item in package.variables}
     required_contract_fields = {
         policy.group_field,
@@ -874,7 +1168,8 @@ def _normalize_external_policy_candidate_plan(
     policy_contract = {
         "group_field": policy.group_field,
         "time_field": policy.time_field,
-        "policy_start_year": policy_year,
+        "time_scale": timeline["time_scale"],
+        "policy_start_year": timeline["policy_start_value"],
         "policy_start_month": policy_month,
         "policy_start_weight": partial_weight,
         "post_start_weight": policy.post_start_weight,
@@ -884,9 +1179,9 @@ def _normalize_external_policy_candidate_plan(
         "cluster_composition": policy.cluster_composition,
         "event_reference_year": event_reference_year,
         "event_years": event_years,
-        "event_remote_pre_years": list(policy.event_remote_pre_years),
+        "event_remote_pre_years": list(timeline["event_remote_pre_values"]),
         "event_term_scaling": policy.event_term_scaling,
-        "placebo_start_year": policy.placebo_start_year or policy_year - 3,
+        "placebo_start_year": timeline["placebo_start_value"],
         "placebo_repetitions": policy.placebo_repetitions or 500,
         "permutation_scheme": policy.permutation_scheme,
         "permutation_unit_field": permutation_unit,
@@ -1716,7 +2011,27 @@ class WorkflowEngine:
                 blocking_reasons=["实际数据无法在 H2 前完成确定性画像。"],
             )
 
+        selected_time_key = time_keys[0] if time_keys else None
+        if entity_keys and time_keys:
+            unique_time_keys = [
+                name
+                for name in time_keys
+                if name in frame.columns
+                and not frame.duplicated(
+                    subset=[*entity_keys, name],
+                    keep=False,
+                ).any()
+            ]
+            if unique_time_keys:
+                selected_time_key = max(
+                    unique_time_keys,
+                    key=lambda name: int(frame[name].nunique(dropna=True)),
+                )
         missing_columns = [name for name in selected_columns if name not in frame.columns]
+        key_columns = [
+            *entity_keys,
+            *([selected_time_key] if selected_time_key else []),
+        ]
         missingness = [
             {
                 "variable": name,
@@ -1793,7 +2108,7 @@ class WorkflowEngine:
             data_structure=package.data_structure_hint,
             unit_of_observation=package.unit_of_analysis,
             entity_key=entity_keys,
-            time_key=time_keys[0] if time_keys else None,
+            time_key=selected_time_key,
             spatial_key=spatial_keys[0] if spatial_keys else None,
             event_date_key=event_keys[0] if event_keys else None,
             row_count=len(frame),
@@ -2928,6 +3243,7 @@ class WorkflowEngine:
                 package,
                 state.execution_mode,
                 strategy,
+                self.dataset_registry,
             )
             plan = self._bind_spatial_assets(package, plan)
             fingerprint = _plan_executable_fingerprint(plan)
@@ -3189,6 +3505,9 @@ class WorkflowEngine:
                     group = str(policy_contract["group_field"])
                     time = str(policy_contract["time_field"])
                     start_year = int(policy_contract["policy_start_year"])
+                    time_scale = str(
+                        policy_contract.get("time_scale", "calendar_year")
+                    )
                     start_weight = float(policy_contract["policy_start_weight"])
                     entity = profile.entity_key[0]
                     cluster_fields = [
@@ -3244,8 +3563,16 @@ class WorkflowEngine:
                     add(
                         "policy_timing_map",
                         "pass" if timing_ok else "fail",
-                        f"政策年={start_year}；参考年={reference_year}；实际年份={observed_years}；缺失年份={missing_years}。",
-                        None if timing_ok else "政策年和事件研究参考年必须真实存在于数据中。",
+                        (
+                            f"时间刻度={time_scale}；政策时点值={start_year}；"
+                            f"参考时点值={reference_year}；实际时点值={observed_years}；"
+                            f"缺失时点值={missing_years}。"
+                        ),
+                        (
+                            None
+                            if timing_ok
+                            else "政策时点和事件研究参考时点必须真实存在于数据中。"
+                        ),
                     )
                     add(
                         "policy_partial_year_weight",

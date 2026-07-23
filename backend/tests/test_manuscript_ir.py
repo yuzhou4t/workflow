@@ -643,6 +643,84 @@ class ManuscriptIRTests(unittest.TestCase):
         )
         self.assertIn("不能单独建立因果识别", section.content_markdown)
 
+    def test_period_index_policy_disclosures_do_not_call_periods_years(self) -> None:
+        ledger = _ledger()
+        ledger.claims[0].supporting_runs = ["run-1"]
+        run = _run().model_copy(deep=True)
+        run.executions.extend(
+            [
+                ExecutionRecord(
+                    execution_id="execution-period-event",
+                    run_type="falsification",
+                    plan_step_id="check-policy-event-study",
+                    check_id="check-policy-event-study",
+                    execution_status="succeeded",
+                    diagnostic_results={
+                        "time_scale": "period_index",
+                        "joint_pretrend_p_value": 0.2,
+                        "remote_pre_requested": True,
+                        "remote_pre_status": "complete",
+                        "remote_pre_complete": True,
+                        "remote_pre_term": "event_remote_pre",
+                        "requested_remote_pre_years": [1, 19],
+                        "generated_remote_pre_years": [1, 19],
+                        "unavailable_remote_pre_years": [],
+                        "collinear_remote_pre": False,
+                        "policy_year_event_requested": True,
+                        "policy_start_year": 31,
+                        "event_term_scaling": "binary_group_year_contrast",
+                        "policy_year_event_term": "event_31",
+                        "policy_year_event_coefficient_directly_comparable_to_baseline": False,
+                    },
+                ),
+                ExecutionRecord(
+                    execution_id="execution-period-fake-time",
+                    run_type="falsification",
+                    plan_step_id="check-policy-placebo-time",
+                    check_id="check-policy-placebo-time",
+                    execution_status="succeeded",
+                    diagnostic_results={
+                        "status": "succeeded",
+                        "time_scale": "period_index",
+                        "sample_start_year": 1,
+                        "sample_end_year": 30,
+                        "policy_start_year": 31,
+                        "rows_used": 100,
+                        "rows_excluded_at_or_after_true_policy": 80,
+                        "true_policy_contamination_rows": 0,
+                        "pseudo_pre_support": True,
+                        "pseudo_post_support": True,
+                    },
+                ),
+            ]
+        )
+
+        registry = build_statement_registry(ledger, run)
+        disclosures = [
+            statement
+            for statement in registry
+            if statement.statement_id.startswith("statement-policy-disclosure-")
+        ]
+        rendered = "\n".join(render_statement(statement) for statement in disclosures)
+        period_values = [
+            value
+            for statement in disclosures
+            for value in statement.protected_values
+            if "year" in value.source_path
+        ]
+
+        self.assertIn("第 1 期、第 19 期", rendered)
+        self.assertIn("政策起始期第 31 期", rendered)
+        self.assertIn("第 1—30 期", rendered)
+        self.assertNotIn("政策年 31", rendered)
+        self.assertNotIn("1—30 年", rendered)
+        self.assertTrue(period_values)
+        self.assertEqual(
+            {value.value_kind for value in period_values},
+            {"period_index"},
+        )
+        verify_statement_sources(disclosures, ledger, run)
+
     def test_policy_composite_disclosure_fails_closed_on_missing_attrition(self) -> None:
         ledger = _ledger()
         ledger.claims[0].supporting_runs = ["run-1"]

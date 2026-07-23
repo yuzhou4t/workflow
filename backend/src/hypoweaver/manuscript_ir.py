@@ -219,7 +219,7 @@ def format_protected_value(value_kind: str, raw_value: Any) -> str:
     value = float(raw_value)
     if not math.isfinite(value):
         raise ManuscriptIRError(f"{value_kind} must be finite")
-    if value_kind in {"count", "year"}:
+    if value_kind in {"count", "year", "period_index"}:
         if not value.is_integer():
             raise ManuscriptIRError(f"{value_kind} must be an integer")
         return str(int(value))
@@ -479,6 +479,44 @@ def _diagnostic_year_values(
     ]
 
 
+def _policy_time_scale(diagnostics: Mapping[str, Any]) -> str:
+    time_scale = diagnostics.get("time_scale", "calendar_year")
+    if time_scale not in {"calendar_year", "period_index"}:
+        raise ManuscriptIRError(
+            "time_scale must be calendar_year or period_index for a policy disclosure"
+        )
+    return str(time_scale)
+
+
+def _diagnostic_period_values(
+    execution_id: str,
+    execution_index: int,
+    diagnostics: Mapping[str, Any],
+    field: str,
+) -> list[ProtectedValue]:
+    raw_periods = diagnostics.get(field)
+    if (
+        not isinstance(raw_periods, Sequence)
+        or isinstance(raw_periods, (str, bytes))
+        or not raw_periods
+    ):
+        raise ManuscriptIRError(
+            f"{field} must be a non-empty period list for a code-owned policy disclosure"
+        )
+    return [
+        _protected_value(
+            value_kind="period_index",
+            source_kind="execution",
+            source_id=execution_id,
+            source_path=(
+                f"/executions/{execution_index}/diagnostic_results/{field}/{index}"
+            ),
+            raw_value=period,
+        )
+        for index, period in enumerate(raw_periods)
+    ]
+
+
 def _fixed_pre_attrition_statement(
     execution_id: str,
     execution_index: int,
@@ -551,6 +589,7 @@ def _event_design_disclosure_statement(
 ) -> ManuscriptStatement | None:
     fragments: list[str] = []
     protected_values: list[ProtectedValue] = []
+    time_scale = _policy_time_scale(diagnostics)
 
     remote_requested = diagnostics.get("remote_pre_requested")
     if remote_requested is not None:
@@ -568,11 +607,20 @@ def _event_design_disclosure_statement(
                 raise ManuscriptIRError(
                     "requested remote-pre disclosure requires a complete, non-collinear bin"
                 )
-            requested_years = _diagnostic_year_values(
-                execution_id,
-                execution_index,
-                diagnostics,
-                "requested_remote_pre_years",
+            requested_years = (
+                _diagnostic_period_values(
+                    execution_id,
+                    execution_index,
+                    diagnostics,
+                    "requested_remote_pre_years",
+                )
+                if time_scale == "period_index"
+                else _diagnostic_year_values(
+                    execution_id,
+                    execution_index,
+                    diagnostics,
+                    "requested_remote_pre_years",
+                )
             )
             generated_years = diagnostics.get("generated_remote_pre_years")
             if generated_years != [value.raw_value for value in requested_years]:
@@ -580,13 +628,23 @@ def _event_design_disclosure_statement(
                     "generated_remote_pre_years must match the frozen requested years"
                 )
             protected_values.extend(requested_years)
-            rendered_years = "、".join(
-                f"[[VALUE:{value.value_id}]]" for value in requested_years
-            )
-            fragments.append(
-                "远端政策前合并项状态为完整，覆盖 "
-                f"{rendered_years} 年，并作为事件期组间差异系数进入联合政策前检验"
-            )
+            if time_scale == "period_index":
+                rendered_years = "、".join(
+                    f"第 [[VALUE:{value.value_id}]] 期"
+                    for value in requested_years
+                )
+                fragments.append(
+                    "远端政策前合并项状态为完整，覆盖 "
+                    f"{rendered_years}，并作为事件期组间差异系数进入联合政策前检验"
+                )
+            else:
+                rendered_years = "、".join(
+                    f"[[VALUE:{value.value_id}]]" for value in requested_years
+                )
+                fragments.append(
+                    "远端政策前合并项状态为完整，覆盖 "
+                    f"{rendered_years} 年，并作为事件期组间差异系数进入联合政策前检验"
+                )
 
     policy_year_requested = diagnostics.get("policy_year_event_requested")
     if policy_year_requested is not None:
@@ -601,7 +659,7 @@ def _event_design_disclosure_statement(
                 execution_index,
                 diagnostics,
                 "policy_start_year",
-                "year",
+                "period_index" if time_scale == "period_index" else "year",
             )
             expected_term = f"event_{int(policy_year.raw_value)}"
             if (
@@ -617,10 +675,17 @@ def _event_design_disclosure_statement(
                     "policy-year event disclosure has inconsistent scaling or comparability"
                 )
             protected_values.append(policy_year)
-            fragments.append(
-                f"政策年 [[VALUE:{policy_year.value_id}]] 的事件项是二元处理组×年份对比，"
-                "不是基准 policy_exposure 的每单位系数，两者数值不可直接比较"
-            )
+            if time_scale == "period_index":
+                fragments.append(
+                    f"政策起始期第 [[VALUE:{policy_year.value_id}]] 期的事件项"
+                    "是二元处理组×时期对比，不是基准 policy_exposure 的每单位系数，"
+                    "两者数值不可直接比较"
+                )
+            else:
+                fragments.append(
+                    f"政策年 [[VALUE:{policy_year.value_id}]] 的事件项是二元处理组×年份对比，"
+                    "不是基准 policy_exposure 的每单位系数，两者数值不可直接比较"
+                )
 
     if not fragments:
         return None
@@ -644,6 +709,10 @@ def _clean_fake_time_statement(
         raise ManuscriptIRError(
             "fake-time disclosure requires status=succeeded"
         )
+    time_scale = _policy_time_scale(diagnostics)
+    time_value_kind = (
+        "period_index" if time_scale == "period_index" else "year"
+    )
     values = {
         field: _diagnostic_value(
             execution_id,
@@ -653,9 +722,9 @@ def _clean_fake_time_statement(
             value_kind,
         )
         for field, value_kind in (
-            ("sample_start_year", "year"),
-            ("sample_end_year", "year"),
-            ("policy_start_year", "year"),
+            ("sample_start_year", time_value_kind),
+            ("sample_end_year", time_value_kind),
+            ("policy_start_year", time_value_kind),
             ("rows_used", "count"),
             ("rows_excluded_at_or_after_true_policy", "count"),
             ("true_policy_contamination_rows", "count"),
@@ -675,12 +744,22 @@ def _clean_fake_time_statement(
         raise ManuscriptIRError(
             "fake-time diagnostics do not establish a clean pre-policy placebo sample"
         )
-    return ManuscriptStatement(
-        statement_id=_stable_id(
-            "statement-policy-disclosure", execution_id, "clean-fake-time"
-        ),
-        statement_kind="diagnostic_fact",
-        text_template=(
+    if time_scale == "period_index":
+        text_template = (
+            "真政策起始期为第 "
+            f"[[VALUE:{values['policy_start_year'].value_id}]] 期；"
+            "伪政策时点检验仅使用第 "
+            f"[[VALUE:{values['sample_start_year'].value_id}]]—"
+            f"[[VALUE:{values['sample_end_year'].value_id}]] 期的 "
+            f"[[VALUE:{values['rows_used'].value_id}]] 行；"
+            "排除真政策期及以后 "
+            f"[[VALUE:{values['rows_excluded_at_or_after_true_policy'].value_id}]] "
+            "行，真政策期污染行为 "
+            f"[[VALUE:{values['true_policy_contamination_rows'].value_id}]]，"
+            "因此该伪时点结果不含真政策期观察。"
+        )
+    else:
+        text_template = (
             "真政策起始年为 "
             f"[[VALUE:{values['policy_start_year'].value_id}]] 年；"
             "伪政策时点检验仅使用 "
@@ -692,7 +771,13 @@ def _clean_fake_time_statement(
             "行，真政策期污染行为 "
             f"[[VALUE:{values['true_policy_contamination_rows'].value_id}]]，"
             "因此该伪时点结果不含真政策期观察。"
+        )
+    return ManuscriptStatement(
+        statement_id=_stable_id(
+            "statement-policy-disclosure", execution_id, "clean-fake-time"
         ),
+        statement_kind="diagnostic_fact",
+        text_template=text_template,
         protected_values=list(values.values()),
         execution_ids=[execution_id],
     )

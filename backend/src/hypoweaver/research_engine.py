@@ -642,6 +642,7 @@ class PanelResearchEngine:
             "observed_years": observed_years,
             "missing_calendar_years": missing_years,
             "calendar_years_imputed": [],
+            "time_scale": design.time_scale,
             "policy_start_year": design.policy_start_year,
             "policy_start_weight": design.policy_start_weight,
             "cluster_fields": list(design.cluster_fields),

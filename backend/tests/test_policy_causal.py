@@ -70,13 +70,29 @@ class PolicyCausalTests(unittest.TestCase):
         self.assertGreater(result["diagnostics"]["treated_entity_count"], 0)
         self.assertGreater(result["diagnostics"]["control_entity_count"], 0)
         self.assertEqual(result["event_study"]["joint_pretrend"]["status"], "tested")
+        self.assertEqual(result["event_study"]["time_scale"], "calendar_year")
         self.assertEqual(result["placebo"]["status"], "succeeded")
+        self.assertEqual(result["placebo"]["time_scale"], "calendar_year")
         self.assertEqual(result["permutation_placebo"]["status"], "succeeded")
         self.assertEqual(
             result["permutation_placebo"]["repetitions_completed"],
             25,
         )
         json.dumps(result, allow_nan=False)
+
+    def test_period_index_scale_reaches_event_and_placebo_diagnostics(self) -> None:
+        model = self.model.model_copy(deep=True)
+        model.parameters["policy_design"]["time_scale"] = "period_index"
+
+        result = estimate_policy_model(self.csv_path, model)
+
+        self.assertEqual(result["diagnostics"]["time_scale"], "period_index")
+        self.assertEqual(result["event_study"]["time_scale"], "period_index")
+        self.assertIn(
+            "treated-by-period",
+            result["event_study"]["policy_year_event_comparability_note"],
+        )
+        self.assertEqual(result["placebo"]["time_scale"], "period_index")
 
     def test_event_study_does_not_generate_unobserved_calendar_year(self) -> None:
         result = estimate_policy_model(self.csv_path, self.model)

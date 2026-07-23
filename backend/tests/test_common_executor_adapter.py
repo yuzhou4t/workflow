@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import tempfile
@@ -17,6 +18,7 @@ from hypoweaver.common_executor_adapter import (
     build_pre_result_binding,
     claim_decision_from_h3,
     run_to_h2_stop,
+    validate_analysis_request,
     validate_sealed_common_result,
 )
 from hypoweaver.engine import WorkflowEngine, WorkflowTransitionError
@@ -210,6 +212,8 @@ class CommonExecutorAdapterTests(unittest.IsolatedAsyncioTestCase):
             "executions": [
                 {
                     "execution_id": "primary",
+                    "check_id": "baseline",
+                    "outcome": self.request["outcome"],
                     "status": "completed",
                     "method": "panel_twfe",
                     "estimates": [{"term": term, "coefficient": 0.25}],
@@ -249,6 +253,226 @@ class CommonExecutorAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     def _bytes(self, payload: dict) -> bytes:
         return (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode()
+
+    def _policy_result(
+        self,
+        *,
+        calibration: dict | None,
+        request_calibration: bool = True,
+    ) -> dict:
+        result = self._result(term="dudt")
+        request = copy.deepcopy(self.request)
+        request["method_selection"] = {
+            "method": "classic_did_city_month_v1",
+            "rationale": "Use the frozen common-start DID specification.",
+        }
+        request["outcome"] = "AQI"
+        request["treatments"] = ["dudt"]
+        request["controls"] = []
+        request["fixed_effects"] = ["id", "month"]
+        request["standard_error"] = {
+            "strategy": "cluster_entity",
+            "cluster": "id",
+        }
+        request["diagnostics"] = (
+            ["claim_calibration"] if request_calibration else []
+        )
+        request["claim_plan"] = {
+            "target_terms": ["dudt"],
+            "maximum_strength": "causal_contingent",
+            "rationale": (
+                "Causal wording remains conditional on sealed diagnostics."
+            ),
+        }
+        result["analysis_request"] = request
+        result["executions"][0]["method"] = "classic_did_city_month_v1"
+        result["executions"][0]["outcome"] = request["outcome"]
+        result["executions"][0]["requested_diagnostics"] = request["diagnostics"]
+        result["executions"][0]["claim_plan"] = request["claim_plan"]
+        result["executions"][0]["diagnostics"] = (
+            {} if calibration is None else {"claim_calibration": calibration}
+        )
+        return result
+
+    def _claim_ledger(
+        self,
+        *,
+        admission_status: str = "admitted",
+        allowed_strength: str = "causal_cautious",
+    ) -> ClaimLedger:
+        return ClaimLedger.model_validate(
+            {
+                "ledger_id": "common-policy-ledger",
+                "case_id": "case_009_gfri_air_quality",
+                "research_run_id": "common-policy-run",
+                "claims": [
+                    {
+                        "claim_id": "claim-policy-1",
+                        "hypothesis_id": "H1",
+                        "claim_text": (
+                            "The frozen policy estimate is informative for the "
+                            "registered hypothesis."
+                        ),
+                        "evidence_status": "supported",
+                        "allowed_strength": allowed_strength,
+                        "supporting_runs": ["common-policy-run"],
+                        "opposing_runs": [],
+                        "scope": "Frozen common-start DID specification.",
+                        "robustness_status": "reviewed",
+                        "unresolved_risks": [],
+                        "admission_status": admission_status,
+                    }
+                ],
+                "excluded_findings": [],
+                "unresolved_issues": [],
+            }
+        )
+
+    def test_policy_request_accepts_only_contingent_pre_result_causal_ceiling(
+        self,
+    ) -> None:
+        request = self._policy_result(calibration=None)["analysis_request"]
+        validated = validate_analysis_request(request)
+        self.assertEqual(
+            validated["claim_plan"]["maximum_strength"],
+            "causal_contingent",
+        )
+
+        panel_request = copy.deepcopy(self.request)
+        panel_request["claim_plan"]["maximum_strength"] = "causal_contingent"
+        with self.assertRaisesRegex(
+            CommonExecutorAdapterError,
+            "only valid for the classic DID",
+        ):
+            validate_analysis_request(panel_request)
+
+    def test_claim_decision_requires_explicit_causal_calibration(self) -> None:
+        passing = {
+            "status": "passed",
+            "causal_claim_admissible": True,
+            "maximum_supported_claim_strength": "causal",
+            "blockers": [],
+        }
+        blocked = {
+            "status": "blocked",
+            "causal_claim_admissible": False,
+            "maximum_supported_claim_strength": "associational",
+            "blockers": ["joint_pretrend_is_adverse"],
+        }
+        cases = [
+            ("passing", passing, True, "admitted", "causal_cautious", "causal"),
+            (
+                "blocked",
+                blocked,
+                True,
+                "admitted",
+                "causal_cautious",
+                "associational",
+            ),
+            (
+                "missing",
+                None,
+                True,
+                "admitted",
+                "causal_cautious",
+                "associational",
+            ),
+            (
+                "not_requested",
+                passing,
+                False,
+                "admitted",
+                "causal_cautious",
+                "associational",
+            ),
+            (
+                "native_downgrade",
+                passing,
+                True,
+                "downgrade_required",
+                "causal_cautious",
+                "associational",
+            ),
+            (
+                "native_preliminary",
+                passing,
+                True,
+                "admitted",
+                "preliminary",
+                "descriptive",
+            ),
+            (
+                "native_rejection",
+                passing,
+                True,
+                "rejected",
+                "prohibited",
+                "descriptive",
+            ),
+        ]
+        for (
+            label,
+            calibration,
+            requested,
+            admission,
+            allowed,
+            expected,
+        ) in cases:
+            with self.subTest(label=label):
+                decision = claim_decision_from_h3(
+                    result=self._policy_result(
+                        calibration=calibration,
+                        request_calibration=requested,
+                    ),
+                    result_binding={
+                        "execution_result_sha256": "f" * 64,
+                    },
+                    claim_ledger=self._claim_ledger(
+                        admission_status=admission,
+                        allowed_strength=allowed,
+                    ),
+                )
+                self.assertEqual(
+                    decision["claims"][0]["strength"],
+                    expected,
+                )
+                self.assertNotEqual(
+                    decision["claims"][0]["strength"],
+                    "causal_contingent",
+                )
+
+    def test_claim_direction_matches_common_contract_zero_tolerance(self) -> None:
+        passing = {
+            "status": "passed",
+            "causal_claim_admissible": True,
+            "maximum_supported_claim_strength": "causal",
+            "blockers": [],
+        }
+        cases = [
+            (-1.000001e-12, "decrease"),
+            (-1e-12, "zero"),
+            (0.0, "zero"),
+            (1e-12, "zero"),
+            (1.000001e-12, "increase"),
+        ]
+
+        for coefficient, expected in cases:
+            with self.subTest(coefficient=coefficient):
+                result = self._policy_result(calibration=passing)
+                result["executions"][0]["estimates"][0][
+                    "coefficient"
+                ] = coefficient
+                decision = claim_decision_from_h3(
+                    result=result,
+                    result_binding={
+                        "execution_result_sha256": "f" * 64,
+                    },
+                    claim_ledger=self._claim_ledger(),
+                )
+                self.assertEqual(
+                    decision["claims"][0]["direction"],
+                    expected,
+                )
 
     def test_h2_boundary_and_request_binding_are_result_free(self) -> None:
         assert_h2_pre_result_boundary(self.run)
@@ -339,6 +563,30 @@ class CommonExecutorAdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(CommonExecutorAdapterError, "provenance"):
             validate_sealed_common_result(
                 self._bytes(hidden_reference), pre_result_binding=binding
+            )
+
+    def test_sealed_result_rejects_check_and_outcome_drift(self) -> None:
+        _, binding = build_pre_result_binding(self.run, self.request)
+        wrong_check = self._result()
+        wrong_check["executions"][0]["check_id"] = "invented-check"
+        with self.assertRaisesRegex(
+            CommonExecutorAdapterError,
+            "check or outcome drifted",
+        ):
+            validate_sealed_common_result(
+                self._bytes(wrong_check),
+                pre_result_binding=binding,
+            )
+
+        wrong_outcome = self._result()
+        wrong_outcome["executions"][0]["outcome"] = "invented-outcome"
+        with self.assertRaisesRegex(
+            CommonExecutorAdapterError,
+            "check or outcome drifted",
+        ):
+            validate_sealed_common_result(
+                self._bytes(wrong_outcome),
+                pre_result_binding=binding,
             )
 
     async def test_ingest_skips_native_executors_and_reaches_claim_gate(self) -> None:

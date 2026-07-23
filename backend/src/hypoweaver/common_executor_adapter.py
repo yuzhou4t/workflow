@@ -101,6 +101,7 @@ _RESULT_KEYS = {
     "t_value",
 }
 _SHA = re.compile(r"^[0-9a-f]{64}$")
+_DIRECTION_ZERO_TOLERANCE = 1e-12
 
 
 class CommonExecutorAdapterError(ValueError):
@@ -295,8 +296,20 @@ def validate_analysis_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     targets = _strings(claim_plan["target_terms"], "claim_plan.target_terms", allow_empty=False)
     if not set(targets).issubset(treatments):
         raise CommonExecutorAdapterError("claim target terms must be treatments")
-    if claim_plan["maximum_strength"] not in {"descriptive", "associational"}:
+    maximum_strength = claim_plan["maximum_strength"]
+    if maximum_strength not in {
+        "descriptive",
+        "associational",
+        "causal_contingent",
+    }:
         raise CommonExecutorAdapterError("claim strength exceeds the common board")
+    if (
+        maximum_strength == "causal_contingent"
+        and method["method"] != "classic_did_city_month_v1"
+    ):
+        raise CommonExecutorAdapterError(
+            "causal_contingent is only valid for the classic DID common method"
+        )
     if "rationale" in claim_plan:
         _text(claim_plan["rationale"], "claim_plan.rationale")
     return request
@@ -433,13 +446,26 @@ def validate_sealed_common_result(
         raise CommonExecutorAdapterError("common result needs one primary execution")
     execution = _object(executions[0], "common execution")
     execution_keys = {
-        "execution_id", "status", "method", "estimates", "diagnostics",
-        "requested_diagnostics", "claim_plan", "implementation_id",
-        "independence_scope", "shared_components",
+        "execution_id", "check_id", "outcome", "status", "method", "estimates",
+        "diagnostics", "requested_diagnostics", "claim_plan",
+        "implementation_id", "independence_scope", "shared_components",
     }
     _exact(execution, execution_keys, "common execution")
-    for key in ("execution_id", "implementation_id", "independence_scope"):
+    for key in (
+        "execution_id",
+        "check_id",
+        "outcome",
+        "implementation_id",
+        "independence_scope",
+    ):
         _text(execution[key], f"common execution.{key}")
+    if (
+        execution["check_id"] != "baseline"
+        or execution["outcome"] != request["outcome"]
+    ):
+        raise CommonExecutorAdapterError(
+            "common execution check or outcome drifted from the H2 request"
+        )
     shared_components = _strings(
         execution["shared_components"], "common execution.shared_components"
     )
@@ -689,6 +715,17 @@ def claim_decision_from_h3(
     """Export Claim Gate outcomes without copying numerical result fields."""
 
     execution = result["executions"][0]
+    request = result["analysis_request"]
+    preregistered_maximum = request["claim_plan"]["maximum_strength"]
+    calibration = execution["diagnostics"].get("claim_calibration")
+    causal_calibration_passed = (
+        "claim_calibration" in request["diagnostics"]
+        and isinstance(calibration, Mapping)
+        and calibration.get("status") in {"passed", "admissible"}
+        and calibration.get("causal_claim_admissible") is True
+        and calibration.get("maximum_supported_claim_strength") == "causal"
+        and calibration.get("blockers") == []
+    )
     targets = set(result["analysis_request"]["claim_plan"]["target_terms"])
     estimates = [item for item in execution["estimates"] if item["term"] in targets]
     claims: list[dict[str, Any]] = []
@@ -704,20 +741,33 @@ def claim_decision_from_h3(
             )
         else:
             admission = {"admitted": "admitted", "downgrade_required": "downgraded"}.get(gated.admission_status, "rejected")
-            strength = (
-                "associational"
-                if admission != "rejected"
-                and gated.allowed_strength in {"associational", "causal_cautious", "causal_strong"}
-                and result["analysis_request"]["claim_plan"]["maximum_strength"] == "associational"
-                else "descriptive"
+            native_supports_association = (
+                admission != "rejected"
+                and gated.allowed_strength
+                in {"associational", "causal_cautious", "causal_strong"}
             )
+            if (
+                preregistered_maximum == "causal_contingent"
+                and admission == "admitted"
+                and gated.allowed_strength in {"causal_cautious", "causal_strong"}
+                and causal_calibration_passed
+            ):
+                strength = "causal"
+            elif (
+                preregistered_maximum
+                in {"associational", "causal_contingent"}
+                and native_supports_association
+            ):
+                strength = "associational"
+            else:
+                strength = "descriptive"
             claim_id = gated.claim_id if len(estimates) == 1 else f"{gated.claim_id}:{term}"
             text = (gated.final_text or gated.claim_text).strip()
         coefficient = float(estimate["coefficient"])
         direction = (
             "uncertain" if admission == "rejected" else
-            "increase" if coefficient > 0 else
-            "decrease" if coefficient < 0 else "zero"
+            "increase" if coefficient > _DIRECTION_ZERO_TOLERANCE else
+            "decrease" if coefficient < -_DIRECTION_ZERO_TOLERANCE else "zero"
         )
         claims.append(
             {

@@ -45,6 +45,7 @@ _POLICY_DESIGN_OPTIONAL_KEYS = frozenset(
         "permutation_unit_field",
         "random_seed",
         "group_assignment_mode",
+        "time_scale",
     }
 )
 _WITHIN_TOLERANCE = 1e-8
@@ -67,6 +68,7 @@ class PolicyEstimationError(PolicyCausalError):
 class PolicyDesign:
     group_field: str
     time_field: str
+    time_scale: str
     policy_start_year: int
     policy_start_month: int | None
     policy_start_weight: float
@@ -137,6 +139,11 @@ def parse_policy_design(model: ModelSpec) -> PolicyDesign:
 
     group_field = _strict_name(raw["group_field"], "group_field")
     time_field = _strict_name(raw["time_field"], "time_field")
+    time_scale = raw.get("time_scale", "calendar_year")
+    if time_scale not in {"calendar_year", "period_index"}:
+        raise PolicyContractError(
+            "time_scale must be calendar_year or period_index."
+        )
     exposure_name = _strict_name(raw["exposure_name"], "exposure_name")
     policy_start_year = _strict_int(raw["policy_start_year"], "policy_start_year")
     policy_start_month = _optional_int(
@@ -315,6 +322,7 @@ def parse_policy_design(model: ModelSpec) -> PolicyDesign:
     return PolicyDesign(
         group_field=group_field,
         time_field=time_field,
+        time_scale=time_scale,
         policy_start_year=policy_start_year,
         policy_start_month=policy_start_month,
         policy_start_weight=policy_start_weight,
@@ -544,6 +552,7 @@ def _estimate_policy_model(
         "observed_years": list(prepared.observed_years),
         "missing_calendar_years": list(prepared.missing_calendar_years),
         "calendar_years_imputed": [],
+        "time_scale": design.time_scale,
         "policy_start_year": design.policy_start_year,
         "policy_start_month": design.policy_start_month,
         "policy_start_weight": design.policy_start_weight,
@@ -641,7 +650,7 @@ def _prepare_data(
     ).copy()
     source_times = source_support[design.time_field].to_numpy(dtype=float)
     if not np.all(np.equal(source_times, np.floor(source_times))):
-        raise PolicyEstimationError("time_field must contain integer absolute years.")
+        raise PolicyEstimationError("time_field must contain integer time values.")
     source_support[design.time_field] = source_times.astype(np.int64)
     invalid_source_groups = sorted(
         set(source_support[design.group_field].unique()) - {0.0, 1.0}
@@ -686,7 +695,7 @@ def _prepare_data(
         raise PolicyEstimationError("no complete observations remain for policy DID.")
     times = frame[design.time_field].to_numpy(dtype=float)
     if not np.all(np.equal(times, np.floor(times))):
-        raise PolicyEstimationError("time_field must contain integer absolute years.")
+        raise PolicyEstimationError("time_field must contain integer time values.")
     frame[design.time_field] = times.astype(np.int64)
     groups = set(frame[design.group_field].unique())
     if groups != {0.0, 1.0}:
@@ -705,9 +714,9 @@ def _prepare_data(
         int(year) for year in sorted(frame[design.time_field].unique())
     )
     if design.policy_start_year not in observed_years:
-        raise PolicyEstimationError("policy_start_year is absent from the data.")
+        raise PolicyEstimationError("the frozen policy start value is absent from the data.")
     if design.event_reference_year not in observed_years:
-        raise PolicyEstimationError("event_reference_year is absent from the data.")
+        raise PolicyEstimationError("the frozen event reference value is absent from the data.")
     if not any(year < design.policy_start_year for year in observed_years):
         raise PolicyEstimationError("policy DID requires at least one pre-policy year.")
     if not any(year > design.policy_start_year for year in observed_years):
@@ -834,6 +843,7 @@ def _run_event_study(
     design = prepared.design
     policy_year_term = f"event_{design.policy_start_year}"
     scaling_diagnostics = {
+        "time_scale": design.time_scale,
         "event_term_scaling": design.event_term_scaling,
         "policy_year_event_term": policy_year_term,
         "policy_year_event_requested": (
@@ -844,7 +854,9 @@ def _run_event_study(
         "policy_year_event_uses_baseline_policy_start_weight": False,
         "policy_year_event_coefficient_directly_comparable_to_baseline": False,
         "policy_year_event_comparability_note": (
-            f"{policy_year_term} is a binary treated-by-year contrast, not the "
+            f"{policy_year_term} is a binary treated-by-"
+            f"{'period' if design.time_scale == 'period_index' else 'year'} "
+            "contrast, not the "
             "baseline per-unit policy_exposure coefficient; coefficient magnitudes "
             "must not be compared directly."
         ),
@@ -1042,8 +1054,9 @@ def _run_placebo(
     if design.placebo_start_year not in prepared.observed_years:
         return {
             "status": "not_executed",
+            "time_scale": design.time_scale,
             "placebo_start_year": design.placebo_start_year,
-            "reason": "placebo_start_year is absent; no year was imputed",
+            "reason": "placebo_start_year is absent; no time value was imputed",
         }
     placebo_prepared = _subset_prepared_data(
         prepared,
@@ -1093,6 +1106,7 @@ def _run_placebo(
         .nunique()
     )
     placebo_diagnostics = {
+        "time_scale": design.time_scale,
         "policy_start_year": design.policy_start_year,
         "placebo_start_year": design.placebo_start_year,
         "sample_start_year": int(placebo_frame[design.time_field].min()),

@@ -271,6 +271,7 @@ def protected_numeric_consistency(
         "p_value",
         "fit_statistic",
         "year",
+        "period_index",
     }
     occurrence_expectations = Counter(
         statement.text

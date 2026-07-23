@@ -936,6 +936,7 @@ class ProtectedValue(StrictModel):
         "p_value",
         "fit_statistic",
         "year",
+        "period_index",
         "passage_quote",
     ]
     source_kind: Literal["claim", "execution", "passage"]
