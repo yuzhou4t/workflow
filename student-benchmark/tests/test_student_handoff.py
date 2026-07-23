@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -363,6 +364,57 @@ class StudentHandoffTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("python:3.11.12", dockerfile)
         self.assertIn("NODE_VERSION=20.19.4", dockerfile)
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX file modes and symlinks")
+    def test_windows_normalizer_restores_git_modes_and_symlinks(self) -> None:
+        normalizer = (
+            MODULE_PATH.parents[1]
+            / "tools"
+            / "windows"
+            / "normalize-workspace.sh"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            repository = workspace / "repository"
+            executable = repository / "bin" / "run.sh"
+            link = repository / "bin" / "tool"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            link.symlink_to("../missing/tool.sh")
+
+            for command in (
+                ["git", "init", "-q"],
+                ["git", "config", "user.name", "SixBench Test"],
+                ["git", "config", "user.email", "sixbench@example.invalid"],
+                ["git", "add", "."],
+                ["git", "commit", "-q", "-m", "fixture"],
+            ):
+                subprocess.run(command, cwd=repository, check=True)
+
+            link.unlink()
+            link.write_text("../missing/tool.sh", encoding="utf-8")
+            executable.chmod(0o644)
+
+            completed = subprocess.run(
+                ["bash", str(normalizer), str(workspace)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(os.readlink(link), "../missing/tool.sh")
+            self.assertNotEqual(executable.stat().st_mode & 0o111, 0)
+            status = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=repository,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(status.stdout, "")
 
     def test_bootstrap_resolves_only_package_internal_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

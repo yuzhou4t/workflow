@@ -53,6 +53,7 @@ if [[ "$ACTION" != "diagnose" ]]; then
     mkdir -p "$(dirname -- "$PACKAGE_ROOT")"
     TEMP_WORKSPACE="$(mktemp -d "$(dirname -- "$PACKAGE_ROOT")/copying.XXXXXX")"
     cp -a "$SOURCE_PACKAGE_ROOT/." "$TEMP_WORKSPACE/"
+    bash "$TEMP_WORKSPACE/tools/windows/normalize-workspace.sh" "$TEMP_WORKSPACE"
     mv "$TEMP_WORKSPACE" "$PACKAGE_ROOT"
   fi
 fi

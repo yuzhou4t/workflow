@@ -66,8 +66,9 @@ wsl --install
    Case 测试。
 
 工作区会自动复制到 WSL 自己的 Linux 文件系统，以保证 `chmod 600`、Python 虚拟环境和 npm
-符号链接可靠。最后的结构化结果和回传 ZIP 会同步回 Windows 原解压目录的 `RETURN`。API 配置、
-release lock、Case 数据和中间结果不会同步到公开 GitHub。
+符号链接可靠；复制过程中还会依据冻结 Git 索引恢复 Windows 传输可能丢失的符号链接和执行权限。
+最后的结构化结果和回传 ZIP 会同步回 Windows 原解压目录的 `RETURN`。API 配置、release lock、
+Case 数据和中间结果不会同步到公开 GitHub。
 
 ## 正式分发前仍需完成
 
