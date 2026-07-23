@@ -1,0 +1,54 @@
+{
+  "schema_version": "sixbench-student-package-v1",
+  "package_id": "case005-hypoweaver-example",
+  "execution_state": "pending_authorization",
+  "release_id": "benchmark-v3-pilot-rc9",
+  "case_number": "005",
+  "case_id": "case_005_agri_green_finance",
+  "case_title_zh": "农业绿色金融",
+  "assignment": "hypoweaver",
+  "assignment_title_zh": "HypoWeaver 执行",
+  "systems": [
+    "hypoweaver"
+  ],
+  "expected_cell_count": 4,
+  "paths": {
+    "workspace": ".",
+    "release_package": "release-package.json",
+    "operator": "workflow/student-benchmark/scripts/case_operator.py",
+    "output_root": "benchmark-results-v3-pilot/validation/case005",
+    "runs": "benchmark-results-v3-pilot/validation/case005/case005-six-system-v3-validation-rc9/runs",
+    "contracts": "benchmark-results-v3-pilot/validation/case005/contracts-rc9",
+    "orchestration": "benchmark-results-v3-pilot/validation/case005/case005-six-system-v3-validation-rc9/student-orchestration/hypoweaver"
+  },
+  "expected_cells": [
+    {
+      "cell_id": "benchmark-v3-pilot-rc9-native_system_package-validation_panel-discovery_blind-hypoweaver-seed20260720",
+      "system_id": "hypoweaver",
+      "input_view": "discovery_blind",
+      "leaderboard_id": "native_system_package",
+      "seed": 20260720
+    },
+    {
+      "cell_id": "benchmark-v3-pilot-rc9-native_system_package-validation_panel-reproduction_aligned-hypoweaver-seed20260720",
+      "system_id": "hypoweaver",
+      "input_view": "reproduction_aligned",
+      "leaderboard_id": "native_system_package",
+      "seed": 20260720
+    },
+    {
+      "cell_id": "benchmark-v3-pilot-rc9-common_executor_reasoning_control-validation_panel-discovery_blind-hypoweaver-seed20260720",
+      "system_id": "hypoweaver",
+      "input_view": "discovery_blind",
+      "leaderboard_id": "common_executor_reasoning_control",
+      "seed": 20260720
+    },
+    {
+      "cell_id": "benchmark-v3-pilot-rc9-common_executor_reasoning_control-validation_panel-reproduction_aligned-hypoweaver-seed20260720",
+      "system_id": "hypoweaver",
+      "input_view": "reproduction_aligned",
+      "leaderboard_id": "common_executor_reasoning_control",
+      "seed": 20260720
+    }
+  ]
+}

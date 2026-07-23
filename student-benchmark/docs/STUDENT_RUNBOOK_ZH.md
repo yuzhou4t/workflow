@@ -1,5 +1,29 @@
 # Case 005/007 同学运行手册
 
+## 0. 正式包的最简入口
+
+解压后先把整个目录交给 AI，并让 AI 读取根目录的 `START_HERE_FOR_AI.md`。也可以直接双击
+`START.command`。不需要自己填写 Case、分组或绝对路径。
+
+AI 首先运行：
+
+```bash
+python3 tools/student_handoff.py explain
+```
+
+工具会报告本机真实路径和唯一分工。之后依次使用：
+
+```bash
+python3 tools/student_handoff.py setup --yes
+python3 tools/student_handoff.py configure-api
+python3 tools/student_handoff.py preflight
+python3 tools/student_handoff.py run --yes
+python3 tools/student_handoff.py bundle
+```
+
+正式运行前仍需本人明确确认，因为它会发生外部模型调用并产生 API 费用。其余 Case、assignment
+和路径参数全部由包内 `ASSIGNMENT.json` 固定。
+
 ## 1. 每个 Case 的 1 + 5 系统分工
 
 每个 Case 的六个系统拆成两个互斥分组：
@@ -89,3 +113,11 @@ python3 scripts/case_operator.py run \
 
 只有两份包都封存并通过完整性检查后，才能生成对照结果。缺少任一分组时，只能标记为
 `incomplete`，不能把已有分组当作完整六系统比较。
+
+每位同学回传：
+
+- `RETURN/*-return.zip`；
+- `RETURN/RETURN_POINTER.json` 的原文。
+
+负责人不接受 AI 手工填写的成功数。所有数字都必须与 ZIP 中的 `RESULT_SUMMARY.json`、
+`RETURN_MANIFEST.json` 和逐单元哈希一致。

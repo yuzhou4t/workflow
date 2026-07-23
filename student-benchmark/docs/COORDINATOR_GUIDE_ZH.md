@@ -123,11 +123,35 @@ cp config/release-package.example.json /absolute/private/path/release-package.js
 
 四位执行同学分别收到：
 
-- 冻结工作区访问权；
+- 包含 AI 入口和本人精确计划的冻结工作区压缩包；
 - 只启用本人 Case 和分组的 `release-package.json`；
-- 本机 release lock、统一 outbound manifest 和项目级正式 receipt；
+- 自动生成本机 release lock 的初始化工具、统一 outbound manifest 和项目级正式 receipt；
 - 自己负责的 4 单元或 20 单元任务书；
 - 私有结果回传路径。
 
 API Key 由各执行同学在自己机器上隐藏输入，负责人不收集。收到两份封存包后，项目负责人按
 Case 合并 4 + 20 个单元并进行完整性检查。结果和 hidden reference 永远不提交到 public GitHub。
+
+在每个已经整理好的冻结工作区中安装 AI 入口：
+
+```bash
+python3 student-benchmark/scripts/install_ai_handoff.py \
+  --case 005 \
+  --assignment hypoweaver \
+  --workspace /absolute/path/to/curated-frozen-workspace \
+  --release /absolute/path/to/release-package.json \
+  --formal
+```
+
+另外三个包分别替换为 `005/baselines`、`007/hypoweaver` 和 `007/baselines`。工具会从冻结
+protocol 生成精确的 4/20 单元列表，并拒绝“formal 包却没有只启用本人分组”的 release。
+
+不要直接压缩当前开发目录：它可能包含旧结果、`.git`、不可移植的 `.venv`、API 配置和其他
+Case。应先在单独的 curated workspace 中只放允许发放的冻结材料，安装 AI 入口，运行秘密扫描和
+离线检查，再形成私有 ZIP。不要把负责人机器生成的 release lock 放进 ZIP；同学解压后由
+`SETUP.command` 在本机自动重建虚拟环境并生成技术性 lock。公开 GitHub 只保存模板和工具，不
+保存四个正式 ZIP。
+
+同学回传的 `RETURN_POINTER.json` 是机器可读收件单；先核对 ZIP SHA-256，再依据
+`RESULT_SUMMARY.json` 和 `RETURN_MANIFEST.json` 合并。详细格式见
+[`AI_PACKAGE_FORMAT_ZH.md`](AI_PACKAGE_FORMAT_ZH.md)。

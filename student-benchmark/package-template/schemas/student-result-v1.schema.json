@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/yuzhou4t/workflow/student-benchmark/student-result-v1.schema.json",
+  "title": "SixBench student result summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "package_id",
+    "release_id",
+    "case_number",
+    "case_id",
+    "assignment",
+    "systems",
+    "execution_environment",
+    "collection_status",
+    "scientific_outcome",
+    "counts",
+    "missing_cells",
+    "partial_cells",
+    "unexpected_cells",
+    "identity_errors",
+    "cells"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "sixbench-student-result-v1"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "package_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "release_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "case_number": {
+      "enum": [
+        "005",
+        "007"
+      ]
+    },
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "assignment": {
+      "enum": [
+        "hypoweaver",
+        "baselines"
+      ]
+    },
+    "systems": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "execution_environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "package_root",
+        "python",
+        "platform"
+      ],
+      "properties": {
+        "package_root": {
+          "type": "string"
+        },
+        "python": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        }
+      }
+    },
+    "collection_status": {
+      "enum": [
+        "complete",
+        "incomplete",
+        "needs_review"
+      ]
+    },
+    "scientific_outcome": {
+      "enum": [
+        "all_completed",
+        "all_failed",
+        "mixed",
+        "not_evaluated",
+        "needs_review"
+      ]
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected",
+        "sealed",
+        "successful",
+        "failed",
+        "other_terminal",
+        "partial",
+        "missing",
+        "unexpected"
+      ],
+      "properties": {
+        "expected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sealed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "successful": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "other_terminal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "partial": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unexpected": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "missing_cells": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "partial_cells": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unexpected_cells": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "identity_errors": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/cell"
+      }
+    }
+  },
+  "$defs": {
+    "cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cell_id",
+        "system_id",
+        "input_view",
+        "leaderboard_id",
+        "seed",
+        "delivery_status",
+        "artifact_presence",
+        "artifact_valid_json",
+        "artifact_sha256",
+        "run_status",
+        "failure_class",
+        "score_eligibility",
+        "claim_count",
+        "execution_count",
+        "completed_check_count",
+        "false_evidence_flags",
+        "false_evidence_flag_count",
+        "identity_errors"
+      ],
+      "properties": {
+        "cell_id": {
+          "type": "string"
+        },
+        "system_id": {
+          "type": "string"
+        },
+        "input_view": {
+          "type": "string"
+        },
+        "leaderboard_id": {
+          "type": "string"
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "string",
+            "null"
+          ]
+        },
+        "delivery_status": {
+          "enum": [
+            "sealed",
+            "partial",
+            "missing"
+          ]
+        },
+        "artifact_presence": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "artifact_valid_json": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "artifact_sha256": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "run_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failure_class": {},
+        "score_eligibility": {},
+        "claim_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "execution_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completed_check_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "false_evidence_flags": {},
+        "false_evidence_flag_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "identity_errors": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

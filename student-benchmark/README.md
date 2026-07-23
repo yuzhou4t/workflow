@@ -7,6 +7,43 @@
 公开仓库不包含案例数据、API Key、隐藏参考、机器专属 release lock、正式授权回执或结果。
 这些内容不能通过把仓库设为 public 自动获得授权。
 
+## 最终发给同学的压缩包
+
+负责人准备的正式私有压缩包会在根目录直接包含：
+
+```text
+Case005-HypoWeaver/
+├── AGENTS.md
+├── ASSIGNMENT.json
+├── README_FOR_STUDENT.md
+├── START_HERE_FOR_AI.md
+├── SETUP.command
+├── START.command
+├── release-package.json
+├── tools/student_handoff.py
+├── workflow/student-benchmark/...
+├── 冻结的系统、Harness 和 Case 文件
+└── RETURN/
+```
+
+同学不需要自己拼路径或输入 Case 参数。解压后可以把整个目录交给 AI，让 AI 先读
+`START_HERE_FOR_AI.md`；也可以直接双击 `START.command`。AI 会通过
+`ASSIGNMENT.json` 识别本人唯一分工，并先报告当前机器上的真实绝对路径、负责的系统和应有单元数。
+
+完成后，工具从真实 `cell_manifest.json`、`normalized_result.json` 和
+`evidence_manifest.json` 生成：
+
+- `RETURN/RESULT_SUMMARY.md`：逐单元结果表；
+- `RETURN/RESULT_SUMMARY.json`：符合固定 Schema 的结构化结果；
+- `RETURN/RETURN_MANIFEST.json`：回传文件和 SHA-256；
+- `RETURN/RETURN_POINTER.json`：AI 可以原样返回的结构化回执；
+- `RETURN/*-return.zip`：通过私有渠道回传的结果包。
+
+报告会把“24/4/20 个产物是否收齐”和“科学工作流运行成功还是失败”分开。失败是允许保留的测试
+结果，缺失、跨分组单元或身份不匹配才属于交付完整性问题。生成逻辑和模板在
+[`package-template`](package-template)，负责人把它装入冻结工作区的工具是
+[`scripts/install_ai_handoff.py`](scripts/install_ai_handoff.py)。
+
 ## 四人分工：每个案例拆成 1 + 5 个系统
 
 | 小组 | 任务 | 工作 |
@@ -43,7 +80,7 @@ python3 scripts/case_operator.py status --case 005 --assignment baselines
 
 随后，负责人通过私有渠道向四位执行同学分别提供：
 
-1. 获准的冻结工作区；
+1. 已经包含本人 `ASSIGNMENT.json` 和 AI 入口的冻结工作区压缩包；
 2. 只启用本人 Case 和分组的 `release-package.json`；
 3. 本地自动生成并校验的 release lock；
 4. 覆盖 005/007、固定内容和固定模型服务的一次性项目授权回执。
@@ -59,8 +96,20 @@ Case 字节、协议、provider、endpoint 和 model 不变，同一项目授权
 
 ## 执行命令
 
-以下以 Case 005 的 HypoWeaver 分组为例；五基线同学把 `hypoweaver` 替换为 `baselines`，
-Case 007 把编号替换为 `007`。
+正式压缩包中不需要手工填写以下路径和参数，直接运行：
+
+```bash
+python3 tools/student_handoff.py explain
+python3 tools/student_handoff.py setup --yes
+python3 tools/student_handoff.py configure-api
+python3 tools/student_handoff.py preflight
+python3 tools/student_handoff.py run --yes
+python3 tools/student_handoff.py bundle
+```
+
+也可以双击 `START.command` 使用菜单。以下底层命令只用于负责人排查；以 Case 005 的
+HypoWeaver 分组为例，五基线同学把 `hypoweaver` 替换为 `baselines`，Case 007 把编号替换为
+`007`。
 
 安全写入 API 配置，Key 通过隐藏输入读取：
 
