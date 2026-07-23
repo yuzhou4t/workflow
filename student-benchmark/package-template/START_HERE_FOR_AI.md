@@ -25,6 +25,8 @@ python3 tools/student_handoff.py preflight
 
 `setup` 只在首次解压或本机环境缺失时运行。它会联网下载冻结依赖，并生成与当前绝对路径和 Python
 环境绑定的技术性 release lock；这不代表重新进行一次人工授权。开始下载前先告诉同学并取得确认。
+HypoWeaver 分包也会安装共同执行板校验所需的 data-to-paper 运行时；这只是 release lock 的
+冻结依赖，不会增加该同学需要运行的系统或单元。
 
 只有预检结果同时满足：
 

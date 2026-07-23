@@ -310,8 +310,8 @@ class StudentHandoffTests(unittest.TestCase):
                 json.dumps(
                     {
                         "paths": {
-                            "data_to_paper_repo": "../../data-to-paper",
-                            "deep_scientist_repo": "../../DeepScientist"
+                            "data_to_paper_repo": "../data-to-paper",
+                            "deep_scientist_repo": "../DeepScientist"
                         },
                         "provider": {
                             "model": "qwen3.7-plus",
@@ -319,7 +319,7 @@ class StudentHandoffTests(unittest.TestCase):
                         },
                         "outbound_authorization": {
                             "provider_id": "test-provider",
-                            "release_lock_path": "../../results/release-lock.json"
+                            "release_lock_path": "../results/release-lock.json"
                         }
                     }
                 ),
@@ -349,7 +349,11 @@ class StudentHandoffTests(unittest.TestCase):
             self.assertFalse(setup_status["ready"])
             self.assertEqual(
                 set(setup_status["checks"]),
-                {"harness_python", "release_lock"},
+                {
+                    "harness_python",
+                    "data_to_paper_python",
+                    "release_lock",
+                },
             )
 
 

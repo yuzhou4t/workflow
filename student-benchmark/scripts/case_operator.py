@@ -194,6 +194,8 @@ def build_context(
     assignment_name: str,
     workspace: Path,
     release_path: Path,
+    *,
+    require_python: bool = True,
 ) -> Context:
     policies = load_policies()
     policy = policies[case_number]
@@ -220,11 +222,13 @@ def build_context(
         follow_symlinks=False,
     )
     protocol = resolve_beneath(workspace, str(release.get("protocol", "")), "protocol")
-    for path, label in (
+    required_paths = [
         (harness, "harness repository"),
-        (python, "frozen Python"),
         (protocol, "frozen protocol"),
-    ):
+    ]
+    if require_python:
+        required_paths.append((python, "frozen Python"))
+    for path, label in required_paths:
         if not path.exists():
             raise OperatorError(f"{label} does not exist: {path}")
 
@@ -269,11 +273,12 @@ def build_context(
         suite = load_json(suite_path)
         if suite.get("independent_case_id") != policy["case_id"]:
             raise OperatorError("suite case identity does not match the assignment")
+        suite_root = suite_path.parent.parent
         paths = suite.get("paths")
         if not isinstance(paths, dict):
             raise OperatorError("suite is missing paths")
-        runtime_config = (suite_path.parent / str(paths.get("runtime_config", ""))).resolve()
-        output_root = (suite_path.parent / str(paths.get("output_root", ""))).resolve()
+        runtime_config = (suite_root / str(paths.get("runtime_config", ""))).resolve()
+        output_root = (suite_root / str(paths.get("output_root", ""))).resolve()
         for path, label in ((runtime_config, "runtime_config"), (output_root, "output_root")):
             try:
                 path.relative_to(workspace)
@@ -430,16 +435,21 @@ def validate_authorization(context: Context) -> None:
     )
 
 
-def enumerate_case_cells(context: Context) -> list[dict[str, Any]]:
+def enumerate_case_cells(
+    context: Context,
+    *,
+    python_override: Path | None = None,
+) -> list[dict[str, Any]]:
     if context.policy["execution_mode"] != "validation_matrix":
         raise OperatorError(f"Case {context.case_number} has no external execution plan")
     rows: list[dict[str, Any]] = []
+    planning_python = python_override or context.python
     with tempfile.TemporaryDirectory(prefix=f"sixbench-case{context.case_number}-") as temp:
         for board in BOARDS:
             output = Path(temp) / f"{board}.json"
             run_checked(
                 [
-                    str(context.python),
+                    str(planning_python),
                     "-m",
                     "sixbench.protocol_v3",
                     "--protocol",

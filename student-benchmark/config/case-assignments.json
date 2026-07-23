@@ -29,7 +29,8 @@
         }
       },
       "local_tests": [
-        "tests/test_validation_contracts.py",
+        "tests/test_student_execution_protocol.py",
+        "tests/test_case.py",
         "tests/test_common_executor.py",
         "tests/test_outbound_authorization.py"
       ]
@@ -62,7 +63,8 @@
         }
       },
       "local_tests": [
-        "tests/test_validation_contracts.py",
+        "tests/test_student_execution_protocol.py",
+        "tests/test_case.py",
         "tests/test_common_executor.py",
         "tests/test_outbound_authorization.py"
       ]

@@ -117,6 +117,7 @@ def load_setup_context(root: Path) -> dict[str, Any]:
         "suite",
     )
     suite_payload = student_handoff.load_object(suite, "suite")
+    suite_root = suite.parent.parent
     suite_paths = suite_payload.get("paths")
     outbound = suite_payload.get("outbound_authorization")
     provider = suite_payload.get("provider")
@@ -158,19 +159,19 @@ def load_setup_context(root: Path) -> dict[str, Any]:
         "environment_freeze": environment_freeze,
         "suite": suite,
         "data_to_paper": resolve_from(
-            suite.parent,
+            suite_root,
             suite_paths.get("data_to_paper_repo"),
             root,
             "data_to_paper_repo",
         ),
         "deep_scientist": resolve_from(
-            suite.parent,
+            suite_root,
             suite_paths.get("deep_scientist_repo"),
             root,
             "deep_scientist_repo",
         ),
         "release_lock": resolve_from(
-            suite.parent,
+            suite_root,
             outbound.get("release_lock_path"),
             root,
             "release lock",
@@ -214,22 +215,23 @@ def install_runtimes(root: Path, context: dict[str, Any]) -> None:
         cwd=context["harness"],
     )
 
-    if "data_to_paper" in systems:
-        data_repo = context["data_to_paper"]
-        data_python = data_repo / ".venv" / "bin" / "python"
-        create_venv(system_python, data_python)
-        run_checked(
-            [
-                str(data_python),
-                "-m",
-                "pip",
-                "install",
-                "--disable-pip-version-check",
-                "-e",
-                str(data_repo),
-            ],
-            cwd=data_repo,
-        )
+    # The release lock validates the complete common-executor board even when
+    # this package delegates only HypoWeaver cells.
+    data_repo = context["data_to_paper"]
+    data_python = data_repo / ".venv" / "bin" / "python"
+    create_venv(system_python, data_python)
+    run_checked(
+        [
+            str(data_python),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "-e",
+            str(data_repo),
+        ],
+        cwd=data_repo,
+    )
 
     if "deep_scientist" in systems:
         npm = shutil.which("npm")
@@ -293,13 +295,12 @@ def generate_release_lock(context: dict[str, Any]) -> None:
 def status(root: Path, context: dict[str, Any]) -> dict[str, Any]:
     targets = {
         "harness_python": context["harness_python"],
+        "data_to_paper_python": (
+            context["data_to_paper"] / ".venv" / "bin" / "python"
+        ),
         "release_lock": context["release_lock"],
     }
     systems = set(context["assignment"]["systems"])
-    if "data_to_paper" in systems:
-        targets["data_to_paper_python"] = (
-            context["data_to_paper"] / ".venv" / "bin" / "python"
-        )
     if "deep_scientist" in systems:
         targets["deep_scientist_python"] = (
             context["deep_scientist"] / ".venv" / "bin" / "python"

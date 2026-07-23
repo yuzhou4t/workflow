@@ -118,8 +118,12 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
         args.assignment,
         workspace,
         release,
+        require_python=False,
     )
-    rows = operator.enumerate_case_cells(context)
+    rows = operator.enumerate_case_cells(
+        context,
+        python_override=Path(sys.executable),
+    )
     if args.formal:
         if not context.case_release.get("execution_enabled"):
             raise RuntimeError("formal handoff requires execution_enabled=true")
