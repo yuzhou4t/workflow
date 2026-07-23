@@ -8,7 +8,26 @@
       "execution_mode": "validation_matrix",
       "external_execution_allowed": true,
       "expected_external_cells": 24,
-      "assignment": "一名执行负责人运行完整矩阵，一名审计负责人独立核验",
+      "assignments": {
+        "hypoweaver": {
+          "title_zh": "HypoWeaver 执行",
+          "systems": [
+            "hypoweaver"
+          ],
+          "expected_external_cells": 4
+        },
+        "baselines": {
+          "title_zh": "五个对照系统执行",
+          "systems": [
+            "agent_laboratory",
+            "data_to_paper",
+            "direct_qwen",
+            "qwen_code_agent_writer",
+            "deep_scientist"
+          ],
+          "expected_external_cells": 20
+        }
+      },
       "local_tests": [
         "tests/test_validation_contracts.py",
         "tests/test_common_executor.py",
@@ -22,7 +41,26 @@
       "execution_mode": "validation_matrix",
       "external_execution_allowed": true,
       "expected_external_cells": 24,
-      "assignment": "一名执行负责人运行完整空间矩阵，一名审计负责人独立核验",
+      "assignments": {
+        "hypoweaver": {
+          "title_zh": "HypoWeaver 执行",
+          "systems": [
+            "hypoweaver"
+          ],
+          "expected_external_cells": 4
+        },
+        "baselines": {
+          "title_zh": "五个对照系统执行",
+          "systems": [
+            "agent_laboratory",
+            "data_to_paper",
+            "direct_qwen",
+            "qwen_code_agent_writer",
+            "deep_scientist"
+          ],
+          "expected_external_cells": 20
+        }
+      },
       "local_tests": [
         "tests/test_validation_contracts.py",
         "tests/test_common_executor.py",

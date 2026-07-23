@@ -8,11 +8,13 @@
   "cases": {
     "005": {
       "execution_enabled": false,
+      "enabled_assignments": [],
       "suite": "benchmark-baselines/six-system-comparison/configs/case005-six-system-v3-validation-rc9.json",
       "executor_contract": "benchmark-baselines/six-system-comparison/configs/case005-reference-v1.json"
     },
     "007": {
       "execution_enabled": false,
+      "enabled_assignments": [],
       "suite": "benchmark-baselines/six-system-comparison/configs/case007-six-system-v3-validation-rc9.json",
       "executor_contract": "benchmark-baselines/six-system-comparison/configs/case007-reference-v1.json"
     }

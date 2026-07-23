@@ -1,8 +1,11 @@
 # Public student benchmark rules
 
 - Scope is limited to Case 005 and Case 007 under the frozen SixBench release.
-- Each Case has one execution owner and one independent audit owner. Do not run
-  duplicate paid batches unless a new preregistered release explicitly requires it.
+- Each Case has two mutually exclusive execution assignments: `hypoweaver`
+  runs one system and `baselines` runs the other five. Together they must cover
+  all 24 preregistered cells exactly once.
+- Do not inspect or exchange cross-assignment results until both assignments
+  have finished and sealed their outputs.
 - Never commit API keys, runtime configuration, case data, hidden references,
   authorization receipts, release locks, machine paths, model output, or results.
 - Public templates are not permission to transmit data. External execution remains

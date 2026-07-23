@@ -22,6 +22,7 @@ from typing import Any
 OPS_ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = OPS_ROOT / "config" / "case-assignments.json"
 CASE_NUMBERS = ("005", "007")
+ASSIGNMENTS = ("hypoweaver", "baselines")
 VIEWS = ("discovery_blind", "reproduction_aligned")
 SYSTEMS = (
     "hypoweaver",
@@ -54,6 +55,8 @@ class OperatorError(RuntimeError):
 class Context:
     case_number: str
     policy: dict[str, Any]
+    assignment_name: str
+    assignment: dict[str, Any]
     release: dict[str, Any]
     case_release: dict[str, Any]
     workspace: Path
@@ -86,6 +89,45 @@ def load_policies() -> dict[str, dict[str, Any]]:
     cases = payload.get("cases")
     if not isinstance(cases, dict) or tuple(sorted(cases)) != CASE_NUMBERS:
         raise OperatorError("assignment policy must contain exactly Cases 005/007")
+    for case_number, policy in cases.items():
+        if not isinstance(policy, dict):
+            raise OperatorError(f"invalid assignment policy for Case {case_number}")
+        assignments = policy.get("assignments")
+        if not isinstance(assignments, dict) or set(assignments) != set(ASSIGNMENTS):
+            raise OperatorError(
+                f"Case {case_number} must declare hypoweaver and baselines assignments"
+            )
+        assigned_systems: list[str] = []
+        for assignment_name in ASSIGNMENTS:
+            assignment = assignments[assignment_name]
+            if not isinstance(assignment, dict):
+                raise OperatorError(
+                    f"invalid {assignment_name} assignment for Case {case_number}"
+                )
+            systems = assignment.get("systems")
+            expected_cells = assignment.get("expected_external_cells")
+            if (
+                not isinstance(systems, list)
+                or not systems
+                or any(system not in SYSTEMS for system in systems)
+            ):
+                raise OperatorError(
+                    f"invalid systems in {assignment_name} assignment for Case {case_number}"
+                )
+            calculated_cells = len(systems) * len(VIEWS) * len(BOARDS)
+            if expected_cells != calculated_cells:
+                raise OperatorError(
+                    f"invalid cell count in {assignment_name} assignment for Case {case_number}"
+                )
+            assigned_systems.extend(systems)
+        if tuple(assigned_systems) != SYSTEMS:
+            raise OperatorError(
+                f"Case {case_number} assignments must partition all six systems exactly once"
+            )
+        if policy.get("expected_external_cells") != len(SYSTEMS) * len(VIEWS) * len(
+            BOARDS
+        ):
+            raise OperatorError(f"Case {case_number} must contain 24 total cells")
     return cases
 
 
@@ -149,11 +191,16 @@ def harness_env(harness: Path) -> dict[str, str]:
 
 def build_context(
     case_number: str,
+    assignment_name: str,
     workspace: Path,
     release_path: Path,
 ) -> Context:
     policies = load_policies()
     policy = policies[case_number]
+    assignments = policy["assignments"]
+    if assignment_name not in assignments:
+        raise OperatorError(f"unsupported assignment: {assignment_name}")
+    assignment = assignments[assignment_name]
     release = load_json(release_path.expanduser().resolve())
     if release.get("schema_version") != "sixbench-student-release-v1":
         raise OperatorError("unsupported release package schema")
@@ -196,6 +243,18 @@ def build_context(
     case_release = release_cases[case_number]
     if not isinstance(case_release, dict):
         raise OperatorError(f"invalid release entry for Case {case_number}")
+    enabled_assignments = case_release.get("enabled_assignments")
+    if (
+        not isinstance(enabled_assignments, list)
+        or any(
+            not isinstance(name, str) or name not in ASSIGNMENTS
+            for name in enabled_assignments
+        )
+        or len(enabled_assignments) != len(set(enabled_assignments))
+    ):
+        raise OperatorError(
+            f"Case {case_number} release entry has invalid enabled_assignments"
+        )
 
     suite_path: Path | None = None
     suite: dict[str, Any] | None = None
@@ -232,6 +291,8 @@ def build_context(
     return Context(
         case_number=case_number,
         policy=policy,
+        assignment_name=assignment_name,
+        assignment=assignment,
         release=release,
         case_release=case_release,
         workspace=workspace,
@@ -416,7 +477,21 @@ def enumerate_case_cells(context: Context) -> list[dict[str, Any]]:
     identities = {str(row["cell_id"]) for row in rows}
     if len(rows) != 24 or len(identities) != 24:
         raise OperatorError("the Case plan must contain 24 unique cells")
-    return rows
+    assigned_systems = set(context.assignment["systems"])
+    assigned_rows = [
+        row for row in rows if str(row.get("system_id")) in assigned_systems
+    ]
+    assigned_identities = {str(row["cell_id"]) for row in assigned_rows}
+    expected_cells = int(context.assignment["expected_external_cells"])
+    if (
+        len(assigned_rows) != expected_cells
+        or len(assigned_identities) != expected_cells
+    ):
+        raise OperatorError(
+            f"the {context.assignment_name} assignment must contain "
+            f"{expected_cells} unique cells"
+        )
+    return assigned_rows
 
 
 def run_local_tests(context: Context) -> None:
@@ -453,7 +528,11 @@ def preflight(context: Context, *, report_path: Path | None = None) -> dict[str,
 
     plan: list[dict[str, Any]] = []
     if context.policy["execution_mode"] == "validation_matrix":
-        checked("matrix_shape_24", lambda: plan.extend(enumerate_case_cells(context)))
+        expected_cells = int(context.assignment["expected_external_cells"])
+        checked(
+            f"assigned_matrix_shape_{expected_cells}",
+            lambda: plan.extend(enumerate_case_cells(context)),
+        )
 
     local_passed = all(row["status"] == "passed" for row in checks)
     external_ready = False
@@ -462,6 +541,12 @@ def preflight(context: Context, *, report_path: Path | None = None) -> dict[str,
         blockers.append("assignment policy marks this Case as local audit only")
     elif not bool(context.case_release.get("execution_enabled")):
         blockers.append("release package has execution_enabled=false")
+    elif context.assignment_name not in context.case_release.get(
+        "enabled_assignments", []
+    ):
+        blockers.append(
+            f"release package does not enable the {context.assignment_name} assignment"
+        )
     elif local_passed:
         runtime_ok = checked("runtime_config", lambda: validate_runtime_config(context))
         authorization_ok = checked("release_and_authorization", lambda: validate_authorization(context))
@@ -478,10 +563,12 @@ def preflight(context: Context, *, report_path: Path | None = None) -> dict[str,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "case_number": context.case_number,
         "case_id": context.policy["case_id"],
+        "assignment": context.assignment_name,
+        "systems": context.assignment["systems"],
         "release_id": context.release["release_id"],
         "preflight_passed": local_passed,
         "external_execution_ready": external_ready,
-        "expected_external_cells": context.policy["expected_external_cells"],
+        "expected_external_cells": context.assignment["expected_external_cells"],
         "planned_cells": len(plan),
         "checks": checks,
         "blockers": blockers,
@@ -949,19 +1036,39 @@ def run_matrix(context: Context) -> None:
     release_suffix = str(context.release["release_id"]).removeprefix("benchmark-v3-pilot-")
     contracts_root = context.output_root / f"contracts-{release_suffix}"
     run_root = context.output_root / suite_id / "runs"
-    log_dir = context.output_root / suite_id / "student-orchestration"
-    emit(log_dir, "batch_started", case_number=context.case_number, suite_id=suite_id)
+    log_dir = (
+        context.output_root
+        / suite_id
+        / "student-orchestration"
+        / context.assignment_name
+    )
+    emit(
+        log_dir,
+        "batch_started",
+        case_number=context.case_number,
+        assignment=context.assignment_name,
+        systems=context.assignment["systems"],
+        suite_id=suite_id,
+    )
     for row in plan:
         manifest = seal_manifest(context, row=row, contracts_root=contracts_root)
         if row["leaderboard"] == BOARDS[0]:
             run_native_cell(context, row, manifest, run_root, log_dir)
         else:
             run_common_cell(context, row, manifest, run_root, log_dir)
-    emit(log_dir, "batch_finished", case_number=context.case_number, suite_id=suite_id)
+    emit(
+        log_dir,
+        "batch_finished",
+        case_number=context.case_number,
+        assignment=context.assignment_name,
+        systems=context.assignment["systems"],
+        suite_id=suite_id,
+    )
 
 
-def status(case_number: str) -> None:
+def status(case_number: str, assignment_name: str) -> None:
     policy = load_policies()[case_number]
+    assignment = policy["assignments"][assignment_name]
     print(
         json.dumps(
             {
@@ -971,8 +1078,11 @@ def status(case_number: str) -> None:
                 "track": policy["track"],
                 "execution_mode": policy["execution_mode"],
                 "external_execution_allowed": policy["external_execution_allowed"],
-                "expected_external_cells": policy["expected_external_cells"],
-                "assignment": policy["assignment"],
+                "case_external_cells": policy["expected_external_cells"],
+                "assignment": assignment_name,
+                "assignment_title_zh": assignment["title_zh"],
+                "systems": assignment["systems"],
+                "expected_external_cells": assignment["expected_external_cells"],
             },
             ensure_ascii=False,
             indent=2,
@@ -985,10 +1095,12 @@ def parser() -> argparse.ArgumentParser:
     subparsers = result.add_subparsers(dest="command", required=True)
     status_parser = subparsers.add_parser("status", help="show the immutable assignment policy")
     status_parser.add_argument("--case", choices=CASE_NUMBERS, required=True)
+    status_parser.add_argument("--assignment", choices=ASSIGNMENTS, required=True)
 
     for name in ("configure-api", "preflight", "plan", "run"):
         command = subparsers.add_parser(name)
         command.add_argument("--case", choices=CASE_NUMBERS, required=True)
+        command.add_argument("--assignment", choices=ASSIGNMENTS, required=True)
         command.add_argument("--workspace", type=Path, required=True)
         command.add_argument("--release", type=Path, required=True)
         if name == "configure-api":
@@ -1001,9 +1113,9 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if args.command == "status":
-        status(args.case)
+        status(args.case, args.assignment)
         return 0
-    context = build_context(args.case, args.workspace, args.release)
+    context = build_context(args.case, args.assignment, args.workspace, args.release)
     if args.command == "configure-api":
         configure_api(context, replace=args.replace)
         return 0
