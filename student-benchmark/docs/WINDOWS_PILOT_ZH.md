@@ -32,8 +32,9 @@ wsl --install
 
 ## 第一阶段：只验收环境，不碰真实 Case 和 API
 
-1. 把负责人提供的未压缩 Windows 试运行文件夹放到 Windows 本地磁盘。
-2. 不移动、不改名、不修改其中的文件。
+1. 把负责人提供的未压缩 Windows 试运行文件夹完整复制到短的本地路径，例如
+   `C:\sixbench\case005`；必须保留其中的隐藏 `.git` 目录。
+2. 落盘后不移动、不改名、不修改其中的文件。
 3. 双击 `CHECK_WINDOWS.cmd`。
 4. 第一次会下载基础镜像并构建运行环境。
 5. 完成后，把原文件夹中的 `RETURN/WINDOWS_ENV_CHECK.json` 发回负责人。
