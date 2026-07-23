@@ -1,0 +1,20 @@
+{
+  "schema_version": "sixbench-student-release-v1",
+  "release_id": "benchmark-v3-pilot-rc9",
+  "harness_repo": "benchmark-baselines/six-system-comparison",
+  "harness_commit": "f0b7ae4ec0fd2ec7b87e5802d34d91a5f27a2ea6",
+  "python": "benchmark-baselines/six-system-comparison/.venv/bin/python",
+  "protocol": "benchmark-baselines/six-system-comparison/configs/benchmark-v3-pilot-rc9.json",
+  "cases": {
+    "005": {
+      "execution_enabled": false,
+      "suite": "benchmark-baselines/six-system-comparison/configs/case005-six-system-v3-validation-rc9.json",
+      "executor_contract": "benchmark-baselines/six-system-comparison/configs/case005-reference-v1.json"
+    },
+    "007": {
+      "execution_enabled": false,
+      "suite": "benchmark-baselines/six-system-comparison/configs/case007-six-system-v3-validation-rc9.json",
+      "executor_contract": "benchmark-baselines/six-system-comparison/configs/case007-reference-v1.json"
+    }
+  }
+}

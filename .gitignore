@@ -8,3 +8,17 @@ __pycache__/
 *.py[cod]
 backend/var/
 tmp/
+
+# Public student benchmark tooling is tracked, but machine-local execution
+# material, credentials, case data, authorizations, and results are not.
+student-benchmark/private/
+student-benchmark/reports/
+student-benchmark/results/
+student-benchmark/runtime-config.json
+student-benchmark/release-package.json
+student-benchmark/*-authorization-manifest.json
+student-benchmark/*-authorization-receipt.json
+student-benchmark/*-release-lock.json
+student-benchmark/*.tar
+student-benchmark/*.tar.gz
+student-benchmark/*.zip

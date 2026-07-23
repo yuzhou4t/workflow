@@ -1,0 +1,33 @@
+{
+  "schema_version": "sixbench-student-assignments-v1",
+  "cases": {
+    "005": {
+      "case_id": "case_005_agri_green_finance",
+      "title_zh": "农业绿色金融",
+      "track": "validation",
+      "execution_mode": "validation_matrix",
+      "external_execution_allowed": true,
+      "expected_external_cells": 24,
+      "assignment": "一名执行负责人运行完整矩阵，一名审计负责人独立核验",
+      "local_tests": [
+        "tests/test_validation_contracts.py",
+        "tests/test_common_executor.py",
+        "tests/test_outbound_authorization.py"
+      ]
+    },
+    "007": {
+      "case_id": "case_007_digital_green_finance_resilience",
+      "title_zh": "数字绿色金融韧性",
+      "track": "validation",
+      "execution_mode": "validation_matrix",
+      "external_execution_allowed": true,
+      "expected_external_cells": 24,
+      "assignment": "一名执行负责人运行完整空间矩阵，一名审计负责人独立核验",
+      "local_tests": [
+        "tests/test_validation_contracts.py",
+        "tests/test_common_executor.py",
+        "tests/test_outbound_authorization.py"
+      ]
+    }
+  }
+}

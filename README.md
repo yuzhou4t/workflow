@@ -4,6 +4,10 @@
 
 新同学接手时，请先阅读 [`README_NEXT_STEPS.md`](README_NEXT_STEPS.md)。其中写明当前架构、真实案例暴露的不足、下一阶段任务拆分、代码入口与逐项验收标准。
 
+负责六系统 Case 005/007 测试的同学请从
+[`student-benchmark/README.md`](student-benchmark/README.md) 开始。该公开入口包含四人分工、
+本机 API 配置、离线预检和运行说明，但不包含案例数据、密钥、授权回执或测试结果。
+
 当前第一版优先验证一条可信的核心闭环：
 
 ```text
