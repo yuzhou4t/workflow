@@ -589,6 +589,28 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["logical_call_ceiling"], 20)
         self.assertEqual(snapshot["group_counting_unit"], "logical_call")
 
+    async def test_forced_model_applies_to_every_benchmark_role(self) -> None:
+        engine = WorkflowEngine(
+            self.repository,
+            model_call_budget_mode="v3",
+            forced_model="qwen3.7-plus",
+        )
+
+        self.assertEqual(
+            engine._model_for_role("qwen3.7-max"),
+            "qwen3.7-plus",
+        )
+        self.assertEqual(
+            engine._model_for_role("qwen3.7-plus"),
+            "qwen3.7-plus",
+        )
+        with self.assertRaisesRegex(ValueError, "forced_model"):
+            WorkflowEngine(
+                self.repository,
+                model_call_budget_mode="v3",
+                forced_model=" ",
+            )
+
     async def test_fixture_flow_stops_at_each_gate_and_completes_plan_only(self) -> None:
         run = await self.engine.create_run(
             CreateRunRequest(preset_case_id="green-finance-did")

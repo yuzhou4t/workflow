@@ -357,6 +357,13 @@ async def run_case(
         "v3" if v3_model_budget else ("v2" if v2_model_budget else "legacy")
     )
     manifest["model_budget_mode"] = budget_mode
+    runtime_config_store = RuntimeConfigStore()
+    forced_model = (
+        runtime_config_store.resolve().qwen_model
+        if v3_model_budget
+        else None
+    )
+    manifest["forced_model"] = forced_model
     run_dir = (output_root / case.case_id / run_id).resolve()
     run_dir.mkdir(parents=True, exist_ok=False)
     _write_json(run_dir / "input_manifest.json", manifest)
@@ -365,8 +372,9 @@ async def run_case(
     engine = WorkflowEngine(
         repository,
         dataset_registry=registry,
-        runtime_config_store=RuntimeConfigStore(),
+        runtime_config_store=runtime_config_store,
         model_call_budget_mode=budget_mode,
+        forced_model=forced_model,
     )
     request = CreateRunRequest(
         mode="research",

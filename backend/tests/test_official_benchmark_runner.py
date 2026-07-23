@@ -35,11 +35,34 @@ from hypoweaver.official_benchmark_runner import (
     OfficialBenchmarkConfiguration,
     OfficialBenchmarkOrchestrator,
     _claim_decision,
+    _gate_hashes,
     _native_component_artifact_sha256,
     _receipts_from_usage,
     prepare_official_protocol,
 )
 from hypoweaver.seal import canonical_sha256
+
+
+def test_official_gate_hashes_match_workflow_gate_contract() -> None:
+    state = SimpleNamespace(
+        artifacts={
+            "claim_ledger": {"sha256": "a" * 64},
+            "research_run": {"sha256": "b" * 64},
+            "evidence_figure_bundle": {"sha256": "c" * 64},
+            "manuscript_package": {"sha256": "d" * 64},
+            "publication_figure_bundle": {"sha256": "e" * 64},
+        }
+    )
+
+    assert _gate_hashes(state, "H3") == {
+        "claim_ledger": "a" * 64,
+        "research_run": "b" * 64,
+        "evidence_figure_bundle": "c" * 64,
+    }
+    assert _gate_hashes(state, "H4") == {
+        "manuscript_package": "d" * 64,
+        "publication_figure_bundle": "e" * 64,
+    }
 
 
 class _FakeOfficialSystems:

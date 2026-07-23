@@ -1562,6 +1562,7 @@ class WorkflowEngine:
         *,
         model_call_limit: int = 20,
         model_call_budget_mode: ModelCallBudgetMode = "legacy",
+        forced_model: str | None = None,
     ) -> None:
         if not 1 <= model_call_limit <= 20:
             raise ValueError("model_call_limit must be between one and twenty")
@@ -1571,12 +1572,17 @@ class WorkflowEngine:
             raise ValueError(
                 f"{model_call_budget_mode} model call budget uses a frozen envelope"
             )
+        if forced_model is not None:
+            forced_model = forced_model.strip()
+            if not forced_model:
+                raise ValueError("forced_model must be non-empty when provided")
         self.repository = repository
         self.dataset_registry = dataset_registry or DatasetRegistry()
         self.runtime_config_store = runtime_config_store
         self.visualization_renderer = visualization_renderer
         self.model_call_limit = model_call_limit
         self.model_call_budget_mode = model_call_budget_mode
+        self.forced_model = forced_model
         self.model_call_provider_attempt_limit = (
             V2_PROVIDER_ATTEMPT_BUDGET
             if model_call_budget_mode == "v2"
@@ -1596,6 +1602,9 @@ class WorkflowEngine:
             )
         )
         self._model_budgets: dict[str, ModelCallBudget] = {}
+
+    def _model_for_role(self, default_model: str) -> str:
+        return self.forced_model or default_model
 
     def _model_budget(self, state: RunState) -> ModelCallBudget:
         existing = self._model_budgets.get(state.id)
@@ -1636,6 +1645,7 @@ class WorkflowEngine:
     def _gateway(self, state: RunState) -> ModelGateway:
         return (
             QwenModelGateway(
+                model_override=self.forced_model,
                 budget=self._model_budget(state),
                 config_store=self.runtime_config_store,
             )
@@ -1646,7 +1656,7 @@ class WorkflowEngine:
     def _reviewer_gateway(self, state: RunState) -> ModelGateway:
         if state.model_provider == "qwen":
             return QwenModelGateway(
-                model_override=REVIEWER_MODEL,
+                model_override=self._model_for_role(REVIEWER_MODEL),
                 budget=self._model_budget(state),
                 config_store=self.runtime_config_store,
             )
@@ -2433,7 +2443,9 @@ class WorkflowEngine:
                 else:
                     retry_gateway = (
                         QwenModelGateway(
-                            model_override=DESIGN_RETRY_MODEL,
+                            model_override=self._model_for_role(
+                                DESIGN_RETRY_MODEL
+                            ),
                             budget=self._model_budget(state),
                             config_store=self.runtime_config_store,
                         )
@@ -3778,7 +3790,9 @@ class WorkflowEngine:
             payload = {
                 "dimensions": missing,
                 "reviewer_policy": (
-                    f"qwen:{REVIEWER_MODEL}:paired-dimension-batch"
+                    "qwen:"
+                    f"{self._model_for_role(REVIEWER_MODEL)}:"
+                    "paired-dimension-batch"
                     if state.model_provider == "qwen"
                     else "fixture:paired-dimension-batch"
                 ),
@@ -6340,9 +6354,12 @@ class WorkflowEngine:
             feedback_by_id = feedback_by_id or {}
             section_gateway = gateway
             if feedback_by_id and getattr(gateway, "provider_name", None) == "qwen":
+                escalation_model = self._model_for_role(
+                    WRITER_ESCALATION_MODEL
+                )
                 if escalated_gateway is None:
                     escalated_gateway = QwenModelGateway(
-                        model_override=WRITER_ESCALATION_MODEL,
+                        model_override=escalation_model,
                         budget=self._model_budget(state),
                         config_store=self.runtime_config_store,
                     )
@@ -6358,7 +6375,7 @@ class WorkflowEngine:
                 for request in requests:
                     request["section_spec"]["writer_model_policy"] = {
                         "tier": "escalated_after_quality_failure",
-                        "model": WRITER_ESCALATION_MODEL,
+                        "model": escalation_model,
                     }
             section_specs = []
             for request in requests:

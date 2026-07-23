@@ -790,8 +790,8 @@ def _gate_hashes(state: RunState, gate: str) -> dict[str, str]:
     keys = {
         "H1": ("research_package",),
         "H2": ("design_arena", "analysis_plan", "critic_report"),
-        "H3": ("claim_ledger", "research_run"),
-        "H4": ("manuscript_package",),
+        "H3": ("claim_ledger", "research_run", "evidence_figure_bundle"),
+        "H4": ("manuscript_package", "publication_figure_bundle"),
     }[gate]
     return {
         key: str(state.artifacts[key]["sha256"])
