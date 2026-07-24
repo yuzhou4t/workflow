@@ -38,14 +38,14 @@
 
 ### 1.2 本地启动与基础验证
 
+Windows 11 接手者先完整执行主 [`README.md`](README.md) 的“Windows 11 从零安装与本地启动”。
+仓库要求 Python 3.11 或 3.12、Node.js 20.19+；不要在 WSL 中固定寻找名为
+`python3.11` 的命令。完成依赖安装并激活 `.venv` 后，统一使用：
+
 ```bash
-git clone https://github.com/yuzhou4t/workflow.git
-cd workflow
-python3.11 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r backend/requirements.txt
-npm ci
-PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v
+source .venv/bin/activate
+export PYTHONPATH=backend/src
+python -m unittest discover -s backend/tests -v
 npm test
 npm run build
 ```
@@ -53,8 +53,8 @@ npm run build
 启动三个本地服务：
 
 ```bash
-PYTHONPATH=backend/src .venv/bin/python -m uvicorn hypoweaver.api:app --port 8000
-PYTHONPATH=backend/src .venv/bin/python -m uvicorn hypoweaver.research_api:app --port 9000
+python -m uvicorn hypoweaver.api:app --port 8000
+python -m uvicorn hypoweaver.research_api:app --port 9000
 npm run dev -- --port 5174
 ```
 
@@ -84,7 +84,7 @@ npm run dev -- --port 5174
 假设生成或科研绘图。
 
 开始前请完整阅读 README.md 与 README_NEXT_STEPS.md，并先检查 git status。
-按 README 的从零安装命令配置 Python 3.11、Node.js 和依赖；没有 API Key
+按 README 的从零安装命令配置 Python 3.11/3.12、Node.js 和依赖；没有 API Key
 或真实案例时，只运行离线单元测试、生产构建和 Fixture，不得伪造实证结果。
 
 必须遵守：
@@ -400,7 +400,9 @@ citation_passage_ids
 任何提交都必须先运行：
 
 ```bash
-PYTHONPATH=backend/src python3.11 -m unittest discover -s backend/tests -v
+source .venv/bin/activate
+export PYTHONPATH=backend/src
+python -m unittest discover -s backend/tests -v
 npm test
 npm run build
 git diff --check
