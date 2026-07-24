@@ -4,6 +4,23 @@
 
 新同学接手时，请先阅读 [`README_NEXT_STEPS.md`](README_NEXT_STEPS.md)。其中写明当前架构、真实案例暴露的不足、下一阶段任务拆分、代码入口与逐项验收标准。
 
+## 四人任务与六系统测试入口
+
+本项目只使用这一个公开仓库。Case 测试和前端任务的说明统一放在
+[`student-ops/`](student-ops/README.md)，不再需要另一个任务仓库：
+
+| 分工 | 任务书 |
+|---|---|
+| Case 005：完整六系统测试 | [`student-ops/assignments/CASE_005.md`](student-ops/assignments/CASE_005.md) |
+| Case 007：完整六系统测试 | [`student-ops/assignments/CASE_007.md`](student-ops/assignments/CASE_007.md) |
+| Case 009：修复后完整六系统重跑 | [`student-ops/assignments/CASE_009.md`](student-ops/assignments/CASE_009.md) |
+| HypoWeaver 前端 UI | [`student-ops/assignments/FRONTEND_UI.md`](student-ops/assignments/FRONTEND_UI.md) |
+
+Case 同学在 Windows 11 上先按
+[`student-ops/docs/STUDENT_RUNBOOK_ZH.md`](student-ops/docs/STUDENT_RUNBOOK_ZH.md)
+让自己的 AI 配置 WSL2 环境并生成环境报告。当前只做环境准备；正式 release、本人负责的
+可见案例包和授权材料由负责人后续私发并明确解锁。
+
 当前第一版优先验证一条可信的核心闭环：
 
 ```text
@@ -56,7 +73,8 @@
 - Python 3.11 或 3.12；
 - Node.js 20.19+；
 - Git；
-- 仅运行本工作流时不需要 Docker。执行 SixBench 六系统隔离测试时，另按 [`sixbench-student-ops`](https://github.com/yuzhou4t/sixbench-student-ops) 的任务书安装 Docker Desktop。
+- 仅运行本工作流时不需要 Docker。执行 SixBench 六系统隔离测试时，另按
+  [`student-ops`](student-ops/README.md) 中的任务书安装 Docker Desktop。
 
 ### 第 1 步：安装 WSL2 和 Ubuntu
 
