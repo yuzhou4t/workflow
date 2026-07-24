@@ -1,0 +1,25 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Never commit credentials or machine-bound authorization material.
+.env
+.env.*
+!.env.example
+secrets/
+runtime-config.json
+release-package.json
+*-authorization-manifest.json
+*-authorization-receipt.json
+*-release-lock.json
+
+# Case data and generated benchmark artifacts travel through the approved channel.
+case-bundles/
+student-reports/
+benchmark-results*/
+artifacts/
+*.tar
+*.tar.gz
+*.zip

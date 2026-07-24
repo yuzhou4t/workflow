@@ -1,0 +1,55 @@
+{
+  "schema_version": "sixbench-student-assignments-v2",
+  "cases": {
+    "005": {
+      "case_id": "case_005_agri_green_finance",
+      "title_zh": "农业绿色金融",
+      "track": "validation",
+      "assignment_state": "environment_setup_only_until_new_release",
+      "minimum_release_sequence": 11,
+      "execution_mode": "validation_matrix",
+      "external_execution_allowed": true,
+      "expected_external_cells": 24,
+      "assignment": "独立完成六系统、双视图、双榜单 Validation 矩阵并汇报异常",
+      "local_tests": [
+        "tests/test_validation_contracts.py",
+        "tests/test_common_executor.py",
+        "tests/test_outbound_authorization.py"
+      ]
+    },
+    "007": {
+      "case_id": "case_007_digital_green_finance_resilience",
+      "title_zh": "数字绿色金融韧性",
+      "track": "validation",
+      "assignment_state": "environment_setup_only_until_new_release",
+      "minimum_release_sequence": 11,
+      "execution_mode": "validation_matrix",
+      "external_execution_allowed": true,
+      "expected_external_cells": 24,
+      "assignment": "独立完成六系统、双视图、双榜单空间方法 Validation 矩阵并汇报异常",
+      "local_tests": [
+        "tests/test_validation_contracts.py",
+        "tests/test_common_executor.py",
+        "tests/test_outbound_authorization.py"
+      ]
+    },
+    "009": {
+      "case_id": "case_009_gfri_air_quality",
+      "title_zh": "绿色金融改革创新试验区与空气质量",
+      "track": "validation_refreeze_required",
+      "assignment_state": "waiting_for_post_repair_release",
+      "minimum_release_sequence": 11,
+      "execution_mode": "validation_matrix",
+      "external_execution_allowed": true,
+      "expected_external_cells": 24,
+      "assignment": "在修复后的新不可变版本上独立重跑完整六系统 Validation 矩阵，不继承旧运行",
+      "local_tests": [
+        "tests/test_validation_contracts.py",
+        "tests/test_common_executor.py",
+        "tests/test_outbound_authorization.py",
+        "tests/test_case008_case009_contract.py",
+        "tests/test_discovery_control_selection.py"
+      ]
+    }
+  }
+}
