@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="night">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>新建 / 配置 · 重做原型</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/src/theme.css" />
+<link rel="stylesheet" href="/src/styles.css" />
+<link rel="stylesheet" href="/src/execution.css" />
+<link rel="stylesheet" href="/src/views.css" />
+<style>
+  body { margin: 0; background: var(--surface-bg); }
+
+  /* 悬浮控制 */
+  .rp-ctl { position: fixed; right: 18px; bottom: 18px; z-index: 200; display: flex; gap: 8px; }
+  .rp-ctl button { font-family: var(--font-sans); font-size: 12px; font-weight: 600; padding: 9px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--hairline-strong); background: var(--surface); color: var(--text); }
+  .rp-ctl button.on { background: var(--brand); color: var(--on-accent); border-color: var(--brand); }
+
+  .rp-page { height: calc(100vh - 60px); overflow: hidden; }
+  .rp-page[hidden] { display: none; }
+  .rp-eyebrow { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--text-faint); font-weight: 600; }
+  .rp-title { font-family: var(--font-serif); font-weight: 500; letter-spacing: -.02em; color: var(--text); }
+  .rp-sub { color: var(--text-muted); font-size: 14px; line-height: 1.6; }
+
+  /* ===== 新建 · 极简开始页 ===== */
+  .rp-new { display: grid; grid-template-columns: 1.55fr 1fr; height: 100%; }
+  .rp-new__main { padding: 44px 48px; display: flex; flex-direction: column; min-width: 0; }
+  .rp-new__aside { border-left: 1px solid var(--hairline); padding: 40px 34px; display: flex; flex-direction: column; gap: 28px; overflow-y: auto; }
+  .rp-new .rp-title { font-size: 40px; line-height: 1.08; margin: 12px 0 8px; }
+
+  .rp-drop { margin-top: 30px; border: 1.5px dashed var(--hairline-strong); border-radius: var(--radius-lg); padding: 34px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; background: var(--surface); transition: border-color .18s, background .18s; }
+  .rp-drop:hover { border-color: var(--brand); }
+  .rp-drop .ic { width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); }
+  .rp-drop b { font-size: 16px; color: var(--text); }
+  .rp-drop span { font-size: 12px; color: var(--text-muted); max-width: 420px; line-height: 1.6; }
+  .rp-drop .primary-button { margin-top: 4px; }
+
+  .rp-engines { margin-top: 26px; }
+  .rp-engines .rp-eyebrow { margin-bottom: 8px; }
+  .rp-engine { display: grid; grid-template-columns: 20px 1fr auto; gap: 14px; align-items: center; padding: 15px 12px; border-bottom: 1px solid var(--hairline); border-radius: 10px; cursor: pointer; }
+  .rp-engine:hover { background: var(--surface-2); }
+  .rp-engine.on { background: var(--brand-soft); border-bottom-color: transparent; }
+  .rp-engine input { accent-color: var(--brand); width: 16px; height: 16px; margin: 0; }
+  .rp-engine b { font-size: 14px; color: var(--text); }
+  .rp-engine small { display: block; font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+  .rp-engine em { font-style: normal; font-size: 11px; color: var(--text-faint); }
+
+  .rp-constraints { margin-top: auto; display: flex; gap: 28px; padding-top: 22px; border-top: 1px solid var(--hairline); }
+  .rp-constraints div { min-width: 0; }
+  .rp-constraints strong { display: block; font-size: 12px; color: var(--text); }
+  .rp-constraints small { font-size: 11px; color: var(--text-muted); }
+  .rp-foot { margin-top: 18px; }
+  .rp-foot a { font-size: 13px; color: var(--text-muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
+  .rp-run { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--hairline); cursor: pointer; }
+  .rp-run:first-of-type { border-top: 0; }
+  .rp-run:hover .rn { color: var(--brand); }
+  .rp-run .rn { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rp-run .stt { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+  .rp-run.wait .stt { color: var(--attention); } .rp-run.done .stt { color: var(--positive); }
+  .rp-run .pl { grid-column: 1/3; height: 2px; border-radius: 2px; background: var(--hairline); overflow: hidden; }
+  .rp-run .pl i { display: block; height: 100%; background: var(--brand); opacity: .7; }
+  .rp-svc { display: grid; gap: 10px; }
+  .rp-svc div { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--text-muted); }
+  .rp-svc i { width: 8px; height: 8px; border-radius: 50%; background: var(--positive); box-shadow: 0 0 0 3px color-mix(in srgb, var(--positive) 20%, transparent); }
+  .rp-svc i.off { background: var(--text-faint); box-shadow: none; }
+  .rp-svc b { color: var(--text); font-weight: 600; }
+
+  /* ===== 配置 · 单屏优雅设置页 ===== */
+  .rp-set { height: 100%; overflow-y: auto; padding: 40px 48px 30px; max-width: 1200px; margin: 0 auto; }
+  .rp-set__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+  .rp-set .rp-title { font-size: 30px; margin: 10px 0 4px; }
+  .rp-keypath { display: flex; align-items: center; gap: 10px; margin: 20px 0 6px; padding: 12px 14px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); background: var(--surface-2); font-size: 12px; color: var(--text-muted); }
+  .rp-keypath code { color: var(--brand); font-family: var(--font-mono); }
+  .rp-keypath button { margin-left: auto; }
+  .rp-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 44px; margin-top: 24px; }
+  .rp-group { display: grid; align-content: start; gap: 14px; }
+  .rp-group > header { display: flex; align-items: center; gap: 11px; padding-bottom: 12px; border-bottom: 1px solid var(--hairline); }
+  .rp-group .gi { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-2); color: var(--text-muted); }
+  .rp-group h2 { font-family: var(--font-serif); font-weight: 500; font-size: 17px; color: var(--text); }
+  .rp-state { font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+  .rp-state.ready { color: var(--positive); } .rp-state.warn { color: var(--attention); }
+  .rp-field { display: grid; gap: 7px; }
+  .rp-field > span { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+  .rp-field small { font-size: 11px; color: var(--text-faint); }
+  .rp-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .rp-test { width: fit-content; }
+  .rp-token { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--hairline); display: grid; grid-template-columns: 1.4fr 1fr; gap: 24px 32px; align-items: end; }
+  .rp-token p { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin-top: 8px; }
+  .rp-token code { color: var(--brand); font-family: var(--font-mono); font-size: 11px; }
+  .rp-set__actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--hairline); }
+  .rp-result { margin-right: auto; font-size: 12.5px; color: var(--positive); }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <button class="brand" type="button"><span class="brand__mark">R</span><span><strong>Research Bench</strong><small>实证工作流对照台</small></span></button>
+  <nav aria-label="主要导航"><button type="button" class="is-active" id="navNew">新建</button><button type="button">运行记录</button><button type="button" id="navSet">配置</button></nav>
+  <div class="header-actions"><button class="theme-toggle" type="button" id="hd">☾</button><button class="config-summary" type="button"><span class="status-dot is-ready"></span>服务已就绪</button></div>
+</header>
+
+<!-- ===== 新建 · 极简开始页 ===== -->
+<main class="rp-page rp-new" id="pageNew">
+  <div class="rp-new__main">
+    <p class="rp-eyebrow">Research Bench</p>
+    <h1 class="rp-title">开始一次假设验证</h1>
+    <p class="rp-sub">选择一个案例文件夹，系统只上传主 CSV、自动隔离论文与代码，并直接停在 H1 研究边界确认。</p>
+
+    <div class="rp-drop">
+      <span class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16M12 4v12m0 0 4-4m-4 4-4-4"/></svg></span>
+      <b>选择案例文件夹并启动</b>
+      <span>或将案例文件夹拖到此处。PDF、脚本与 02_hidden_reference 等隐藏材料不会上传，仅显示隔离数量。</span>
+      <button type="button" class="primary-button">选择案例文件夹</button>
+    </div>
+
+    <div class="rp-engines">
+      <p class="rp-eyebrow">运行引擎</p>
+      <label class="rp-engine on">
+        <input type="radio" name="eng" checked />
+        <span><b>HypoWeaver-Qwen</b><small>反证优先的证据—主张编译器，H1–H4 人工闸门</small></span>
+        <em>主流程</em>
+      </label>
+      <label class="rp-engine">
+        <input type="radio" name="eng" />
+        <span><b>Agent Laboratory</b><small>外部基线，原生调度；科学状态默认不判定</small></span>
+        <em>对照基线</em>
+      </label>
+    </div>
+
+    <div class="rp-constraints">
+      <div><strong>同一案例</strong><small>同一份 CSV 与安全说明</small></div>
+      <div><strong>同一模型</strong><small>qwen3.7-plus</small></div>
+      <div><strong>结果隔离</strong><small>隐藏参考不进入流程</small></div>
+    </div>
+    <p class="rp-foot"><a>手动填写研究输入 →</a></p>
+  </div>
+
+  <aside class="rp-new__aside">
+    <div>
+      <p class="rp-eyebrow" style="margin-bottom:14px">最近运行</p>
+      <div class="rp-run"><span class="rn">企业ESG表现与短债长用</span><span class="stt done">已完成</span><span class="pl"><i style="width:100%"></i></span></div>
+      <div class="rp-run wait"><span class="rn">绿色金融与省级可持续发展</span><span class="stt">H1 · 等待人工审核</span><span class="pl"><i style="width:20%"></i></span></div>
+      <div class="rp-run"><span class="rn">绿色信贷与高污染企业</span><span class="stt">H3 · 运行中</span><span class="pl"><i style="width:78%"></i></span></div>
+      <div class="rp-run"><span class="rn">数字普惠绿色金融韧性</span><span class="stt done">已完成</span><span class="pl"><i style="width:100%"></i></span></div>
+    </div>
+    <div>
+      <p class="rp-eyebrow" style="margin-bottom:14px">服务状态</p>
+      <div class="rp-svc">
+        <div><i></i><b>千问模型</b> · qwen3.7-plus 已配置</div>
+        <div><i class="off"></i><b>Python 执行器</b> · 真实研究前需配置</div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<!-- ===== 配置 · 单屏优雅设置页 ===== -->
+<main class="rp-page rp-set" id="pageSet" hidden>
+  <div class="rp-set__head">
+    <div><p class="rp-eyebrow">配置</p><h1 class="rp-title">模型与执行器</h1><p class="rp-sub">先配置服务，再开始真实研究；流程演示模式无需任何密钥。</p></div>
+    <button type="button" class="secondary-button">重新检测</button>
+  </div>
+
+  <div class="rp-keypath">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M10.85 12.15 19 4M18 5l2 2M15 8l2 2"/></svg>
+    密钥仅写入后端私有文件 <code>backend/var/runtime-config.json</code>（权限 0600），不回显浏览器；环境变量始终优先。
+    <button type="button" class="secondary-button">复制路径</button>
+  </div>
+
+  <div class="rp-groups">
+    <section class="rp-group">
+      <header><span class="gi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M10.85 12.15 19 4M18 5l2 2M15 8l2 2"/></svg></span><div><h2>千问模型</h2><span class="rp-state ready">已配置 · file</span></div></header>
+      <label class="rp-field"><span>API 密钥</span><input type="password" placeholder="已配置；留空表示不修改" /></label>
+      <div class="rp-row2"><label class="rp-field"><span>模型 ID</span><input value="qwen3.7-plus" /></label><label class="rp-field"><span>API 地址</span><input value="https://dashscope.aliyuncs.com/compatible-mode/v1" /></label></div>
+      <button type="button" class="test-button rp-test">测试千问连接</button>
+    </section>
+
+    <section class="rp-group">
+      <header><span class="gi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/></svg></span><div><h2>Python 研究执行器</h2><span class="rp-state warn">尚未配置地址</span></div></header>
+      <label class="rp-field"><span>执行器地址</span><input placeholder="http://127.0.0.1:9000" /></label>
+      <label class="rp-field"><span>执行器令牌</span><input type="password" placeholder="可选：RESEARCH_ENGINE_TOKEN" /></label>
+      <button type="button" class="test-button rp-test">测试执行器连接</button>
+    </section>
+  </div>
+
+  <div class="rp-token">
+    <label class="rp-field"><span>工作流访问令牌</span><input type="password" placeholder="输入后端 HYPOWEAVER_API_TOKEN" /></label>
+    <p><code>HYPOWEAVER_API_TOKEN</code> 只用于访问工作流后端，仅保存在当前标签页 sessionStorage，关闭即清除。</p>
+  </div>
+
+  <div class="rp-set__actions">
+    <span class="rp-result">连接成功 · 模型返回正常</span>
+    <button type="button" class="secondary-button">重置</button>
+    <button type="button" class="primary-button">保存配置</button>
+  </div>
+</main>
+
+<div class="rp-ctl">
+  <button type="button" id="tNew" class="on">新建</button>
+  <button type="button" id="tSet">配置</button>
+  <button type="button" id="tTheme">切换 日/夜</button>
+</div>
+
+<script>
+  const pageNew = document.getElementById('pageNew'), pageSet = document.getElementById('pageSet');
+  function show(which){
+    const isNew = which === 'new';
+    pageNew.hidden = !isNew; pageSet.hidden = isNew;
+    document.getElementById('tNew').classList.toggle('on', isNew);
+    document.getElementById('tSet').classList.toggle('on', !isNew);
+    document.getElementById('navNew').classList.toggle('is-active', isNew);
+    document.getElementById('navSet').classList.toggle('is-active', !isNew);
+  }
+  document.getElementById('tNew').onclick = () => show('new');
+  document.getElementById('tSet').onclick = () => show('set');
+  document.getElementById('navNew').onclick = () => show('new');
+  document.getElementById('navSet').onclick = () => show('set');
+  function flip(){const r=document.documentElement;const n=r.getAttribute('data-theme')==='night'?'day':'night';document.body.classList.add('theming');setTimeout(()=>document.body.classList.remove('theming'),600);r.setAttribute('data-theme',n);document.getElementById('hd').textContent=n==='night'?'☾':'☀';}
+  document.getElementById('tTheme').onclick = flip; document.getElementById('hd').onclick = flip;
+  document.querySelectorAll('.rp-engine').forEach(e=>e.addEventListener('click',()=>{document.querySelectorAll('.rp-engine').forEach(x=>x.classList.remove('on'));e.classList.add('on');}));
+</script>
+</body>
+</html>

@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HypoWeaver 前端样式方案 · Style Gallery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Noto+Serif+SC:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+/* ============ 全局基础 ============ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-serif: "Fraunces", "Noto Serif SC", Georgia, serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+html, body { height: 100%; }
+body {
+  font-family: var(--font-sans);
+  background: #0b0d12;
+  color: #e7e7ea;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============ 顶部切换器 ============ */
+.picker {
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 14px 24px;
+  background: rgba(13,15,20,.9);
+  border-bottom: 1px solid #23262f;
+  backdrop-filter: blur(10px);
+}
+.picker .title { font-weight: 800; font-size: 15px; letter-spacing: -.01em; }
+.picker .title small { display: block; font-weight: 500; font-size: 11px; color: #8b8f9a; }
+.picker .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.picker button {
+  cursor: pointer; font: inherit; font-size: 13px; font-weight: 600;
+  padding: 9px 15px; border-radius: 10px;
+  border: 1px solid #2b2f3a; background: #161922; color: #c7cad3;
+  transition: all .18s ease;
+}
+.picker button:hover { border-color: #3c4150; color: #fff; }
+.picker button.active { background: #fff; color: #111; border-color: #fff; }
+.picker .hint { flex-basis: 100%; font-size: 12px; color: #7c808b; }
+
+/* ============ 舞台 ============ */
+.stage { padding: 26px; }
+.frame {
+  --ink:#191919; --muted:#6d7280; --line:#e4e4e0; --panel:#ffffff; --bg:#f6f6f3;
+  --accent:#1f4b3f; --accent-2:#1f4b3f; --accent-ink:#1f4b3f;
+  --ok:#1f7a52; --warn:#9a6400; --danger:#a33a45; --radius:12px;
+  --hero-serif: var(--font-sans); --shadow: 0 1px 2px rgba(0,0,0,.04);
+  max-width: 1360px; margin: 0 auto; border-radius: 18px; overflow: hidden;
+  background: var(--bg); color: var(--ink);
+  border: 1px solid rgba(0,0,0,.06);
+  box-shadow: 0 30px 80px -30px rgba(0,0,0,.6);
+}
+
+/* ---- topbar ---- */
+.topbar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 22px; height: 62px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 11px; }
+.brand .mark {
+  width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
+  background: var(--accent); color: #fff; font-weight: 800; font-size: 15px;
+}
+.brand b { font-size: 15px; letter-spacing: -.01em; display: block; }
+.brand span { font-size: 11px; color: var(--muted); }
+.nav { display: flex; gap: 4px; margin-left: 14px; }
+.nav a {
+  padding: 8px 14px; border-radius: 9px; font-size: 13px; font-weight: 600;
+  color: var(--muted); text-decoration: none; cursor: pointer;
+}
+.nav a.on { background: var(--accent); color: #fff; }
+.top-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600;
+  padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--muted);
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.btn {
+  cursor: pointer; font: inherit; font-size: 13px; font-weight: 650;
+  padding: 9px 15px; border-radius: 10px; border: 1px solid transparent;
+  background: var(--accent); color: #fff; display: inline-flex; align-items: center; gap: 7px;
+}
+.btn.ghost { background: transparent; border-color: var(--line); color: var(--ink); }
+
+/* ---- layout ---- */
+.body { display: grid; grid-template-columns: 232px 1fr; min-height: 720px; }
+.side { padding: 18px 14px; border-right: 1px solid var(--line); background: var(--panel); }
+.side .side-h { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px 12px; }
+.side .side-h b { font-size: 12px; }
+.side .side-h a { font-size: 11px; color: var(--accent-ink); cursor: pointer; text-decoration: none; font-weight: 700; }
+.run-item {
+  display: grid; gap: 5px; padding: 12px 11px; border-radius: 11px; cursor: pointer; margin-bottom: 4px;
+  border: 1px solid transparent;
+}
+.run-item:hover { background: var(--bg); }
+.run-item.on { background: var(--bg); border-color: var(--line); box-shadow: var(--shadow); }
+.run-item .rn { font-size: 12.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.run-item .rm { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+.tag.run { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.tag.wait { color: var(--warn); }
+.tag.done { color: var(--ok); }
+
+.main { padding: 26px 30px; min-width: 0; }
+.hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.hero h1 { font-family: var(--hero-serif); font-size: 30px; line-height: 1.15; letter-spacing: -.02em; margin: 8px 0 6px; }
+.hero p { font-size: 13px; color: var(--muted); }
+.hero .actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* ---- metric cards ---- */
+.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 22px 0; }
+.stat { padding: 16px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.stat .lbl { font-size: 11px; color: var(--muted); font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.stat .val { font-family: var(--font-mono); font-size: 26px; font-weight: 700; margin-top: 8px; letter-spacing: -.02em; }
+.stat .val small { font-size: 13px; color: var(--muted); font-weight: 500; }
+.stat .bar { height: 6px; border-radius: 4px; background: var(--bg); margin-top: 10px; overflow: hidden; }
+.stat .bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.spark { display: flex; align-items: flex-end; gap: 3px; height: 26px; margin-top: 10px; }
+.spark i { flex: 1; background: color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 2px 2px 0 0; }
+
+/* ---- pipeline ---- */
+.section-title { display: flex; align-items: center; justify-content: space-between; margin: 26px 0 14px; }
+.section-title h2 { font-size: 16px; letter-spacing: -.01em; }
+.section-title span { font-size: 11px; color: var(--muted); }
+.pipe { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.lane { padding: 18px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.lane-h { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.badge { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-size: 11px; font-weight: 800; border: 1px solid var(--accent); color: var(--accent-ink); }
+.badge.al { border-color: var(--muted); color: var(--muted); }
+.lane-h b { font-size: 14px; }
+.lane-h .st { margin-left: auto; font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.lane-h .st.run { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+
+.steps { display: grid; gap: 2px; }
+.step { display: grid; grid-template-columns: 26px 1fr auto; gap: 11px; align-items: center; padding: 9px 4px; position: relative; }
+.step .node {
+  width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  border: 1.5px solid var(--line); background: var(--panel); font-size: 10px; font-weight: 800; color: var(--muted);
+  z-index: 1;
+}
+.step:not(:last-child)::before { content: ""; position: absolute; left: 12px; top: 26px; bottom: -4px; width: 1.5px; background: var(--line); }
+.step.done .node { background: var(--accent); border-color: var(--accent); color: #fff; }
+.step.done::before { background: var(--accent); }
+.step.active .node { border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+.step.wait .node { border-color: var(--warn); color: var(--warn); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 16%, transparent); }
+.step .txt b { font-size: 12.5px; font-weight: 600; display: block; }
+.step .txt small { font-size: 11px; color: var(--muted); }
+.step .g { font-size: 10px; font-weight: 800; color: var(--muted); }
+.step.active .g { color: var(--accent-ink); }
+.step.wait .g { color: var(--warn); }
+
+.gatecard { margin-top: 14px; padding: 14px; border-radius: 11px; border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--panel)); }
+.gatecard b { font-size: 12.5px; color: color-mix(in srgb, var(--warn) 80%, #000); display: block; margin-bottom: 4px; }
+.gatecard p { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.gatecard .g-actions { display: flex; gap: 8px; margin-top: 12px; }
+.gatecard .g-actions button { cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 650; padding: 7px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.gatecard .g-actions button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ---- claims / manuscript ---- */
+.grid2 { display: grid; grid-template-columns: 1.15fr .85fr; gap: 16px; margin-top: 16px; }
+.claim { padding: 13px 14px; border-radius: 11px; border: 1px solid var(--line); background: var(--panel); margin-bottom: 10px; box-shadow: var(--shadow); }
+.claim .ch { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.claim .ch b { font-size: 11px; font-weight: 800; color: var(--ok); }
+.claim .ch small { font-size: 10px; color: var(--muted); margin-left: auto; }
+.claim p { font-size: 12.5px; line-height: 1.55; }
+.paper { padding: 18px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.paper h3 { font-family: var(--hero-serif); font-size: 15px; margin-bottom: 4px; }
+.paper .meta { font-size: 10.5px; color: var(--muted); margin-bottom: 12px; }
+.paper .txt { font-family: var(--font-serif); font-size: 12.5px; line-height: 1.85; color: color-mix(in srgb, var(--ink) 88%, transparent); }
+.paper .sec { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 12px 0 4px; }
+
+/* ============ 主题 A · 学术编辑部 ============ */
+.frame[data-theme="editorial"] {
+  --bg:#f7f4ec; --panel:#fffdf8; --ink:#20211d; --muted:#7a766b; --line:#e6e0d3;
+  --accent:#1f4b3f; --accent-2:#1f4b3f; --accent-ink:#1f4b3f;
+  --ok:#1f7a52; --warn:#9a6400; --danger:#a33a45; --radius:10px;
+  --hero-serif: var(--font-serif); --shadow: none;
+  background-image: none;
+}
+.frame[data-theme="editorial"] .metrics .stat,
+.frame[data-theme="editorial"] .lane,
+.frame[data-theme="editorial"] .paper { box-shadow: none; }
+.frame[data-theme="editorial"] .hero h1 { font-weight: 600; }
+
+/* ============ 主题 B · 指挥中心（暗色） ============ */
+.frame[data-theme="control"] {
+  --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e; --line:#232a33;
+  --accent:#34d399; --accent-2:#22d3ee; --accent-ink:#34d399;
+  --ok:#34d399; --warn:#fbbf24; --danger:#f87171; --radius:12px;
+  --hero-serif: var(--font-sans); --shadow: 0 6px 20px -12px rgba(0,0,0,.7);
+  border-color: #1f242c;
+  background-image: radial-gradient(900px 400px at 80% -10%, rgba(34,211,238,.10), transparent 60%);
+}
+.frame[data-theme="control"] .mark { box-shadow: 0 0 22px -4px var(--accent); }
+.frame[data-theme="control"] .nav a.on,
+.frame[data-theme="control"] .btn { color: #08130d; }
+.frame[data-theme="control"] .badge { background: rgba(52,211,153,.08); }
+.frame[data-theme="control"] .dot { box-shadow: 0 0 10px 1px var(--ok); }
+.frame[data-theme="control"] .stat .val { color: var(--accent); text-shadow: 0 0 20px rgba(52,211,153,.25); }
+.frame[data-theme="control"] .step.active .node { box-shadow: 0 0 0 4px rgba(52,211,153,.18), 0 0 16px rgba(52,211,153,.4); }
+.frame[data-theme="control"] .spark i { background: linear-gradient(180deg, var(--accent-2), var(--accent)); }
+
+/* ============ 主题 C · 极光玻璃 ============ */
+.frame[data-theme="aurora"] {
+  --bg:transparent; --panel:rgba(255,255,255,.62); --ink:#152033; --muted:#5b6b82; --line:rgba(255,255,255,.7);
+  --accent:#0ea5a0; --accent-2:#6366f1; --accent-ink:#0b7d78;
+  --ok:#0f9d76; --warn:#c2820b; --danger:#e0576b; --radius:16px;
+  --hero-serif: var(--font-sans); --shadow: 0 14px 40px -18px rgba(20,60,90,.35);
+  background:
+    radial-gradient(700px 500px at 12% 8%, rgba(45,212,191,.55), transparent 55%),
+    radial-gradient(760px 560px at 88% 4%, rgba(129,140,248,.5), transparent 55%),
+    radial-gradient(700px 620px at 70% 100%, rgba(56,189,248,.45), transparent 55%),
+    linear-gradient(135deg, #eafaf3, #eef1ff);
+}
+.frame[data-theme="aurora"] .topbar,
+.frame[data-theme="aurora"] .side,
+.frame[data-theme="aurora"] .stat,
+.frame[data-theme="aurora"] .lane,
+.frame[data-theme="aurora"] .claim,
+.frame[data-theme="aurora"] .paper,
+.frame[data-theme="aurora"] .pill { backdrop-filter: blur(16px) saturate(1.3); -webkit-backdrop-filter: blur(16px) saturate(1.3); }
+.frame[data-theme="aurora"] .topbar { background: rgba(255,255,255,.5); border-color: rgba(255,255,255,.6); }
+.frame[data-theme="aurora"] .side { background: rgba(255,255,255,.42); }
+.frame[data-theme="aurora"] .btn { background: linear-gradient(120deg, var(--accent), var(--accent-2)); box-shadow: 0 8px 20px -8px rgba(14,165,160,.6); }
+.frame[data-theme="aurora"] .badge { background: rgba(255,255,255,.55); }
+.frame[data-theme="aurora"] .mark { background: linear-gradient(120deg, var(--accent), var(--accent-2)); }
+
+/* ============ 主题 D · 现代产品台（Linear 风） ============ */
+.frame[data-theme="product"] {
+  --bg:#f7f8fb; --panel:#ffffff; --ink:#1c1f26; --muted:#6b7280; --line:#eceef2;
+  --accent:#6366f1; --accent-2:#8b5cf6; --accent-ink:#5b57e6;
+  --ok:#16a34a; --warn:#d97706; --danger:#e11d48; --radius:12px;
+  --hero-serif: var(--font-sans); --shadow: 0 1px 3px rgba(20,24,40,.06), 0 8px 24px -16px rgba(20,24,40,.25);
+}
+.frame[data-theme="product"] .hero h1 { font-weight: 800; }
+.frame[data-theme="product"] .btn { background: linear-gradient(120deg, var(--accent), var(--accent-2)); box-shadow: 0 6px 16px -8px rgba(99,102,241,.6); }
+.frame[data-theme="product"] .badge { background: color-mix(in srgb, var(--accent) 8%, #fff); }
+
+@media (max-width: 1080px) {
+  .metrics { grid-template-columns: repeat(2,1fr); }
+  .pipe, .grid2 { grid-template-columns: 1fr; }
+  .body { grid-template-columns: 1fr; }
+  .side { display: none; }
+}
+</style>
+</head>
+<body>
+<header class="picker">
+  <div class="title">HypoWeaver 前端样式方案<small>点击切换 · 同一套研究控制台在四种视觉风格下的效果</small></div>
+  <div class="tabs" id="tabs">
+    <button data-t="editorial" class="active">A · 学术编辑部</button>
+    <button data-t="control">B · 指挥中心（暗）</button>
+    <button data-t="aurora">C · 极光玻璃</button>
+    <button data-t="product">D · 现代产品台</button>
+  </div>
+  <div class="hint" id="hint">A · 学术编辑部：暖白纸感 + 衬线标题 + 松林绿点缀，出版级、克制、可信，最贴近当前极简基调的升级版。</div>
+</header>
+
+<div class="stage">
+  <div class="frame" data-theme="editorial" id="frame">
+    <!-- topbar -->
+    <div class="topbar">
+      <div class="brand">
+        <div class="mark">R</div>
+        <div><b>Research Bench</b><span>实证工作流对照台</span></div>
+      </div>
+      <nav class="nav">
+        <a>新建</a><a class="on">运行记录</a><a>配置</a>
+      </nav>
+      <div class="top-right">
+        <span class="pill"><span class="dot"></span>服务已就绪</span>
+        <button class="btn ghost">展开基线</button>
+        <button class="btn">选择新案例</button>
+      </div>
+    </div>
+
+    <div class="body">
+      <!-- sidebar -->
+      <aside class="side">
+        <div class="side-h"><b>运行记录</b><a>+ 新建</a></div>
+        <div class="run-item on">
+          <div class="rn">绿色金融与可持续发展</div>
+          <div class="rm"><span class="tag run">运行中</span> H2 · 2 分钟前</div>
+        </div>
+        <div class="run-item">
+          <div class="rn">绿色信贷与高污染企业</div>
+          <div class="rm"><span class="tag wait">待审核</span> H3 · 18 分钟前</div>
+        </div>
+        <div class="run-item">
+          <div class="rn">数字普惠绿色金融韧性</div>
+          <div class="rm"><span class="tag done">已完成</span> H4 · 1 小时前</div>
+        </div>
+        <div class="run-item">
+          <div class="rn">央行绿色沟通与金融市场</div>
+          <div class="rm"><span class="tag">待启动</span> — · 昨天</div>
+        </div>
+      </aside>
+
+      <!-- main -->
+      <main class="main">
+        <div class="hero">
+          <div>
+            <div class="eyebrow">当前案例</div>
+            <h1>绿色金融与可持续发展</h1>
+            <p>HypoWeaver 当前：执行模型与诊断 · 等待 H2 冻结分析计划</p>
+          </div>
+          <div class="actions">
+            <button class="btn ghost">删除记录</button>
+            <button class="btn">继续执行</button>
+          </div>
+        </div>
+
+        <!-- metrics -->
+        <div class="metrics">
+          <div class="stat">
+            <div class="lbl">◍ 流程进度</div>
+            <div class="val">5<small>/8 阶段</small></div>
+            <div class="bar"><i style="width:62%"></i></div>
+          </div>
+          <div class="stat">
+            <div class="lbl">◍ 逻辑模型调用</div>
+            <div class="val">6<small>/9</small></div>
+            <div class="bar"><i style="width:66%"></i></div>
+          </div>
+          <div class="stat">
+            <div class="lbl">◍ Provider Attempt</div>
+            <div class="val">11<small>/20</small></div>
+            <div class="spark"><i style="height:40%"></i><i style="height:65%"></i><i style="height:50%"></i><i style="height:85%"></i><i style="height:70%"></i><i style="height:95%"></i><i style="height:60%"></i></div>
+          </div>
+          <div class="stat">
+            <div class="lbl">◍ 结论约束</div>
+            <div class="val">3<small>条 Claim</small></div>
+            <div class="bar"><i style="width:38%"></i></div>
+          </div>
+        </div>
+
+        <!-- pipeline -->
+        <div class="section-title"><h2>纵向执行链路</h2><span>同一案例 · 同一模型 · 独立运行</span></div>
+        <div class="pipe">
+          <section class="lane">
+            <div class="lane-h"><span class="badge">HW</span><b>HypoWeaver-Qwen</b><span class="st run">运行中</span></div>
+            <div class="steps">
+              <div class="step done"><div class="node">✓</div><div class="txt"><b>读取案例与规范化</b><small>SHA256 校验 · 变量角色推断</small></div><div class="g">—</div></div>
+              <div class="step done"><div class="node">✓</div><div class="txt"><b>确认研究边界</b><small>研究问题 · 样本边界</small></div><div class="g">H1</div></div>
+              <div class="step done"><div class="node">✓</div><div class="txt"><b>拆解假设与数据画像</b><small>并行执行</small></div><div class="g">—</div></div>
+              <div class="step done"><div class="node">✓</div><div class="txt"><b>方法路由与三候选设计</b><small>无结果 Probe · 四类 Reviewer</small></div><div class="g">—</div></div>
+              <div class="step wait"><div class="node">!</div><div class="txt"><b>冻结分析计划</b><small>请从可行候选中选择并冻结合同</small></div><div class="g">H2</div></div>
+              <div class="step active"><div class="node">●</div><div class="txt"><b>执行模型与数值复现</b><small>研究执行器 · 独立复算</small></div><div class="g">—</div></div>
+              <div class="step"><div class="node">7</div><div class="txt"><b>授权结论</b><small>确定性 Claim Gate</small></div><div class="g">H3</div></div>
+              <div class="step"><div class="node">8</div><div class="txt"><b>生成研究成果</b><small>Manuscript IR · 一致性审计</small></div><div class="g">H4</div></div>
+            </div>
+            <div class="gatecard">
+              <b>H2 · 请选择并冻结分析计划</b>
+              <p>Reviewer 只淘汰硬失败方案；请从可行候选中明确选择一个，批准后才冻结合同。</p>
+              <div class="g-actions">
+                <button>退回并编辑</button>
+                <button>拒绝并终止</button>
+                <button class="primary">批准并继续</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="lane">
+            <div class="lane-h"><span class="badge al">AL</span><b>Agent Laboratory</b><span class="st">运行中</span></div>
+            <div class="steps">
+              <div class="step done"><div class="node">✓</div><div class="txt"><b>形成研究计划</b><small>已完成</small></div><div class="g"></div></div>
+              <div class="step done"><div class="node">✓</div><div class="txt"><b>准备分析数据</b><small>已完成</small></div><div class="g"></div></div>
+              <div class="step active"><div class="node">●</div><div class="txt"><b>运行实验</b><small>执行模型生成代码</small></div><div class="g"></div></div>
+              <div class="step"><div class="node">4</div><div class="txt"><b>解释结果</b><small>尚未开始</small></div><div class="g"></div></div>
+              <div class="step"><div class="node">5</div><div class="txt"><b>生成研究报告</b><small>尚未开始</small></div><div class="g"></div></div>
+            </div>
+            <div class="grid2" style="grid-template-columns:1fr;margin-top:16px">
+              <div class="claim">
+                <div class="ch"><b>外部基线</b><small>scientific_status = not_assessed</small></div>
+                <p>基线保留原生调度；科学有效性不会由基线自行判定，不继承 HypoWeaver 的 Critic 与 ClaimLedger。</p>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- claims + manuscript -->
+        <div class="section-title"><h2>结论与论文初稿</h2><span>实证表述受 H3 授权结论约束</span></div>
+        <div class="grid2">
+          <div>
+            <div class="claim">
+              <div class="ch"><b>H3 已批准</b><small>associational · 支撑运行 2</small></div>
+              <p>在样本期内，绿色信贷强度与企业可持续发展绩效呈稳健正相关，双向固定效应下系数在 1% 水平显著。</p>
+            </div>
+            <div class="claim">
+              <div class="ch"><b>H3 已降级授权</b><small>descriptive · 需审慎表述</small></div>
+              <p>数字金融渗透与区域绿色投资存在正向关联；因识别条件不足，表述降级为相关性而非因果。</p>
+            </div>
+            <div class="claim">
+              <div class="ch" style="opacity:.7"><b style="color:var(--warn)">H3 已暂缓</b><small>证据不足</small></div>
+              <p>机制路径（融资约束缓解）暂缓授权，等待异质性与证伪检查补齐后再评估。</p>
+            </div>
+          </div>
+          <div class="paper">
+            <h3>论文初稿 · v2</h3>
+            <div class="meta">IR v1 · 8 节 · 一致性审计通过</div>
+            <div class="sec">01 · Abstract</div>
+            <div class="txt">本文基于 2013–2022 年省级面板，检验绿色金融发展对可持续发展绩效的影响。采用双向固定效应模型，并通过独立复算与数值容差复现审计验证结果稳健性……</div>
+            <div class="sec">05 · Empirical Results</div>
+            <div class="txt">核心解释变量系数为正且在 1% 水平显著；安慰剂检验与置换检验均未推翻基准结论。</div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</div>
+
+<script>
+  const hints = {
+    editorial: "A · 学术编辑部：暖白纸感 + 衬线标题 + 松林绿点缀，出版级、克制、可信，最贴近当前极简基调的升级版。",
+    control: "B · 指挥中心（暗）：深色数据面板 + 翠绿/青色荧光 + 等宽数字，适合实时监控多个并行实验，科技感强。",
+    aurora: "C · 极光玻璃：柔和渐变背景 + 毛玻璃卡片 + 圆润造型，最“赏心悦目”、最有产品感，适合演示与评审。",
+    product: "D · 现代产品台：Linear/Notion 风，中性底 + 靛紫强调色，干净利落、信息密度高，工程团队友好。"
+  };
+  const frame = document.getElementById('frame');
+  const hint = document.getElementById('hint');
+  document.getElementById('tabs').addEventListener('click', (e) => {
+    const btn = e.target.closest('button'); if (!btn) return;
+    document.querySelectorAll('#tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const t = btn.dataset.t;
+    frame.setAttribute('data-theme', t);
+    hint.textContent = hints[t];
+  });
+</script>
+</body>
+</html>

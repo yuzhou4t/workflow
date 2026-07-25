@@ -881,3 +881,18 @@ input::placeholder, textarea::placeholder { color: #9aa6b6; }
   .launcher-footer,
   .comparison-panel > header { align-items: flex-start; flex-direction: column; }
 }
+
+/* ===== 主题化顶栏（消费 design tokens；日/夜双模式 Stage 1） ===== */
+.app-header { background: var(--surface); border-bottom-color: var(--hairline-strong); }
+.brand { color: var(--text); }
+.brand small { color: var(--text-faint); }
+.brand__mark { background: var(--text); color: var(--surface); }
+.app-header nav button { color: var(--text-muted); }
+.app-header nav button:hover { color: var(--text); background: var(--surface-2); }
+.app-header nav button.is-active { color: var(--text); border-bottom-color: var(--brand); }
+.header-actions { justify-self: end; display: inline-flex; align-items: center; gap: 10px; }
+.theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--surface); color: var(--text-muted); transition: color .15s, background .15s, border-color .15s; }
+.theme-toggle:hover { color: var(--text); background: var(--surface-2); border-color: var(--text-faint); }
+.config-summary { border-color: var(--hairline-strong); background: var(--surface); color: var(--text-muted); }
+.status-dot { background: var(--text-faint); }
+.status-dot.is-ready { background: var(--brand); }

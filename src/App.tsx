@@ -4,6 +4,7 @@ import { ExecutionWorkspace } from './components/ExecutionWorkspace'
 import { PreflightPanel } from './components/PreflightPanel'
 import { ResearchBenchLauncher } from './components/ResearchBenchLauncher'
 import { ResearchInputForm } from './components/ResearchInputForm'
+import { RunHistoryList } from './components/RunHistoryList'
 import { SystemConfigPanel } from './components/SystemConfigPanel'
 import { demoResearchDraft, emptyResearchDraft, preflightResearch, type ResearchDraft } from './data/researchDraft'
 import { normalizeCaseSubmission, workflowApi } from './runtime/api'
@@ -78,24 +79,9 @@ export function App() {
     setBusyLabel('正在读取运行记录…')
     setError(null)
     workflowApi.listRuns()
-      .then(async (nextRuns) => {
+      .then((nextRuns) => {
         if (cancelled || requestId !== runRequestRef.current) return
         setRuns(nextRuns)
-        const preferredId = runIdRef.current && nextRuns.some((item) => item.id === runIdRef.current)
-          ? runIdRef.current
-          : nextRuns[0]?.id
-        if (!preferredId) {
-          setRun(null)
-          setBaselineRun(null)
-          return
-        }
-        const nextRun = await workflowApi.getRun(preferredId)
-        if (cancelled || requestId !== runRequestRef.current) return
-        const nextBaselines = await workflowApi.listAgentLaboratoryRuns(nextRun.caseId)
-        if (cancelled || requestId !== runRequestRef.current) return
-        runIdRef.current = nextRun.id
-        setRun(nextRun)
-        setBaselineRun(nextBaselines[0] ?? null)
       })
       .catch((reason) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason))
@@ -256,20 +242,15 @@ export function App() {
     if (!run) return
     const confirmed = window.confirm(`确定删除“${run.caseName}”这条运行记录吗？此操作不会删除案例数据文件。`)
     if (!confirmed) return
-    const restored = await withBusy('正在删除运行记录…', async () => {
+    const nextRuns = await withBusy('正在删除运行记录…', async () => {
       await workflowApi.deleteRun(run.id)
-      const nextRuns = await workflowApi.listRuns()
-      const nextRun = nextRuns[0] ? await workflowApi.getRun(nextRuns[0].id) : null
-      const nextBaselines = nextRun
-        ? await workflowApi.listAgentLaboratoryRuns(nextRun.caseId)
-        : []
-      return { nextRuns, nextRun, baselineRun: nextBaselines[0] ?? null }
+      return workflowApi.listRuns()
     })
-    if (!restored) return
-    setRuns(restored.nextRuns)
-    runIdRef.current = restored.nextRun?.id ?? null
-    setRun(restored.nextRun)
-    setBaselineRun(restored.baselineRun)
+    if (!nextRuns) return
+    setRuns(nextRuns)
+    runIdRef.current = null
+    setRun(null)
+    setBaselineRun(null)
   }
 
   async function decideGate(gate: string, input: GateDecisionInput) {
@@ -347,18 +328,32 @@ export function App() {
     if (nextView !== 'new') setShowPreflight(false)
   }
 
+  function showHistory() {
+    runIdRef.current = null
+    setRun(null)
+    setBaselineRun(null)
+    changeView('runs')
+  }
+
+  function backToHistory() {
+    runIdRef.current = null
+    setRun(null)
+    setBaselineRun(null)
+  }
+
   if (loading) return <main className="load-state"><span className="loading-mark" /><strong>正在连接代码工作流</strong><p>读取流程定义、配置状态与持久化运行记录…</p></main>
   if (!definition) return <main className="load-state load-state--error"><strong>无法连接工作流后端</strong><p>{error ?? '后端没有返回有效流程定义。'}</p><button type="button" onClick={() => window.location.reload()}>重新连接</button></main>
 
   return (
     <div className="app-shell">
-      <AppHeader view={view} config={config} onChangeView={changeView} />
+      <AppHeader view={view} config={config} onChangeView={changeView} onShowHistory={showHistory} />
       {error && <div className="error-banner" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>关闭</button></div>}
       {view === 'settings' && <SystemConfigPanel status={config} accessTokenPresent={accessTokenPresent} accessTokenVerified={accessTokenVerified} busy={busy} onRefresh={() => withBusy('正在重新读取配置状态…', refreshConfig).then(() => undefined)} onSetAccessToken={(token) => { workflowApi.setAccessToken(token); setAccessTokenPresent(workflowApi.hasAccessToken()); setAccessTokenVerified(false) }} onSave={saveConfig} onTest={testConnection} />}
       {view === 'new' && !showPreflight && !showAdvancedInput && <ResearchBenchLauncher config={config} importReport={importReport} busy={busy} busyLabel={busyLabel} compareOpen={compareOpen} onToggleCompare={() => setCompareOpen((current) => !current)} onImportCaseFolder={importCaseFolder} onOpenAdvanced={() => setShowAdvancedInput(true)} onOpenSettings={() => changeView('settings')} />}
       {view === 'new' && !showPreflight && showAdvancedInput && <ResearchInputForm draft={draft} config={config} importReport={importReport} busy={busy} onChange={setDraft} onLoadDemo={() => { setDraft(demoResearchDraft()); setImportReport(null) }} onImportCaseFile={(file) => importCaseFile(file, 'hypoweaver')} onOpenSettings={() => changeView('settings')} onCheck={() => setShowPreflight(true)} />}
       {view === 'new' && showPreflight && <PreflightPanel draft={draft} items={preflightItems} importReport={importReport} busy={busy} onBack={() => setShowPreflight(false)} onStart={startResearch} />}
-      {view === 'runs' && <ExecutionWorkspace definition={definition} run={run} runs={runs} baselineRun={baselineRun} compareOpen={compareOpen} caseReady={Boolean(draft.case.datasetRefs.length && (!run || draft.case.caseId === run.caseId) && (!baselineRun || draft.case.caseId === baselineRun.caseId))} busy={busy} busyLabel={busyLabel} onSelectRun={selectRun} onDeleteRun={() => void deleteRun()} onNewResearch={() => { setShowAdvancedInput(false); changeView('new') }} onToggleCompare={() => setCompareOpen((current) => !current)} onStartHypoweaver={startHypoweaver} onStartBaseline={() => startBaseline()} onOpenSettings={() => changeView('settings')} onGateDecision={decideGate} onSubmitRevision={submitGateRevision} onRetryWriting={retryWriting} />}
+      {view === 'runs' && !run && <RunHistoryList runs={runs} busy={busy} onSelectRun={selectRun} onNewResearch={() => { setShowAdvancedInput(false); changeView('new') }} />}
+      {view === 'runs' && run && <ExecutionWorkspace definition={definition} run={run} runs={runs} baselineRun={baselineRun} compareOpen={compareOpen} caseReady={Boolean(draft.case.datasetRefs.length && (!run || draft.case.caseId === run.caseId) && (!baselineRun || draft.case.caseId === baselineRun.caseId))} busy={busy} busyLabel={busyLabel} onSelectRun={selectRun} onBackToHistory={backToHistory} onDeleteRun={() => void deleteRun()} onNewResearch={() => { setShowAdvancedInput(false); changeView('new') }} onToggleCompare={() => setCompareOpen((current) => !current)} onStartHypoweaver={startHypoweaver} onStartBaseline={() => startBaseline()} onOpenSettings={() => changeView('settings')} onGateDecision={decideGate} onSubmitRevision={submitGateRevision} onRetryWriting={retryWriting} />}
     </div>
   )
 }

@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HypoWeaver · 单屏工作流方案(bymonolog 暖色单色)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --fs:"Inter","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --fd:"Space Grotesk","PingFang SC",sans-serif;
+  --fm:"JetBrains Mono",monospace;
+  --bg:#0e0d0c; --panel:#161311; --panel2:#1e1a16; --panel3:#252019;
+  --line:rgba(232,232,227,.10); --line2:rgba(232,232,227,.18);
+  --bone:#e8e8e3; --stone:#d1d1c7; --muted:#9a958d; --faint:#6b645c;
+  --amber:#d0a05a; --ok:#b9c2a8;
+}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--fs);background:#000;color:var(--bone);-webkit-font-smoothing:antialiased}
+/* film grain */
+body::after{content:"";position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:.05;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+/* meta switcher */
+.meta{position:fixed;top:0;left:0;right:0;height:46px;z-index:100;display:flex;align-items:center;gap:14px;
+  padding:0 18px;background:#0a0908;border-bottom:1px solid var(--line)}
+.meta b{font-family:var(--fd);font-size:13px;font-weight:600;letter-spacing:.02em}
+.meta b small{color:var(--faint);font-weight:400;margin-left:8px;font-family:var(--fs)}
+.meta .tabs{margin-left:auto;display:flex;gap:6px}
+.meta button{font:inherit;font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--line2);background:transparent;color:var(--muted);transition:.16s}
+.meta button:hover{color:var(--bone);border-color:var(--bone)}
+.meta button.on{background:var(--bone);color:#111;border-color:var(--bone)}
+
+/* app frame */
+.app{position:fixed;inset:46px 0 0 0;background:
+  radial-gradient(900px 500px at 80% -10%,rgba(208,160,90,.06),transparent 60%),
+  radial-gradient(700px 600px at 8% 110%,rgba(232,232,227,.04),transparent 55%),var(--bg);
+  padding:16px;overflow:hidden}
+.layout{position:absolute;inset:16px;opacity:0;transform:scale(.985);pointer-events:none;
+  transition:opacity .45s cubic-bezier(.4,0,.15,1),transform .45s cubic-bezier(.4,0,.15,1)}
+.layout.on{opacity:1;transform:none;pointer-events:auto}
+
+/* shared bits */
+.brand{display:flex;align-items:center;gap:9px}
+.brand .mk{width:28px;height:28px;border-radius:7px;background:var(--bone);color:#111;display:grid;place-items:center;font-family:var(--fd);font-weight:700;font-size:14px}
+.brand b{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:.01em}
+.brand small{display:block;color:var(--faint);font-size:10px}
+.chip{font-size:9.5px;font-weight:700;letter-spacing:.03em;padding:3px 8px;border-radius:999px;border:1px solid var(--line2);color:var(--muted)}
+.chip.run{color:var(--bone);border-color:var(--bone)}
+.chip.wait{color:var(--amber);border-color:rgba(208,160,90,.5)}
+.chip.done{color:var(--ok);border-color:rgba(185,194,168,.4)}
+.tbtn{font:inherit;font-size:12px;font-weight:600;padding:8px 14px;border-radius:9px;cursor:pointer;border:1px solid var(--line2);background:transparent;color:var(--bone);transition:.15s}
+.tbtn:hover{background:var(--panel2)}
+.tbtn.solid{background:var(--bone);color:#111;border-color:var(--bone)}
+.tbtn.solid:hover{background:#fff}
+.k{font-family:var(--fm)}
+.eyebrow{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);font-weight:600}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px}
+.pad{padding:16px}
+
+/* ================= LAYOUT 1 · BENTO ================= */
+.bento{display:grid;grid-template-columns:repeat(12,1fr);grid-template-rows:auto repeat(2,1fr);gap:12px;height:100%}
+.bento .tile{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;overflow:hidden;position:relative;
+  transition:transform .4s cubic-bezier(.3,0,.1,1),border-color .25s,background .25s;cursor:pointer}
+.bento .tile:hover{border-color:var(--line2);background:var(--panel2)}
+.bento .tile .th{display:flex;align-items:center;gap:9px;margin-bottom:12px}
+.bento .tile .th .eyebrow{margin-left:2px}
+.bento .tile .th .chip{margin-left:auto}
+.t-top{grid-column:1/13;grid-row:1;display:flex;align-items:center;gap:16px;cursor:default}
+.t-top:hover{background:var(--panel)}
+.t-flow{grid-column:1/8;grid-row:2/4}
+.t-gate{grid-column:8/13;grid-row:2}
+.t-metrics{grid-column:8/13;grid-row:3}
+/* actually rebalance: gate tall, metrics + runs bottom */
+.bento{grid-template-rows:64px 1.15fr .85fr}
+.t-flow{grid-column:1/6;grid-row:2/4}
+.t-gate{grid-column:6/10;grid-row:2/4}
+.t-metrics{grid-column:10/13;grid-row:2}
+.t-runs{grid-column:10/13;grid-row:3}
+.t-result{grid-column:1/6;grid-row:3;display:none}
+
+/* horizontal flow inside flow tile */
+.flowmini{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.fstep{display:grid;grid-template-columns:26px 1fr auto;gap:10px;align-items:center;padding:7px 2px;position:relative;border-radius:8px;transition:.15s}
+.fstep:hover{background:var(--panel2)}
+.fstep .n{width:24px;height:24px;border-radius:50%;border:1.5px solid var(--line2);display:grid;place-items:center;font-size:10px;font-weight:700;color:var(--faint);z-index:1;background:var(--panel)}
+.fstep:not(:last-child)::before{content:"";position:absolute;left:12px;top:26px;height:14px;width:1.5px;background:var(--line)}
+.fstep.done .n{background:var(--bone);border-color:var(--bone);color:#111}
+.fstep.done::before{background:var(--stone)}
+.fstep.now .n{border-color:var(--amber);color:var(--amber);box-shadow:0 0 0 4px rgba(208,160,90,.14)}
+.fstep .nm{font-size:12px;font-weight:600}
+.fstep .nm small{display:block;color:var(--faint);font-size:10px;font-weight:400}
+.fstep .g{font-family:var(--fm);font-size:10px;color:var(--faint)}
+.fstep.now .g{color:var(--amber)}
+.fstep.gate .n{border-radius:7px}
+
+/* gate content */
+.gate-h{display:flex;align-items:center;gap:11px;margin-bottom:8px}
+.gate-h .gi{width:38px;height:38px;border-radius:11px;border:1px solid rgba(208,160,90,.5);color:var(--amber);display:grid;place-items:center;font-family:var(--fm);font-weight:600}
+.gate-h b{font-size:15px;font-family:var(--fd)} .gate-h small{display:block;color:var(--muted);font-size:11px}
+.cand{border:1px solid var(--line);border-radius:11px;padding:11px 12px;margin-bottom:8px;cursor:pointer;transition:.15s}
+.cand:hover{border-color:var(--line2);background:var(--panel2)}
+.cand.on{border-color:var(--bone);background:var(--panel3)}
+.cand .ct{display:flex;align-items:center;gap:8px}.cand .ct b{font-size:12.5px}
+.cand .ct em{margin-left:auto;font-style:normal;font-size:9.5px;color:var(--muted)}
+.cand p{font-size:10.5px;color:var(--muted);line-height:1.5;margin-top:5px}
+.cand code{display:block;font-family:var(--fm);font-size:10px;color:var(--stone);margin-top:6px}
+.gacts{display:flex;gap:8px;margin-top:12px}
+.gacts .tbtn{flex:1;text-align:center;justify-content:center;padding:10px}
+.gacts .tbtn.solid{flex:1.4}
+
+/* metrics mini */
+.mgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mcell .ml{font-size:10.5px;color:var(--muted)}
+.mcell .mv{font-family:var(--fm);font-size:23px;font-weight:600;margin-top:3px}
+.mcell .mv small{font-size:11px;color:var(--faint)}
+.mbar{height:4px;border-radius:4px;background:var(--panel3);margin-top:7px;overflow:hidden}
+.mbar i{display:block;height:100%;background:var(--stone)}
+
+/* runs mini */
+.rrow{display:flex;align-items:center;gap:9px;padding:8px 0;border-top:1px solid var(--line)}
+.rrow:first-of-type{border-top:0}
+.rrow .rn{font-size:11.5px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rrow .rp{width:52px;height:4px;border-radius:4px;background:var(--panel3);overflow:hidden}
+.rrow .rp i{display:block;height:100%;background:var(--stone)}
+
+/* ================= LAYOUT 2 · COMMAND DECK ================= */
+.deck{display:grid;grid-template-columns:230px 1fr 320px;gap:12px;height:100%}
+.deck .col{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
+.deck .ch{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px}
+.deck .ch b{font-size:13px;font-family:var(--fd)}
+.deck .cb{padding:12px;overflow:auto;flex:1}
+.runitem{padding:11px;border-radius:11px;cursor:pointer;margin-bottom:4px;border:1px solid transparent;transition:.15s}
+.runitem:hover{background:var(--panel2)}
+.runitem.on{background:var(--panel2);border-color:var(--line2)}
+.runitem .rn{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.runitem .rm{font-size:10.5px;color:var(--faint);margin-top:5px;display:flex;align-items:center;gap:7px}
+.deck .center{padding:0}
+.deck .stagebar{display:flex;gap:0;padding:16px 16px 8px}
+.segflow{display:flex;align-items:center;width:100%;gap:0}
+.seg{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;position:relative;cursor:pointer}
+.seg .bar{height:4px;width:100%;background:var(--panel3);border-radius:4px;position:relative;overflow:hidden}
+.seg.done .bar{background:var(--stone)}
+.seg.now .bar{background:linear-gradient(90deg,var(--amber),transparent);background-size:200% 100%;animation:shine 1.8s linear infinite}
+@keyframes shine{from{background-position:120% 0}to{background-position:-120% 0}}
+.seg .lb{font-size:10px;color:var(--muted);white-space:nowrap}
+.seg.done .lb{color:var(--stone)} .seg.now .lb{color:var(--amber);font-weight:700}
+.deck .focus{padding:16px;flex:1;overflow:auto}
+.deck .detail{padding:14px}
+.kv{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:11.5px}
+.kv span{color:var(--muted)} .kv b{font-family:var(--fm);font-weight:600}
+.claim{border:1px solid var(--line);border-radius:11px;padding:11px;margin-bottom:8px}
+.claim .cl{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.claim .cl b{font-size:10px;font-weight:700;color:var(--ok)} .claim.hold .cl b{color:var(--amber)}
+.claim .cl small{margin-left:auto;color:var(--faint);font-size:9.5px}
+.claim p{font-size:11px;line-height:1.5;color:var(--stone)}
+
+/* ================= LAYOUT 3 · FOCUS + FILMSTRIP ================= */
+.film{display:grid;grid-template-rows:auto 1fr 118px;gap:12px;height:100%}
+.film .ftop{display:flex;align-items:center;gap:14px}
+.film .rtabs{display:flex;gap:6px;margin-left:auto}
+.film .rtab{font-size:11.5px;font-weight:600;padding:8px 13px;border-radius:9px;border:1px solid var(--line2);cursor:pointer;color:var(--muted);display:flex;align-items:center;gap:7px}
+.film .rtab.on{background:var(--panel2);color:var(--bone);border-color:var(--bone)}
+.stagewin{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.slides{display:flex;height:100%;transition:transform .5s cubic-bezier(.5,0,.1,1)}
+.slide{min-width:100%;height:100%;padding:26px 30px;display:grid;grid-template-columns:1.3fr 1fr;gap:26px}
+.slide .big{display:flex;flex-direction:column;justify-content:center}
+.slide .big .eyebrow{margin-bottom:10px}
+.slide .big h2{font-family:var(--fd);font-size:30px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.slide .big p{font-size:13px;color:var(--muted);line-height:1.65;margin-top:12px;max-width:440px}
+.slide .big .acts{display:flex;gap:9px;margin-top:20px}
+.slide .side{border-left:1px solid var(--line);padding-left:26px;display:flex;flex-direction:column;justify-content:center}
+.strip{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px;display:flex;gap:9px;overflow-x:auto;align-items:stretch}
+.frame{flex:0 0 138px;border:1px solid var(--line);border-radius:12px;padding:11px 12px;cursor:pointer;transition:.18s;background:var(--panel);position:relative;display:flex;flex-direction:column;gap:6px}
+.frame:hover{border-color:var(--line2);transform:translateY(-2px)}
+.frame.on{border-color:var(--bone);background:var(--panel2)}
+.frame .fi{display:flex;align-items:center;gap:7px}
+.frame .fn{width:20px;height:20px;border-radius:6px;border:1.5px solid var(--line2);display:grid;place-items:center;font-size:9px;font-weight:700;color:var(--faint)}
+.frame.done .fn{background:var(--bone);border-color:var(--bone);color:#111}
+.frame.now .fn{border-color:var(--amber);color:var(--amber)}
+.frame .ft{font-size:11px;font-weight:600;line-height:1.25}
+.frame .fs{font-size:9.5px;color:var(--faint)}
+.frame.now .fs{color:var(--amber)}
+.frame .gtag{position:absolute;top:9px;right:10px;font-family:var(--fm);font-size:9px;color:var(--faint)}
+
+@media (max-width:1120px){
+  .bento{grid-template-columns:repeat(6,1fr);grid-template-rows:56px auto auto auto}
+  .t-flow{grid-column:1/7;grid-row:2} .t-gate{grid-column:1/7;grid-row:3}
+  .t-metrics{grid-column:1/4;grid-row:4} .t-runs{grid-column:4/7;grid-row:4}
+  .deck{grid-template-columns:1fr} .slide{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="meta">
+  <b>单屏工作流方案 · bymonolog 暖色单色<small>无页面滚动 · 点击进入模块 · 丝滑切换</small></b>
+  <div class="tabs" id="tabs">
+    <button data-l="bento" class="on">方案一 · 便当格</button>
+    <button data-l="deck">方案二 · 三栏指挥台</button>
+    <button data-l="film">方案三 · 聚焦胶片</button>
+  </div>
+</div>
+
+<div class="app">
+  <!-- ============ LAYOUT 1 · BENTO ============ -->
+  <section class="layout on" data-l="bento">
+    <div class="bento">
+      <div class="tile t-top">
+        <div class="brand"><span class="mk">R</span><div><b>HypoWeaver</b><small>绿色金融 · 实证工作流</small></div></div>
+        <span class="chip run">运行中 · H2 待冻结</span>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="tbtn">总览</button><button class="tbtn">配置</button><button class="tbtn solid">启动新研究</button>
+        </div>
+      </div>
+
+      <div class="tile t-flow">
+        <div class="th"><span class="eyebrow">纵向执行链路</span><span class="chip">5 / 8 阶段</span></div>
+        <div class="flowmini">
+          <div class="fstep done"><div class="n">✓</div><div class="nm">导入案例<small>SHA256 · 规范化</small></div><div class="g">—</div></div>
+          <div class="fstep done gate"><div class="n">✓</div><div class="nm">确认研究边界<small>研究问题 · 样本边界</small></div><div class="g">H1</div></div>
+          <div class="fstep done"><div class="n">✓</div><div class="nm">拆解假设 · 数据画像<small>并行</small></div><div class="g">—</div></div>
+          <div class="fstep done"><div class="n">✓</div><div class="nm">方法路由 · 四类审查<small>三候选 + Probe</small></div><div class="g">—</div></div>
+          <div class="fstep now gate"><div class="n">●</div><div class="nm">冻结分析计划<small>请选择候选并冻结合同</small></div><div class="g">H2</div></div>
+          <div class="fstep gate"><div class="n">6</div><div class="nm">授权结论<small>确定性 Claim Gate</small></div><div class="g">H3</div></div>
+          <div class="fstep"><div class="n">7</div><div class="nm">生成论文<small>Manuscript IR · 8 节</small></div><div class="g">—</div></div>
+          <div class="fstep gate"><div class="n">8</div><div class="nm">审稿封存<small>密封 + 盲测</small></div><div class="g">H4</div></div>
+        </div>
+      </div>
+
+      <div class="tile t-gate">
+        <div class="th"><span class="eyebrow">当前决策</span><span class="chip wait">H2</span></div>
+        <div class="gate-h"><div class="gi">H2</div><div><b>冻结分析计划</b><small>从可行候选中选择并冻结</small></div></div>
+        <div class="cand on"><div class="ct"><b>识别优先 · DID</b><em>Probe pass</em></div><p>满足平行趋势、安慰剂与置换检验。</p><code>Y = β·Green×Post + αi + λt + ε</code></div>
+        <div class="cand"><div class="ct"><b>直接基准 · 面板 FE</b><em>Probe pass</em></div><p>关联基准模型,作为对照下限。</p></div>
+        <div class="cand"><div class="ct"><b>测量稳健优先</b><em>Probe warn</em></div><p>更换绿色金融指标构造。</p></div>
+        <div class="gacts"><button class="tbtn">退回</button><button class="tbtn">拒绝</button><button class="tbtn solid">批准并冻结</button></div>
+      </div>
+
+      <div class="tile t-metrics">
+        <div class="th"><span class="eyebrow">实时指标</span></div>
+        <div class="mgrid">
+          <div class="mcell"><div class="ml">流程进度</div><div class="mv">5<small>/8</small></div><div class="mbar"><i style="width:62%"></i></div></div>
+          <div class="mcell"><div class="ml">逻辑调用</div><div class="mv">6<small>/9</small></div><div class="mbar"><i style="width:66%"></i></div></div>
+          <div class="mcell"><div class="ml">Attempt</div><div class="mv">11<small>/20</small></div><div class="mbar"><i style="width:55%"></i></div></div>
+          <div class="mcell"><div class="ml">Claim</div><div class="mv">3<small>条</small></div><div class="mbar"><i style="width:38%"></i></div></div>
+        </div>
+      </div>
+
+      <div class="tile t-runs">
+        <div class="th"><span class="eyebrow">并行运行</span><span class="chip">4 个</span></div>
+        <div class="rrow"><span class="rn">绿色金融可持续</span><span class="chip run">H2</span><span class="rp"><i style="width:62%"></i></span></div>
+        <div class="rrow"><span class="rn">绿色信贷高污染</span><span class="chip wait">H3</span><span class="rp"><i style="width:78%"></i></span></div>
+        <div class="rrow"><span class="rn">数字普惠韧性</span><span class="chip done">H4</span><span class="rp"><i style="width:100%"></i></span></div>
+        <div class="rrow"><span class="rn">央行绿色沟通</span><span class="chip">待启动</span><span class="rp"><i style="width:0"></i></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LAYOUT 2 · COMMAND DECK ============ -->
+  <section class="layout" data-l="deck">
+    <div class="deck">
+      <div class="col">
+        <div class="ch"><b>运行记录</b><span class="chip" style="margin-left:auto">4</span></div>
+        <div class="cb">
+          <div class="runitem on"><div class="rn">绿色金融与可持续发展</div><div class="rm"><span class="chip run">运行中</span> H2 · 2 分钟前</div></div>
+          <div class="runitem"><div class="rn">绿色信贷与高污染企业</div><div class="rm"><span class="chip wait">待审核</span> H3 · 18 分钟前</div></div>
+          <div class="runitem"><div class="rn">数字普惠绿色金融韧性</div><div class="rm"><span class="chip done">已完成</span> H4 · 1 小时前</div></div>
+          <div class="runitem"><div class="rn">央行绿色沟通与市场</div><div class="rm"><span class="chip">待启动</span> — · 昨天</div></div>
+        </div>
+      </div>
+
+      <div class="col center">
+        <div class="ch" style="justify-content:space-between"><div class="brand"><span class="mk">R</span><div><b>绿色金融与可持续发展</b><small>Qwen3.7-Plus · 当前 H2</small></div></div><button class="tbtn solid">继续执行</button></div>
+        <div class="stagebar">
+          <div class="segflow" id="segflow">
+            <div class="seg done"><div class="bar"></div><div class="lb">导入</div></div>
+            <div class="seg done"><div class="bar"></div><div class="lb">H1</div></div>
+            <div class="seg done"><div class="bar"></div><div class="lb">假设/数据</div></div>
+            <div class="seg done"><div class="bar"></div><div class="lb">方法/审查</div></div>
+            <div class="seg now"><div class="bar"></div><div class="lb">H2 冻结</div></div>
+            <div class="seg"><div class="bar"></div><div class="lb">执行</div></div>
+            <div class="seg"><div class="bar"></div><div class="lb">H3</div></div>
+            <div class="seg"><div class="bar"></div><div class="lb">论文</div></div>
+            <div class="seg"><div class="bar"></div><div class="lb">H4</div></div>
+          </div>
+        </div>
+        <div class="focus">
+          <div class="gate-h"><div class="gi">H2</div><div><b>冻结分析计划</b><small>Reviewer 只淘汰硬失败方案 · 冻结后编译 Test DAG</small></div></div>
+          <div class="cand on"><div class="ct"><b>识别优先 · 双向固定效应 + 政策 DID</b><em>Probe pass · 0 问题</em></div><p>优先满足因果识别:平行趋势、安慰剂与置换检验齐备。</p><code>Y = β·Green×Post + αi + λt + ε</code></div>
+          <div class="cand"><div class="ct"><b>直接基准 · 省级面板双向固定效应</b><em>Probe pass · 1 问题</em></div><p>关联基准模型,作为对照下限。</p></div>
+          <div class="cand"><div class="ct"><b>测量稳健优先 · 更换绿色金融构造</b><em>Probe warn · 2 问题</em></div><p>检验指标测量稳健性,识别力偏弱。</p></div>
+          <div class="gacts"><button class="tbtn">退回并编辑</button><button class="tbtn">拒绝并终止</button><button class="tbtn solid">批准并冻结合同</button></div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="ch"><b>指标 · 结论</b></div>
+        <div class="cb">
+          <div class="kv"><span>流程进度</span><b>5 / 8</b></div>
+          <div class="kv"><span>逻辑调用</span><b>6 / 9</b></div>
+          <div class="kv"><span>Provider Attempt</span><b>11 / 20</b></div>
+          <div class="kv"><span>受约束结论</span><b>3 条</b></div>
+          <div style="margin:14px 0 8px" class="eyebrow">受 H3 约束的结论</div>
+          <div class="claim"><div class="cl"><b>H3 已批准</b><small>associational</small></div><p>绿色信贷强度与可持续发展绩效稳健正相关,1% 水平显著。</p></div>
+          <div class="claim hold"><div class="cl"><b>H3 已暂缓</b><small>证据不足</small></div><p>机制路径暂缓授权,待异质性与证伪检查补齐。</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LAYOUT 3 · FOCUS + FILMSTRIP ============ -->
+  <section class="layout" data-l="film">
+    <div class="film">
+      <div class="ftop">
+        <div class="brand"><span class="mk">R</span><div><b>HypoWeaver</b><small>点击下方任意阶段 · 焦点丝滑滑动</small></div></div>
+        <div class="rtabs">
+          <div class="rtab on"><span class="chip run" style="border:0;padding:0">●</span>绿色金融可持续</div>
+          <div class="rtab"><span class="chip wait" style="border:0;padding:0">●</span>绿色信贷高污染</div>
+          <div class="rtab"><span class="chip done" style="border:0;padding:0">●</span>数字普惠韧性</div>
+        </div>
+      </div>
+
+      <div class="stagewin">
+        <div class="slides" id="slides">
+          <div class="slide"><div class="big"><div class="eyebrow">阶段 05 · 人工闸门 H2</div><h2>冻结分析计划</h2><p>从三个可行候选中明确选择一个,批准后冻结 FormalResearchContract,系统据此编译 Test DAG、必做诊断与稳定 Claim ID。</p><div class="acts"><button class="tbtn">退回并编辑</button><button class="tbtn solid">批准并冻结合同</button></div></div><div class="side"><div class="eyebrow" style="margin-bottom:10px">推荐候选</div><div class="cand on"><div class="ct"><b>识别优先 · DID</b><em>Probe pass</em></div><p>平行趋势 + 安慰剂 + 置换检验齐备。</p><code>Y = β·Green×Post + αi + λt + ε</code></div><div class="cand"><div class="ct"><b>直接基准 · 面板 FE</b><em>Probe pass</em></div></div></div></div>
+          <div class="slide"><div class="big"><div class="eyebrow">阶段 06 · 执行与复现</div><h2>执行模型与数值复现</h2><p>研究执行器按冻结合同运行估计器,并独立复算做数值容差复现审计。execution_status 与 scientific_status 分别记录。</p><div class="acts"><button class="tbtn">查看执行日志</button></div></div><div class="side"><div class="eyebrow" style="margin-bottom:10px">尚未开始</div><div class="kv"><span>估计器</span><b>panel_did</b></div><div class="kv"><span>诊断</span><b>待运行</b></div></div></div>
+        </div>
+      </div>
+
+      <div class="strip" id="strip">
+        <div class="frame done"><div class="fi"><div class="fn">✓</div><div class="ft">导入案例</div></div><div class="fs">规范化 · 已完成</div></div>
+        <div class="frame done"><span class="gtag">H1</span><div class="fi"><div class="fn">✓</div><div class="ft">研究边界</div></div><div class="fs">已确认</div></div>
+        <div class="frame done"><div class="fi"><div class="fn">✓</div><div class="ft">假设 · 数据</div></div><div class="fs">并行画像 · 完成</div></div>
+        <div class="frame done"><div class="fi"><div class="fn">✓</div><div class="ft">方法 · 审查</div></div><div class="fs">四类 Reviewer · 完成</div></div>
+        <div class="frame now on"><span class="gtag">H2</span><div class="fi"><div class="fn">●</div><div class="ft">冻结计划</div></div><div class="fs">待你决策</div></div>
+        <div class="frame"><div class="fi"><div class="fn">6</div><div class="ft">执行复现</div></div><div class="fs">未开始</div></div>
+        <div class="frame"><span class="gtag">H3</span><div class="fi"><div class="fn">7</div><div class="ft">授权结论</div></div><div class="fs">未开始</div></div>
+        <div class="frame"><div class="fi"><div class="fn">8</div><div class="ft">生成论文</div></div><div class="fs">未开始</div></div>
+        <div class="frame"><span class="gtag">H4</span><div class="fi"><div class="fn">9</div><div class="ft">审稿封存</div></div><div class="fs">未开始</div></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  // layout switch
+  const tabs=document.getElementById('tabs');
+  tabs.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+    tabs.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+    document.querySelectorAll('.layout').forEach(l=>l.classList.toggle('on',l.dataset.l===b.dataset.l));});
+  // candidate select (all layouts)
+  document.querySelectorAll('.cand').forEach(c=>c.addEventListener('click',()=>{
+    const box=c.parentElement;box.querySelectorAll('.cand').forEach(x=>x.classList.remove('on'));c.classList.add('on');}));
+  // filmstrip focus slide (silky)
+  const frames=[...document.querySelectorAll('#strip .frame')];
+  const slides=document.getElementById('slides');
+  const slideMap={4:0,5:1}; // frame index -> slide index (demo has 2 detailed slides)
+  frames.forEach((f,i)=>f.addEventListener('click',()=>{
+    frames.forEach(x=>x.classList.remove('on'));f.classList.add('on');
+    const s=slideMap[i]!==undefined?slideMap[i]:0;
+    slides.style.transform=`translateX(-${s*100}%)`;}));
+  // bento tile click subtle emphasis
+  document.querySelectorAll('.bento .tile:not(.t-top)').forEach(t=>t.addEventListener('click',()=>{
+    document.querySelectorAll('.bento .tile').forEach(x=>x.style.outline='');
+    t.style.outline='1px solid var(--bone)';}));
+</script>
+</body>
+</html>

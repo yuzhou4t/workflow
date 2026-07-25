@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HypoWeaver · 流动工作流画布(设计原型)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Noto+Serif+SC:wght@600&display=swap" rel="stylesheet" />
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root{
+  --fs:"Inter","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --fserif:"Fraunces","Noto Serif SC",Georgia,serif;
+  --fm:"JetBrains Mono","SFMono-Regular",Consolas,monospace;
+}
+html,body{height:100%;overflow:hidden;}
+body{font-family:var(--fs);background:#05070a;color:#e8eef5;-webkit-font-smoothing:antialiased;}
+
+/* palette switch bar */
+.paletteBar{position:fixed;top:0;left:0;right:0;z-index:200;display:flex;align-items:center;gap:14px;
+  padding:10px 18px;background:rgba(5,8,12,.85);border-bottom:1px solid #1b2230;backdrop-filter:blur(10px);}
+.paletteBar b{font-size:13px;font-weight:800}
+.paletteBar b small{display:block;font-weight:500;color:#8a93a3;font-size:10.5px}
+.paletteBar .sw{display:flex;gap:7px;margin-left:auto}
+.paletteBar button{cursor:pointer;font:inherit;font-size:12px;font-weight:600;padding:7px 13px;border-radius:9px;
+  border:1px solid #2a3242;background:#131824;color:#c3cad6;transition:.16s}
+.paletteBar button:hover{border-color:#3a4256;color:#fff}
+.paletteBar button.on{background:#fff;color:#111;border-color:#fff}
+
+/* ===== app shell ===== */
+.app{
+  --bg:#0a1622; --grid:rgba(94,178,214,.09); --panel:#0f2334; --panel2:#12293c; --line:#20374c;
+  --ink:#dce9f5; --muted:#7f97ac; --accent:#54d6c6; --accent2:#8bd6ff;
+  --gate:#ffb454; --done:#4ade80; --edge:#274a63; --edge-live:#54d6c6; --pending:#33475c;
+  position:fixed;inset:44px 0 0 0;display:grid;grid-template-columns:60px 1fr 348px;background:var(--bg);
+}
+/* left rail */
+.rail{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 0;border-right:1px solid var(--line);background:var(--panel)}
+.rail .logo{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--accent);color:#04121a;font-weight:800;margin-bottom:10px}
+.rail button{width:40px;height:40px;border-radius:11px;border:0;background:transparent;color:var(--muted);cursor:pointer;display:grid;place-items:center;font-size:17px;transition:.15s}
+.rail button:hover{background:var(--panel2);color:var(--ink)}
+.rail button.on{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)}
+.rail .sp{flex:1}
+
+/* center canvas region */
+.center{position:relative;min-width:0;display:flex;flex-direction:column}
+.topline{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line)}
+.topline .eyebrow{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.topline h1{font-size:17px;letter-spacing:-.01em}
+.topline h1 .fam{font-family:var(--fserif);font-weight:600}
+.runpills{display:flex;gap:6px;margin-left:8px}
+.runpills .rp{font-size:11px;font-weight:600;padding:6px 11px;border-radius:999px;border:1px solid var(--line);color:var(--muted);cursor:pointer}
+.runpills .rp.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.topline .right{margin-left:auto;display:flex;align-items:center;gap:9px}
+.live{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:var(--muted)}
+.live .beat{width:8px;height:8px;border-radius:50%;background:var(--done);box-shadow:0 0 0 0 var(--done);animation:beat 1.8s infinite}
+@keyframes beat{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--done) 70%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.tbtn{font:inherit;font-size:12px;font-weight:650;padding:8px 13px;border-radius:9px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.tbtn.primary{background:var(--accent);border-color:var(--accent);color:#04121a}
+
+/* canvas viewport */
+.viewport{flex:1;position:relative;overflow:auto;
+  background-image:radial-gradient(var(--grid) 1px,transparent 1px);background-size:26px 26px;background-position:-1px -1px}
+.canvas{position:relative;width:1560px;height:660px;margin:6px auto}
+.edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.edges path{fill:none}
+.edge-base{stroke:var(--edge);stroke-width:2.5}
+.edge-pending{stroke:var(--pending);stroke-width:2;stroke-dasharray:2 7;opacity:.7}
+.edge-live{stroke:var(--edge-live);stroke-width:2.5;stroke-dasharray:7 11;animation:flow 1s linear infinite;filter:drop-shadow(0 0 4px color-mix(in srgb,var(--edge-live) 60%,transparent))}
+@keyframes flow{to{stroke-dashoffset:-18}}
+.comet{fill:var(--accent);filter:drop-shadow(0 0 6px var(--accent))}
+
+/* nodes */
+.node{position:absolute;width:154px;transform:translate(-50%,-50%);cursor:pointer}
+.node .card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:11px 12px;transition:.16s;display:grid;gap:5px}
+.node:hover .card{border-color:var(--accent);transform:translateY(-1px)}
+.node.sel .card{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+.node .tp{display:flex;align-items:center;gap:7px}
+.node .ic{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;font-size:11px;background:var(--panel2);color:var(--muted);flex:0 0 auto}
+.node .nm{font-size:12px;font-weight:650;line-height:1.2}
+.node .sub{font-size:10px;color:var(--muted);line-height:1.35}
+.node.done .ic{background:color-mix(in srgb,var(--done) 20%,transparent);color:var(--done)}
+.node.done .card{border-color:color-mix(in srgb,var(--done) 40%,var(--line))}
+.node.active .ic{background:color-mix(in srgb,var(--accent) 22%,transparent);color:var(--accent)}
+.node.active .card{border-color:var(--accent);box-shadow:0 0 22px -6px var(--accent)}
+.node .st{font-size:9.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}
+.node.done .st{color:var(--done)} .node.active .st{color:var(--accent)} .node.pending .st{color:var(--muted)}
+
+/* gate node — hexagon-ish, prominent */
+.node.gate{width:132px}
+.node.gate .card{border-radius:14px;background:linear-gradient(160deg,var(--panel2),var(--panel));text-align:center;place-items:center}
+.node.gate .glab{font-family:var(--fm);font-size:15px;font-weight:700;letter-spacing:.06em}
+.node.gate.wait .card{border-color:var(--gate);box-shadow:0 0 0 3px color-mix(in srgb,var(--gate) 20%,transparent),0 0 30px -6px var(--gate);animation:gateglow 2.4s ease-in-out infinite}
+@keyframes gateglow{0%,100%{box-shadow:0 0 0 3px color-mix(in srgb,var(--gate) 16%,transparent),0 0 22px -8px var(--gate)}50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--gate) 30%,transparent),0 0 36px -4px var(--gate)}}
+.node.gate.wait .glab{color:var(--gate)}
+.node.gate.done .card{border-color:color-mix(in srgb,var(--done) 45%,var(--line))}
+.node.gate.done .glab{color:var(--done)}
+.node.gate .lock{font-size:9px;color:var(--muted);margin-top:2px}
+.node.gate.wait .lock{color:var(--gate)}
+
+/* branch tag */
+.branchTag{position:absolute;transform:translate(-50%,-50%);font-size:10px;color:var(--muted);font-weight:600;background:var(--bg);padding:2px 8px;border-radius:6px;border:1px dashed var(--line)}
+
+/* bottom monitor dock */
+.dock{border-top:1px solid var(--line);background:var(--panel);padding:10px 18px;display:flex;align-items:center;gap:14px;overflow-x:auto}
+.dock .dh{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;flex:0 0 auto}
+.mini{flex:0 0 auto;width:210px;border:1px solid var(--line);border-radius:11px;padding:9px 11px;background:var(--panel2);cursor:pointer;transition:.15s}
+.mini:hover{border-color:var(--accent)}
+.mini.on{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
+.mini .mt{display:flex;align-items:center;gap:7px;margin-bottom:8px}
+.mini .mt b{font-size:11.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini .mt .chip{margin-left:auto;font-size:9px;font-weight:800;padding:2px 7px;border-radius:6px;flex:0 0 auto}
+.chip.run{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}
+.chip.wait{background:color-mix(in srgb,var(--gate) 18%,transparent);color:var(--gate)}
+.chip.done{background:color-mix(in srgb,var(--done) 18%,transparent);color:var(--done)}
+.flowbar{display:flex;gap:3px;align-items:center}
+.flowbar i{height:6px;border-radius:3px;flex:1;background:var(--pending)}
+.flowbar i.d{background:var(--done)} .flowbar i.a{background:var(--accent);animation:pulse 1.4s infinite}
+@keyframes pulse{50%{opacity:.4}}
+
+/* right drawer */
+.drawer{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+.drawer .dhead{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:10px}
+.drawer .dhead .dic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--panel2);color:var(--accent);flex:0 0 auto}
+.drawer .dhead b{font-size:14px;display:block}
+.drawer .dhead small{font-size:11px;color:var(--muted)}
+.drawer .dbody{flex:1;overflow-y:auto;padding:16px}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:12px}
+.kv span{color:var(--muted)} .kv b{font-family:var(--fm);font-weight:600}
+.seg{margin-top:16px}
+.seg .sl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:9px}
+.cand{border:1px solid var(--line);border-radius:11px;padding:11px;margin-bottom:8px;cursor:pointer;transition:.15s}
+.cand:hover{border-color:var(--accent)}
+.cand.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.cand .ct{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.cand .ct b{font-size:12px}
+.cand .ct em{margin-left:auto;font-style:normal;font-size:9.5px;color:var(--muted)}
+.cand p{font-size:10.5px;color:var(--muted);line-height:1.5}
+.cand code{display:block;margin-top:6px;font-family:var(--fm);font-size:9.5px;color:var(--accent2)}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tags span{font-size:10px;padding:4px 8px;border-radius:7px;border:1px solid var(--line);color:var(--muted)}
+.miniclaim{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px}
+.miniclaim b{font-size:10px;font-weight:800;color:var(--done)}
+.miniclaim p{font-size:11px;line-height:1.5;margin-top:5px}
+.dfoot{padding:12px 16px;border-top:1px solid var(--line);display:flex;gap:8px}
+.dfoot button{flex:1;font:inherit;font-size:12px;font-weight:650;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);cursor:pointer}
+.dfoot button.primary{background:var(--accent);border-color:var(--accent);color:#04121a;flex:1.4}
+
+/* ===== palette: botanical (light paper) ===== */
+.app[data-p="botanical"]{
+  --bg:#efe7d6; --grid:rgba(120,96,60,.12); --panel:#fbf6ea; --panel2:#f3ebd9; --line:#ddd0b8;
+  --ink:#2a2418; --muted:#8b7f66; --accent:#1f5c46; --accent2:#c4501e;
+  --gate:#b26a12; --done:#2f7d54; --edge:#cbbd9c; --edge-live:#c4501e; --pending:#d8cdb4;
+}
+.app[data-p="botanical"] .rail .logo,.app[data-p="botanical"] .tbtn.primary,
+.app[data-p="botanical"] .dfoot button.primary{color:#fbf6ea}
+.app[data-p="botanical"] .topline h1 .fam,.app[data-p="botanical"] .node .nm{color:#2a2418}
+.app[data-p="botanical"] .comet{fill:var(--accent2)}
+
+/* ===== palette: signal (riso light) ===== */
+.app[data-p="signal"]{
+  --bg:#f3f1ea; --grid:rgba(20,30,80,.10); --panel:#ffffff; --panel2:#f0f1f7; --line:#e2e0d6;
+  --ink:#14161c; --muted:#6b6f7d; --accent:#1a49ff; --accent2:#0d2edb;
+  --gate:#f2a900; --done:#12a150; --edge:#c9cbe0; --edge-live:#ff5a3c; --pending:#dcdde6;
+}
+.app[data-p="signal"] .rail .logo,.app[data-p="signal"] .tbtn.primary,
+.app[data-p="signal"] .dfoot button.primary{color:#fff}
+.app[data-p="signal"] .comet{fill:#ff5a3c}
+</style>
+</head>
+<body>
+<div class="paletteBar">
+  <b>流动工作流画布 · 设计原型<small>整屏不翻页 · 数据沿连线流动 · 点节点看详情 · 底部并行监控</small></b>
+  <div class="sw" id="sw">
+    <button data-p="blueprint" class="on">蓝图仪表</button>
+    <button data-p="botanical">植墨纸感</button>
+    <button data-p="signal">信号印刷</button>
+  </div>
+</div>
+
+<div class="app" data-p="blueprint" id="app">
+  <!-- left rail -->
+  <nav class="rail">
+    <div class="logo">R</div>
+    <button title="总览">▦</button>
+    <button class="on" title="工作流画布">⇄</button>
+    <button title="运行记录">≡</button>
+    <button title="结果">◈</button>
+    <div class="sp"></div>
+    <button title="配置">⚙</button>
+  </nav>
+
+  <!-- center -->
+  <div class="center">
+    <div class="topline">
+      <div>
+        <div class="eyebrow">工作流画布 · 当前案例</div>
+        <h1><span class="fam">绿色金融与可持续发展</span></h1>
+      </div>
+      <div class="runpills">
+        <span class="rp on">HypoWeaver</span>
+        <span class="rp">Agent Laboratory</span>
+      </div>
+      <div class="right">
+        <span class="live"><span class="beat"></span>正在流动 · H2 待冻结</span>
+        <button class="tbtn">适应窗口</button>
+        <button class="tbtn primary">继续执行</button>
+      </div>
+    </div>
+
+    <div class="viewport">
+      <div class="canvas" id="canvas">
+        <svg class="edges" id="edges" viewBox="0 0 1560 660" preserveAspectRatio="none"></svg>
+        <!-- branch labels -->
+        <div class="branchTag" style="left:640px;top:60px">并行分支</div>
+        <div id="nodes"></div>
+      </div>
+    </div>
+
+    <!-- bottom monitor dock -->
+    <div class="dock">
+      <div class="dh">并行运行监控</div>
+      <div class="mini on">
+        <div class="mt"><b>绿色金融与可持续发展</b><span class="chip run">RUN</span></div>
+        <div class="flowbar"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="a"></i><i></i><i></i><i></i></div>
+      </div>
+      <div class="mini">
+        <div class="mt"><b>绿色信贷与高污染企业</b><span class="chip wait">H3</span></div>
+        <div class="flowbar"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="a"></i><i></i></div>
+      </div>
+      <div class="mini">
+        <div class="mt"><b>数字普惠绿色金融韧性</b><span class="chip done">DONE</span></div>
+        <div class="flowbar"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i></div>
+      </div>
+      <div class="mini">
+        <div class="mt"><b>央行绿色沟通与市场</b><span class="chip" style="background:var(--panel);color:var(--muted);border:1px solid var(--line)">待启动</span></div>
+        <div class="flowbar"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- right drawer -->
+  <aside class="drawer" id="drawer"></aside>
+</div>
+
+<script>
+/* ---------- node model ---------- */
+const N = {
+  import:{x:150,y:150,ic:"↧",nm:"导入案例",sub:"SHA256 · 规范化",state:"done",st:"已完成"},
+  h1:{x:355,y:150,kind:"gate",glab:"H1",lock:"研究边界",state:"done",gstate:"done",st:"已确认"},
+  hyp:{x:560,y:78,ic:"⊃",nm:"假设拆解",sub:"结构化假设",state:"done",st:"已完成"},
+  prof:{x:560,y:222,ic:"◔",nm:"数据画像",sub:"变量角色 · 分布",state:"done",st:"已完成"},
+  route:{x:770,y:150,ic:"⋔",nm:"方法路由",sub:"面板 / DID / 空间",state:"done",st:"已完成"},
+  arena:{x:975,y:150,ic:"⚑",nm:"三候选 + Probe",sub:"无结果预检",state:"done",st:"已完成"},
+  review:{x:1180,y:150,ic:"⚖",nm:"四类 Reviewer",sub:"隔离并行审查",state:"done",st:"已完成"},
+  h2:{x:1385,y:150,kind:"gate",glab:"H2",lock:"冻结分析计划",state:"active",gstate:"wait",st:"待冻结"},
+  exec:{x:1180,y:470,ic:"▶",nm:"执行与复现",sub:"研究执行器 · 独立复算",state:"pending",st:"待执行"},
+  h3:{x:975,y:470,kind:"gate",glab:"H3",lock:"结论授权",state:"pending",gstate:"pending",st:"未开始"},
+  paper:{x:745,y:470,ic:"❋",nm:"生成论文",sub:"Manuscript IR · 8 节",state:"pending",st:"未开始"},
+  h4:{x:520,y:470,kind:"gate",glab:"H4",lock:"人工审稿",state:"pending",gstate:"pending",st:"未开始"},
+  seal:{x:300,y:470,ic:"◼",nm:"封存成果",sub:"密封 + 盲测",state:"pending",st:"未开始"},
+};
+const E = [
+  ["import","h1",1],["h1","hyp",1],["h1","prof",1],["hyp","route",1],["prof","route",1],
+  ["route","arena",1],["arena","review",1],["review","h2",1],
+  ["h2","exec",0],["exec","h3",0],["h3","paper",0],["paper","h4",0],["h4","seal",0],
+];
+
+/* ---------- render edges ---------- */
+function path(a,b){
+  const n1=N[a],n2=N[b], dx=(n2.x-n1.x), dy=(n2.y-n1.y);
+  // smooth cubic; for the big vertical drop (h2->exec) bow outward
+  let c1x,c1y,c2x,c2y;
+  if(Math.abs(dy)>180){ c1x=n1.x+90; c1y=n1.y+dy*0.55; c2x=n2.x+90; c2y=n2.y-dy*0.15; }
+  else { c1x=n1.x+dx*0.5; c1y=n1.y; c2x=n1.x+dx*0.5; c2y=n2.y; }
+  return `M ${n1.x} ${n1.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${n2.x} ${n2.y}`;
+}
+const svg=document.getElementById("edges");
+let liveId="";
+E.forEach(([a,b,live],i)=>{
+  const d=path(a,b);
+  const base=document.createElementNS("http://www.w3.org/2000/svg","path");
+  base.setAttribute("d",d); base.setAttribute("class","edge-base"); svg.appendChild(base);
+  const ov=document.createElementNS("http://www.w3.org/2000/svg","path");
+  ov.setAttribute("d",d); ov.setAttribute("class",live?"edge-live":"edge-pending");
+  if(b==="h2"){ ov.setAttribute("id","liveEdge"); liveId="liveEdge"; }
+  svg.appendChild(ov);
+});
+// comet along the active edge into H2
+if(liveId){
+  const c=document.createElementNS("http://www.w3.org/2000/svg","circle");
+  c.setAttribute("r","4.5"); c.setAttribute("class","comet");
+  const m=document.createElementNS("http://www.w3.org/2000/svg","animateMotion");
+  m.setAttribute("dur","1.7s"); m.setAttribute("repeatCount","indefinite");
+  const mp=document.createElementNS("http://www.w3.org/2000/svg","mpath");
+  mp.setAttributeNS("http://www.w3.org/1999/xlink","href","#"+liveId);
+  m.appendChild(mp); c.appendChild(m); svg.appendChild(c);
+}
+
+/* ---------- render nodes ---------- */
+const holder=document.getElementById("nodes");
+Object.entries(N).forEach(([id,n])=>{
+  const el=document.createElement("div");
+  el.dataset.id=id;
+  el.style.left=n.x+"px"; el.style.top=n.y+"px";
+  if(n.kind==="gate"){
+    el.className=`node gate ${n.gstate}`;
+    el.innerHTML=`<div class="card"><div class="glab">${n.glab}</div><div class="lock">🔒 ${n.lock}</div><div class="st">${n.st}</div></div>`;
+  }else{
+    el.className=`node ${n.state}`;
+    el.innerHTML=`<div class="card"><div class="tp"><div class="ic">${n.ic}</div><div class="nm">${n.nm}</div></div><div class="sub">${n.sub}</div><div class="st">${n.st}</div></div>`;
+  }
+  el.addEventListener("click",()=>select(id));
+  holder.appendChild(el);
+});
+
+/* ---------- drawer content ---------- */
+const drawer=document.getElementById("drawer");
+function drawH2(){
+  return `<div class="dhead"><div class="dic">🔒</div><div><b>H2 · 冻结分析计划</b><small>请从可行候选中选择一个并冻结合同</small></div></div>
+  <div class="dbody">
+    <div class="kv"><span>当前节点</span><b>design_arena → h2_gate</b></div>
+    <div class="kv"><span>逻辑调用</span><b>6 / 9</b></div>
+    <div class="kv"><span>Provider Attempt</span><b>11 / 20</b></div>
+    <div class="seg"><div class="sl">可行研究设计候选</div>
+      <div class="cand on"><div class="ct"><b>识别优先</b><em>Probe pass · 问题 0</em></div><p>双向固定效应 + 政策 DID,优先满足因果识别的平行趋势与安慰剂检验。</p><code>Y = β·Green×Post + αi + λt + ε</code></div>
+      <div class="cand"><div class="ct"><b>直接基准</b><em>Probe pass · 问题 1</em></div><p>省级面板双向固定效应基准关联模型。</p></div>
+      <div class="cand"><div class="ct"><b>测量稳健优先</b><em>Probe warn · 问题 2</em></div><p>更换绿色金融指标构造,检验测量稳健性。</p></div>
+    </div>
+    <div class="seg"><div class="sl">冻结后将编译</div>
+      <div class="tags"><span>Test DAG</span><span>必做诊断</span><span>稳定 Claim ID</span><span>执行终态</span></div>
+    </div>
+  </div>
+  <div class="dfoot"><button>退回并编辑</button><button class="primary">批准并冻结合同</button></div>`;
+}
+function drawNode(id){
+  const n=N[id];
+  if(id==="h2") return drawH2();
+  const busy=n.state==="active";
+  return `<div class="dhead"><div class="dic">${n.kind==="gate"?"🔒":(n.ic||"◆")}</div><div><b>${n.nm||n.glab}</b><small>${n.sub||n.lock||""}</small></div></div>
+  <div class="dbody">
+    <div class="kv"><span>状态</span><b>${n.st}</b></div>
+    <div class="kv"><span>类型</span><b>${n.kind==="gate"?"人工闸门":"自动节点"}</b></div>
+    <div class="kv"><span>Attempt</span><b>${n.state==="pending"?"—":"1 · succeeded"}</b></div>
+    <div class="seg"><div class="sl">提示词 / 输入 / 输出</div>
+      <div class="tags"><span>提示词</span><span>实际输入</span><span>实际输出</span><span>运行日志</span></div>
+      <p style="font-size:11px;color:var(--muted);line-height:1.6;margin-top:10px">${n.state==="pending"?"该节点等待上游流入,尚无内容。":"点击标签即可就地查看本节点的提示词模板、渲染结果与结构化输入输出——无需离开画布。"}</p>
+    </div>
+    ${n.state!=="pending"?`<div class="seg"><div class="sl">受约束结论(示例)</div><div class="miniclaim"><b>H3 已批准</b><p>绿色信贷强度与可持续发展绩效稳健正相关,1% 水平显著。</p></div></div>`:""}
+  </div>
+  <div class="dfoot"><button>查看完整详情</button>${busy?`<button class="primary">继续</button>`:""}</div>`;
+}
+function select(id){
+  document.querySelectorAll(".node").forEach(el=>el.classList.toggle("sel",el.dataset.id===id));
+  drawer.innerHTML=drawNode(id);
+}
+select("h2");
+
+/* ---------- palette switch ---------- */
+document.getElementById("sw").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b)return;
+  document.querySelectorAll("#sw button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");
+  document.getElementById("app").setAttribute("data-p",b.dataset.p);
+});
+</script>
+</body>
+</html>

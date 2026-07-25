@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="night">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>新建 / 配置 · 真实样式预览</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/src/theme.css" />
+<link rel="stylesheet" href="/src/styles.css" />
+<link rel="stylesheet" href="/src/execution.css" />
+<link rel="stylesheet" href="/src/views.css" />
+<style>
+  body { margin: 0; }
+  .pv-toggle { position: fixed; right: 18px; bottom: 18px; z-index: 200; }
+  .pv-toggle button { font-family: var(--font-sans); font-size: 12px; font-weight: 600; padding: 9px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--hairline-strong); background: var(--surface); color: var(--text); }
+  .pv-split { display: grid; grid-template-columns: 1fr 1fr; gap: 0; align-items: start; }
+  .pv-split > div { border-right: 1px solid var(--hairline); }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <button class="brand" type="button"><span class="brand__mark">R</span><span><strong>Research Bench</strong><small>实证工作流对照台</small></span></button>
+  <nav aria-label="主要导航"><button type="button" class="is-active">新建</button><button type="button">运行记录</button><button type="button">配置</button></nav>
+  <div class="header-actions"><button class="theme-toggle" type="button" id="hd">☾</button><button class="config-summary" type="button"><span class="status-dot is-ready"></span>服务已就绪</button></div>
+</header>
+
+<div class="pv-split">
+  <!-- 新建启动器 -->
+  <div>
+    <main class="bench-page bench-page--launcher" style="width:calc(100% - 48px)">
+      <header class="bench-hero">
+        <div><p class="eyebrow">Research Bench</p><h1>选择一个案例，开始验证</h1><p>同一份输入可以分别运行 HypoWeaver-Qwen 与 Agent Laboratory。</p></div>
+        <div class="bench-hero__actions"><button type="button" class="quiet-button">展开基线</button><button type="button" class="primary-button">选择案例文件夹并启动</button></div>
+      </header>
+      <section class="shared-input-strip">
+        <div><span>01</span><strong>同一案例</strong><small>同一份 CSV 与安全案例说明</small></div>
+        <div><span>02</span><strong>同一模型</strong><small>qwen3.7-plus</small></div>
+        <div><span>03</span><strong>结果隔离</strong><small>隐藏参考不进入运行流程</small></div>
+        <button type="button">配置</button>
+      </section>
+      <div class="bench-grid">
+        <section class="bench-lane">
+          <header class="bench-lane__header"><div><span class="bench-badge">HW</span><h2>HypoWeaver-Qwen</h2></div><small>等待案例</small></header>
+          <ol class="compact-flow">
+            <li class="is-succeeded"><span>✓</span><div><strong>读取案例</strong><small>已完成</small></div></li>
+            <li class="is-running"><span>2</span><div><strong>H1 确认研究边界</strong><small>进行中</small></div></li>
+            <li><span>3</span><div><strong>拆解假设与数据</strong><small>尚未开始</small></div></li>
+            <li><span>4</span><div><strong>设计并审查方法</strong><small>尚未开始</small></div></li>
+          </ol>
+          <p class="lane-note">千问与研究执行器已就绪。</p>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- 配置视图 -->
+  <div>
+    <main class="page settings-page" style="width:calc(100% - 48px)">
+      <header class="page-heading"><div><h1>模型与执行器配置</h1><p>先配置服务，再开始真实研究。流程演示模式无需任何密钥。</p></div><button type="button" class="secondary-button">重新检测配置</button></header>
+      <section class="config-path-panel">
+        <div><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M10.85 12.15 19 4M18 5l2 2M15 8l2 2"/></svg><div><strong>密钥配置位置</strong><code>backend/var/runtime-config.json</code></div></div>
+        <button type="button">复制路径</button>
+        <p>在本页面保存的密钥只写入后端私有文件（权限 0600），不会回显到浏览器。环境变量始终优先于文件配置。</p>
+      </section>
+      <div class="settings-columns">
+        <section class="settings-section">
+          <header><div class="settings-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M10.85 12.15 19 4M18 5l2 2M15 8l2 2"/></svg></div><div><h2>千问模型</h2><span class="service-state is-ready">已配置 · file</span></div></header>
+          <label>API 密钥<input type="password" placeholder="已配置；留空表示不修改" /></label>
+          <div class="field-grid"><label>模型 ID<input value="qwen3.7-plus" /><small class="field-help">区分大小写；百炼公共模型使用小写 ID。</small></label><label>API 地址<input value="https://dashscope.aliyuncs.com/compatible-mode/v1" /></label></div>
+          <button type="button" class="test-button">测试千问连接</button>
+        </section>
+        <section class="settings-section">
+          <header><div class="settings-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/></svg></div><div><h2>Python 研究执行器</h2><span class="service-state">尚未配置执行器地址</span></div></header>
+          <label>执行器地址<input placeholder="http://127.0.0.1:9000" /></label>
+          <label>执行器令牌<input type="password" placeholder="可选：RESEARCH_ENGINE_TOKEN" /></label>
+          <button type="button" class="test-button">测试执行器连接</button>
+        </section>
+      </div>
+      <div class="connection-result is-success"><strong>连接成功</strong><span>模型返回正常。</span></div>
+      <footer class="settings-actions"><div class="workflow-token-field"><label>工作流访问令牌<input type="password" placeholder="输入后端 HYPOWEAVER_API_TOKEN" /></label><p><code>HYPOWEAVER_API_TOKEN</code> 只用于访问工作流后端，仅保存在当前标签页。</p></div><button type="button" class="primary-button">保存配置</button></footer>
+    </main>
+  </div>
+</div>
+
+<div class="pv-toggle"><button type="button" id="pv">切换 日间 / 夜间</button></div>
+<script>
+  function flip(){const r=document.documentElement;const n=r.getAttribute('data-theme')==='night'?'day':'night';document.body.classList.add('theming');setTimeout(()=>document.body.classList.remove('theming'),600);r.setAttribute('data-theme',n);document.getElementById('hd').textContent=n==='night'?'☾':'☀';}
+  document.getElementById('pv').addEventListener('click',flip);document.getElementById('hd').addEventListener('click',flip);
+</script>
+</body>
+</html>

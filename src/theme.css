@@ -1,0 +1,97 @@
+/*
+ * HypoWeaver 设计系统 · Design Tokens
+ * 双模式：日间(雾灰/陶土) + 夜间(墨绿/香槟金)
+ * 参考视觉：bymonolog.com（暖色单色气质）+ 去盒子化编辑级排版
+ * 单一事实源：所有界面颜色/字号/间距/圆角均消费这里的变量。
+ * 用法：<html data-theme="day|night">，默认 day。
+ */
+
+:root {
+  /* —— 字体 —— */
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-serif: "Fraunces", "Newsreader", "Songti SC", Georgia, serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+
+  /* —— 字号阶梯 —— */
+  --fz-display: clamp(34px, 3.4vw, 47px);
+  --fz-h1: 30px;
+  --fz-h2: 24px;
+  --fz-h3: 18px;
+  --fz-body: 14px;
+  --fz-sm: 13px;
+  --fz-xs: 12px;
+  --fz-eyebrow: 11px;
+  --lh-tight: 1.1;
+  --lh-body: 1.6;
+  --tracking-eyebrow: 0.18em;
+
+  /* —— 间距 —— */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 24px; --space-6: 32px; --space-7: 44px; --space-8: 56px;
+
+  /* —— 圆角 —— */
+  --radius-xs: 8px; --radius-sm: 10px; --radius: 14px; --radius-lg: 18px; --radius-pill: 999px;
+
+  /* —— 过渡 —— */
+  --ease: cubic-bezier(0.4, 0, 0.15, 1);
+  --dur-theme: 0.55s;
+
+  /* —— 日间 · 雾灰 / 陶土（默认） —— */
+  --surface-bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #eef0f3;
+  --surface-3: #e7e9ee;
+  --hairline: rgba(27, 29, 34, 0.09);
+  --hairline-strong: rgba(27, 29, 34, 0.16);
+  --text: #1b1d22;
+  --text-muted: #6b7280;
+  --text-faint: #9aa0aa;
+  --brand: #b5533a;
+  --brand-soft: rgba(181, 83, 58, 0.10);
+  --on-accent: #ffffff;
+  --attention: #a06a1f;          /* 等待人工/需关注 */
+  --attention-soft: rgba(160, 106, 31, 0.12);
+  --positive: #3f7d54;           /* 已通过/已完成语义 */
+  --negative: #b0413f;
+  --glow: rgba(181, 83, 58, 0.05);
+  --shadow-1: 0 1px 2px rgba(20, 30, 50, 0.05);
+  --shadow-2: 0 18px 44px -24px rgba(20, 30, 50, 0.28);
+  color-scheme: light;
+}
+
+/* —— 夜间 · 墨绿 / 香槟金 —— */
+:root[data-theme="night"] {
+  --surface-bg: #0b1310;
+  --surface: #111d18;
+  --surface-2: #16261f;
+  --surface-3: #1d3229;
+  --hairline: rgba(236, 239, 233, 0.10);
+  --hairline-strong: rgba(236, 239, 233, 0.18);
+  --text: #eef1ea;
+  --text-muted: #93a89b;
+  --text-faint: #5f7369;
+  --brand: #c8a96a;
+  --brand-soft: rgba(200, 169, 106, 0.14);
+  --on-accent: #14120c;
+  --attention: #d7b877;
+  --attention-soft: rgba(215, 184, 119, 0.14);
+  --positive: #8bb79a;
+  --negative: #d98a86;
+  --glow: rgba(200, 169, 106, 0.08);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 18px 44px -22px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+/* —— 丝滑整屏交叉过渡：仅在切换主题的瞬间开启，避免拖慢普通 hover —— */
+body.theming,
+body.theming *,
+body.theming *::before,
+body.theming *::after {
+  transition:
+    background-color var(--dur-theme) var(--ease),
+    border-color var(--dur-theme) var(--ease),
+    color var(--dur-theme) var(--ease),
+    box-shadow var(--dur-theme) var(--ease),
+    fill var(--dur-theme) var(--ease) !important;
+}

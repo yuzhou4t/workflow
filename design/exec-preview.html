@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="night">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>执行台 · 真实样式预览(theme/styles/execution.css)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<!-- 引用真实前端样式，确保所见即所得 -->
+<link rel="stylesheet" href="/src/theme.css" />
+<link rel="stylesheet" href="/src/styles.css" />
+<link rel="stylesheet" href="/src/execution.css" />
+<style>
+  /* 预览外壳：模拟 60px 顶栏 + 单屏 exec；本文件仅用于视觉验证 */
+  body { margin: 0; background: var(--surface-bg); }
+  .pv-toggle { position: fixed; right: 18px; bottom: 18px; z-index: 200; display: flex; gap: 8px; }
+  .pv-toggle button { font-family: var(--font-sans); font-size: 12px; font-weight: 600; padding: 9px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--hairline-strong); background: var(--surface); color: var(--text); }
+</style>
+</head>
+<body>
+  <!-- 顶栏（复用 app-header 样式 + 主题化覆盖） -->
+  <header class="app-header">
+    <button class="brand" type="button">
+      <span class="brand__mark" aria-hidden="true">R</span>
+      <span><strong>Research Bench</strong><small>实证工作流对照台</small></span>
+    </button>
+    <nav aria-label="主要导航">
+      <button type="button">新建</button>
+      <button type="button" class="is-active">运行记录</button>
+      <button type="button">配置</button>
+    </nav>
+    <div class="header-actions">
+      <button class="theme-toggle" type="button" id="hdToggle" aria-label="切换主题">☾</button>
+      <button class="config-summary" type="button"><span class="status-dot is-ready"></span>服务已就绪</button>
+    </div>
+  </header>
+
+  <!-- 单屏执行台 -->
+  <main class="exec">
+    <section class="exec__stage">
+      <header class="exec-hero">
+        <div class="exec-hero__head">
+          <div>
+            <p class="exec-eyebrow">当前案例 · 真实研究</p>
+            <h1 class="exec-title">绿色金融与可持续发展</h1>
+            <p class="exec-sub">当前：设计并审查方法 · 等待 H2 冻结分析计划</p>
+          </div>
+          <div class="exec-hero__actions">
+            <select aria-label="切换运行记录"><option>绿色金融与可持续发展 · 等待人工审核</option></select>
+            <button type="button" class="quiet-button">展开基线</button>
+            <button type="button" class="quiet-button">配置</button>
+            <button type="button" class="quiet-button delete-run-button">删除</button>
+            <button type="button" class="primary-button">选择新案例</button>
+          </div>
+        </div>
+      </header>
+
+      <nav class="exec-progress" aria-label="研究进度">
+        <div class="track"></div>
+        <div class="fill" style="width:50%"></div>
+        <div class="steps">
+          <div class="exec-step is-complete"><span class="dot"></span><span class="cap">导入案例</span></div>
+          <div class="exec-step is-complete"><span class="dot"></span><span class="cap">研究边界</span><span class="g">H1</span></div>
+          <div class="exec-step is-complete"><span class="dot"></span><span class="cap">假设·数据</span></div>
+          <div class="exec-step is-complete"><span class="dot"></span><span class="cap">方法·审查</span></div>
+          <div class="exec-step is-active"><span class="dot"></span><span class="cap">冻结计划</span><span class="g">H2</span></div>
+          <div class="exec-step"><span class="dot"></span><span class="cap">执行复现</span></div>
+          <div class="exec-step"><span class="dot"></span><span class="cap">授权结论</span><span class="g">H3</span></div>
+          <div class="exec-step"><span class="dot"></span><span class="cap">生成论文</span></div>
+          <div class="exec-step"><span class="dot"></span><span class="cap">审稿封存</span><span class="g">H4</span></div>
+        </div>
+      </nav>
+
+      <div class="exec-focus">
+        <section class="human-review-card">
+          <header>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <div><strong>H2 · 请选择并冻结分析计划</strong><p>Reviewer 只淘汰硬失败方案；请从可行候选中明确选择一个，批准后才冻结合同。</p></div>
+          </header>
+          <section class="design-candidate-list" aria-label="可行研究设计候选">
+            <label class="design-candidate is-selected">
+              <input type="radio" name="cand" checked />
+              <span><strong>识别优先</strong><small>政策 DID · 双向固定效应</small></span>
+              <em>Probe pass · Reviewer 问题 0</em>
+              <p>优先满足因果识别：平行趋势、安慰剂与置换检验齐备。</p>
+              <code>Y = β·Green×Post + αi + λt + ε</code>
+            </label>
+            <label class="design-candidate">
+              <input type="radio" name="cand" />
+              <span><strong>直接基准</strong><small>省级面板双向固定效应</small></span>
+              <em>Probe pass · Reviewer 问题 1</em>
+              <p>关联基准模型，作为对照下限。</p>
+            </label>
+            <label class="design-candidate">
+              <input type="radio" name="cand" />
+              <span><strong>测量稳健优先</strong><small>更换绿色金融指标构造</small></span>
+              <em>Probe warn · Reviewer 问题 2</em>
+              <p>检验指标测量稳健性，识别力偏弱。</p>
+            </label>
+            <p class="design-arena-note">不按总分或多数票自动选"赢家"；不可执行、目标错配或存在 critical 问题的候选不能冻结。</p>
+          </section>
+          <label>审核说明<textarea rows="3" placeholder="记录批准或拒绝理由（选填）"></textarea></label>
+          <footer>
+            <button type="button" class="danger-button">拒绝并终止</button>
+            <button type="button" class="secondary-button">退回并编辑</button>
+            <button type="button" class="primary-button">批准并继续</button>
+          </footer>
+        </section>
+      </div>
+    </section>
+
+    <aside class="exec__aside">
+      <div class="exec-blk">
+        <p class="exec-eyebrow">研究进度</p>
+        <div class="exec-hero-stat"><div class="num">4<small>/8</small></div><div class="meta"><div>阶段已完成</div><div>当前 H2</div></div></div>
+        <div class="exec-ring"><i style="width:50%"></i></div>
+      </div>
+      <div class="exec-blk">
+        <p class="exec-eyebrow">实时用量</p>
+        <div class="exec-mrow"><span>逻辑模型调用</span><b>6 <em>/ 9</em></b></div>
+        <div class="exec-mrow"><span>Provider Attempt</span><b>11 <em>/ 20</em></b></div>
+        <div class="exec-mrow"><span>受约束结论</span><b>3 <em>条</em></b></div>
+      </div>
+      <div class="exec-blk">
+        <p class="exec-eyebrow">并行运行</p>
+        <div class="exec-run is-active"><span class="rn">绿色金融与可持续发展</span><span class="stt">H2 · 等待人工审核</span><span class="pl"><i style="width:50%"></i></span></div>
+        <div class="exec-run is-wait"><span class="rn">绿色信贷与高污染企业</span><span class="stt">H3 · 等待人工审核</span><span class="pl"><i style="width:78%"></i></span></div>
+        <div class="exec-run is-done"><span class="rn">数字普惠绿色金融韧性</span><span class="stt">已完成</span><span class="pl"><i style="width:100%"></i></span></div>
+        <div class="exec-run"><span class="rn">央行绿色沟通与市场</span><span class="stt">待启动</span><span class="pl"><i style="width:0"></i></span></div>
+      </div>
+      <div class="exec-blk">
+        <p class="exec-eyebrow">最新授权结论</p>
+        <p class="exec-claimline"><b>H3 已批准 · </b>绿色信贷强度与可持续发展绩效稳健正相关，1% 水平显著。</p>
+      </div>
+      <div class="exec-aside__tools">
+        <button type="button" class="secondary-button">阶段明细与日志</button>
+        <button type="button" class="secondary-button">论文与图表</button>
+      </div>
+    </aside>
+  </main>
+
+  <div class="pv-toggle">
+    <button type="button" id="pvToggle">切换 日间 / 夜间</button>
+  </div>
+
+  <script>
+    function flip() {
+      const root = document.documentElement;
+      const next = root.getAttribute('data-theme') === 'night' ? 'day' : 'night';
+      document.body.classList.add('theming');
+      setTimeout(() => document.body.classList.remove('theming'), 600);
+      root.setAttribute('data-theme', next);
+      document.getElementById('hdToggle').textContent = next === 'night' ? '☾' : '☀';
+    }
+    document.getElementById('pvToggle').addEventListener('click', flip);
+    document.getElementById('hdToggle').addEventListener('click', flip);
+  </script>
+</body>
+</html>
