@@ -3,17 +3,19 @@ import { AppHeader, type AppView } from './components/AppHeader'
 import { ExecutionWorkspace } from './components/ExecutionWorkspace'
 import { PreflightPanel } from './components/PreflightPanel'
 import { ResearchBenchLauncher } from './components/ResearchBenchLauncher'
+import { ResearchCaseStudio } from './components/ResearchCaseStudio'
 import { ResearchInputForm } from './components/ResearchInputForm'
-import { RunHistoryList } from './components/RunHistoryList'
 import { SystemConfigPanel } from './components/SystemConfigPanel'
 import { demoResearchDraft, emptyResearchDraft, preflightResearch, type ResearchDraft } from './data/researchDraft'
 import { normalizeCaseSubmission, workflowApi } from './runtime/api'
 import { selectCaseFolder, type CaseFolderSelection } from './runtime/caseFolder'
 import type { BaselineRun, CaseImportReport, CaseSubmissionInput, ConnectionTestResult, GateDecisionInput, RunSnapshot, RunSummary, RuntimeConfigStatus, RuntimeConfigUpdate, WorkflowDefinition } from './runtime/types'
 
+const isPublicDemo = import.meta.env.VITE_PUBLIC_DEMO === 'true'
+
 function viewFromHash(): AppView {
   const value = window.location.hash.replace('#', '')
-  return value === 'runs' || value === 'settings' ? value : 'new'
+  return value === 'runs' || value === 'studio' || value === 'settings' ? value : (isPublicDemo ? 'studio' : 'new')
 }
 
 export function App() {
@@ -49,6 +51,10 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    if (isPublicDemo) {
+      setLoading(false)
+      return
+    }
     let cancelled = false
     Promise.all([workflowApi.getDefinition(), workflowApi.getRuntimeConfig()])
       .then(([nextDefinition, nextConfig]) => {
@@ -130,6 +136,10 @@ export function App() {
   }
 
   async function startResearch() {
+    if (isPublicDemo) {
+      setError('公开演示版不连接研究后端，不能创建或保存真实任务。请在本地版中执行。')
+      return
+    }
     const nextRun = await withBusy('正在接收研究任务并执行输入校验…', () => workflowApi.createRun({ mode: draft.mode, case: draft.case }))
     if (!nextRun) return
     runIdRef.current = nextRun.id
@@ -150,6 +160,10 @@ export function App() {
   }
 
   async function startBaseline(caseInput: CaseSubmissionInput = draft.case) {
+    if (isPublicDemo) {
+      setError('公开演示版不连接 Agent Laboratory，不能启动真实基线任务。')
+      return
+    }
     if (!caseInput.datasetRefs.length) {
       setError('当前页面没有可复用的数据文件，请重新选择 CSV。')
       return
@@ -217,6 +231,10 @@ export function App() {
   }
 
   async function importCaseFolder(files: File[], target: 'hypoweaver' | 'agent-laboratory') {
+    if (isPublicDemo) {
+      setError('公开演示版仅用于浏览界面与交互，文件不会上传或保存。请使用本地版处理真实案例。')
+      return
+    }
     try {
       const selection = selectCaseFolder(files)
       await importCaseFile(selection.mainData, target, selection)
@@ -328,32 +346,27 @@ export function App() {
     if (nextView !== 'new') setShowPreflight(false)
   }
 
-  function showHistory() {
-    runIdRef.current = null
-    setRun(null)
-    setBaselineRun(null)
-    changeView('runs')
-  }
-
   function backToHistory() {
     runIdRef.current = null
     setRun(null)
     setBaselineRun(null)
+    changeView('new')
   }
 
   if (loading) return <main className="load-state"><span className="loading-mark" /><strong>正在连接代码工作流</strong><p>读取流程定义、配置状态与持久化运行记录…</p></main>
-  if (!definition) return <main className="load-state load-state--error"><strong>无法连接工作流后端</strong><p>{error ?? '后端没有返回有效流程定义。'}</p><button type="button" onClick={() => window.location.reload()}>重新连接</button></main>
+  if (!definition && !isPublicDemo) return <main className="load-state load-state--error"><strong>无法连接工作流后端</strong><p>{error ?? '后端没有返回有效流程定义。'}</p><button type="button" onClick={() => window.location.reload()}>重新连接</button></main>
 
   return (
     <div className="app-shell">
-      <AppHeader view={view} config={config} onChangeView={changeView} onShowHistory={showHistory} />
+      <AppHeader view={view} config={config} onChangeView={changeView} />
       {error && <div className="error-banner" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>关闭</button></div>}
       {view === 'settings' && <SystemConfigPanel status={config} accessTokenPresent={accessTokenPresent} accessTokenVerified={accessTokenVerified} busy={busy} onRefresh={() => withBusy('正在重新读取配置状态…', refreshConfig).then(() => undefined)} onSetAccessToken={(token) => { workflowApi.setAccessToken(token); setAccessTokenPresent(workflowApi.hasAccessToken()); setAccessTokenVerified(false) }} onSave={saveConfig} onTest={testConnection} />}
+      {view === 'studio' && <ResearchCaseStudio />}
       {view === 'new' && !showPreflight && !showAdvancedInput && <ResearchBenchLauncher config={config} importReport={importReport} busy={busy} busyLabel={busyLabel} compareOpen={compareOpen} onToggleCompare={() => setCompareOpen((current) => !current)} onImportCaseFolder={importCaseFolder} onOpenAdvanced={() => setShowAdvancedInput(true)} onOpenSettings={() => changeView('settings')} />}
       {view === 'new' && !showPreflight && showAdvancedInput && <ResearchInputForm draft={draft} config={config} importReport={importReport} busy={busy} onChange={setDraft} onLoadDemo={() => { setDraft(demoResearchDraft()); setImportReport(null) }} onImportCaseFile={(file) => importCaseFile(file, 'hypoweaver')} onOpenSettings={() => changeView('settings')} onCheck={() => setShowPreflight(true)} />}
       {view === 'new' && showPreflight && <PreflightPanel draft={draft} items={preflightItems} importReport={importReport} busy={busy} onBack={() => setShowPreflight(false)} onStart={startResearch} />}
-      {view === 'runs' && !run && <RunHistoryList runs={runs} busy={busy} onSelectRun={selectRun} onNewResearch={() => { setShowAdvancedInput(false); changeView('new') }} />}
-      {view === 'runs' && run && <ExecutionWorkspace definition={definition} run={run} runs={runs} baselineRun={baselineRun} compareOpen={compareOpen} caseReady={Boolean(draft.case.datasetRefs.length && (!run || draft.case.caseId === run.caseId) && (!baselineRun || draft.case.caseId === baselineRun.caseId))} busy={busy} busyLabel={busyLabel} onSelectRun={selectRun} onBackToHistory={backToHistory} onDeleteRun={() => void deleteRun()} onNewResearch={() => { setShowAdvancedInput(false); changeView('new') }} onToggleCompare={() => setCompareOpen((current) => !current)} onStartHypoweaver={startHypoweaver} onStartBaseline={() => startBaseline()} onOpenSettings={() => changeView('settings')} onGateDecision={decideGate} onSubmitRevision={submitGateRevision} onRetryWriting={retryWriting} />}
+      {view === 'runs' && !run && <ResearchBenchLauncher config={config} importReport={importReport} busy={busy} busyLabel={busyLabel} compareOpen={compareOpen} onToggleCompare={() => setCompareOpen((current) => !current)} onImportCaseFolder={importCaseFolder} onOpenAdvanced={() => setShowAdvancedInput(true)} onOpenSettings={() => changeView('settings')} />}
+      {view === 'runs' && run && definition && <ExecutionWorkspace definition={definition} run={run} runs={runs} baselineRun={baselineRun} compareOpen={compareOpen} caseReady={Boolean(draft.case.datasetRefs.length && (!run || draft.case.caseId === run.caseId) && (!baselineRun || draft.case.caseId === baselineRun.caseId))} busy={busy} busyLabel={busyLabel} onSelectRun={selectRun} onBackToHistory={backToHistory} onDeleteRun={() => void deleteRun()} onNewResearch={() => { setShowAdvancedInput(false); changeView('new') }} onToggleCompare={() => setCompareOpen((current) => !current)} onStartHypoweaver={startHypoweaver} onStartBaseline={() => startBaseline()} onOpenSettings={() => changeView('settings')} onGateDecision={decideGate} onSubmitRevision={submitGateRevision} onRetryWriting={retryWriting} />}
     </div>
   )
 }

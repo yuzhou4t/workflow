@@ -11,3 +11,9 @@ __pycache__/
 *.py[cod]
 backend/var/
 tmp/
+.venv/
+.edge-qa-profile*/
+*.stdout.log
+*.stderr.log
+design-qa.md
+studio-taxonomy-check*.png

@@ -1,18 +1,17 @@
-import { History, Moon, Sun } from 'lucide-react'
+import { FlaskConical, Moon, Sun } from 'lucide-react'
 import { useState } from 'react'
 import type { RuntimeConfigStatus } from '../runtime/types'
 import { getTheme, toggleTheme, type ThemeMode } from '../runtime/theme'
 
-export type AppView = 'new' | 'runs' | 'settings'
+export type AppView = 'new' | 'runs' | 'studio' | 'settings'
 
 interface AppHeaderProps {
   view: AppView
   config: RuntimeConfigStatus | null
   onChangeView: (view: AppView) => void
-  onShowHistory: () => void
 }
 
-export function AppHeader({ view, config, onChangeView, onShowHistory }: AppHeaderProps) {
+export function AppHeader({ view, config, onChangeView }: AppHeaderProps) {
   const qwenReady = Boolean(config?.qwenApiKey.configured)
   const executorReady = Boolean(config?.researchEngineUrl.value)
   const [theme, setTheme] = useState<ThemeMode>(() => getTheme())
@@ -24,8 +23,8 @@ export function AppHeader({ view, config, onChangeView, onShowHistory }: AppHead
         <span><strong>Research Bench</strong><small>实证工作流对照台</small></span>
       </button>
       <div className="header-actions">
-        <button type="button" className={`header-link ${view === 'runs' ? 'is-active' : ''}`} onClick={onShowHistory}>
-          <History size={15} aria-hidden="true" />查看历史记录
+        <button type="button" className={`header-link ${view === 'studio' ? 'is-active' : ''}`} onClick={() => onChangeView('studio')}>
+          <FlaskConical size={15} aria-hidden="true" />研究案件体验
         </button>
         <button
           className="theme-toggle"

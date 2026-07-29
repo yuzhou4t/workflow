@@ -59,25 +59,25 @@
   color-scheme: light;
 }
 
-/* —— 夜间 · 墨绿 / 香槟金 —— */
+/* —— 夜间 · 黑曜 / 暗紫 —— */
 :root[data-theme="night"] {
-  --surface-bg: #0b1310;
-  --surface: #111d18;
-  --surface-2: #16261f;
-  --surface-3: #1d3229;
-  --hairline: rgba(236, 239, 233, 0.10);
-  --hairline-strong: rgba(236, 239, 233, 0.18);
-  --text: #eef1ea;
-  --text-muted: #93a89b;
-  --text-faint: #5f7369;
-  --brand: #c8a96a;
-  --brand-soft: rgba(200, 169, 106, 0.14);
-  --on-accent: #14120c;
-  --attention: #d7b877;
-  --attention-soft: rgba(215, 184, 119, 0.14);
-  --positive: #8bb79a;
-  --negative: #d98a86;
-  --glow: rgba(200, 169, 106, 0.08);
+  --surface-bg: #1a1a1e;
+  --surface: #212126;
+  --surface-2: #29292f;
+  --surface-3: #34343b;
+  --hairline: rgba(244, 242, 248, 0.10);
+  --hairline-strong: rgba(244, 242, 248, 0.18);
+  --text: #f2f1f5;
+  --text-muted: #aaa7b2;
+  --text-faint: #74717c;
+  --brand: #9b6fc2;
+  --brand-soft: rgba(155, 111, 194, 0.16);
+  --on-accent: #151018;
+  --attention: #c7a9e0;
+  --attention-soft: rgba(199, 169, 224, 0.14);
+  --positive: #a693c0;
+  --negative: #dc8f9a;
+  --glow: rgba(155, 111, 194, 0.10);
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 18px 44px -22px rgba(0, 0, 0, 0.6);
   color-scheme: dark;
