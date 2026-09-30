@@ -417,7 +417,21 @@ def enumerate_case_cells(context: Context) -> list[dict[str, Any]]:
                 raise OperatorError(
                     f"expected 12 {board} cells for Case {context.case_number}, found {len(selected)}"
                 )
+            if any(row.get("leaderboard") != board for row in selected):
+                raise OperatorError(f"{board} plan contains cells from another leaderboard")
             rows.extend(selected)
+    expected_matrix = {
+        (board, view, system)
+        for board in BOARDS
+        for view in VIEWS
+        for system in SYSTEMS
+    }
+    observed_matrix = {
+        (str(row.get("leaderboard")), str(row.get("input_view")), str(row.get("system_id")))
+        for row in rows
+    }
+    if len(rows) != len(expected_matrix) or observed_matrix != expected_matrix:
+        raise OperatorError("the Case plan must contain each board/view/system combination exactly once")
     system_rank = {value: index for index, value in enumerate(SYSTEMS)}
     view_rank = {value: index for index, value in enumerate(VIEWS)}
     board_rank = {value: index for index, value in enumerate(BOARDS)}
@@ -652,9 +666,9 @@ def run_native_cell(
     ).is_file():
         emit(log_dir, "cell_skipped_already_adapted", cell_id=cell_id)
         return
-    if run_dir.exists() and not output.is_file():
+    if run_dir.exists():
         raise OperatorError(
-            f"{cell_id}: partial run exists without benchmark_output.json; refusing rerun"
+            f"{cell_id}: partial native run exists; refusing rerun or adaptation"
         )
     runtime = context.suite["runtime"] if context.suite is not None else {}
     outer_timeout = int(runtime.get("cell_wall_time_limit_seconds", 5400)) + 600
